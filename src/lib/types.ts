@@ -15,11 +15,20 @@ export type SongVersion = {
   saved_at: string;
 };
 
+export type YoutubeMarker = {
+  id: string;
+  time: number;
+  label: string;
+};
+
 export type YoutubeSession = {
   id: string;
   song_id: string;
   youtube_url: string;
   youtube_title: string | null;
+  markers?: YoutubeMarker[];
+  loop_start?: number | null;
+  loop_end?: number | null;
 };
 
 export type DatamuseWord = {

@@ -71,8 +71,16 @@ create table if not exists public.youtube_sessions (
   id             uuid primary key default gen_random_uuid(),
   song_id        uuid not null unique references public.songs on delete cascade,
   youtube_url    text not null,
-  youtube_title  text
+  youtube_title  text,
+  markers        jsonb not null default '[]'::jsonb,
+  loop_start     double precision,
+  loop_end       double precision
 );
+-- if you upgraded from an earlier release, run:
+--   alter table public.youtube_sessions
+--     add column if not exists markers jsonb not null default '[]'::jsonb,
+--     add column if not exists loop_start double precision,
+--     add column if not exists loop_end double precision;
 
 -- automatically set songs.user_id and updated_at
 create or replace function public.set_song_owner()

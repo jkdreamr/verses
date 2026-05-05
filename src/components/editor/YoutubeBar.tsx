@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { extractYoutubeId, fetchYoutubeTitle } from "@/lib/youtube";
-import type { YoutubeSession } from "@/lib/types";
+import type { YoutubeMarker, YoutubeSession } from "@/lib/types";
 import { useShortcut } from "@/hooks/useShortcut";
 import { useToast } from "@/components/Toast";
 
@@ -44,6 +44,9 @@ function loadYouTubeApi(): Promise<void> {
   return apiLoadPromise;
 }
 
+const newMarkerId = () =>
+  `m-${Math.random().toString(36).slice(2, 8)}-${Date.now().toString(36)}`;
+
 export function YoutubeBar({
   session,
   onChange,
@@ -58,13 +61,35 @@ export function YoutubeBar({
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(60);
-  const [loop, setLoop] = useState(false);
+  const [draftLabel, setDraftLabel] = useState<{
+    time: number;
+    label: string;
+  } | null>(null);
 
   const hostRef = useRef<HTMLDivElement | null>(null);
   const playerRef = useRef<YouTubePlayer | null>(null);
   const containerId = useRef(
     `yt-player-${Math.random().toString(36).slice(2, 8)}`
   );
+  const sessionRef = useRef<YoutubeSession | null>(session);
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
+
+  const markers = useMemo<YoutubeMarker[]>(
+    () =>
+      [...(session?.markers ?? [])].sort((a, b) => a.time - b.time),
+    [session?.markers]
+  );
+  const loopStart = session?.loop_start ?? null;
+  const loopEnd = session?.loop_end ?? null;
+  const hasLoopRange =
+    loopStart !== null &&
+    loopEnd !== null &&
+    typeof loopStart === "number" &&
+    typeof loopEnd === "number" &&
+    loopEnd > loopStart;
+  const [loopOn, setLoopOn] = useState(false);
 
   useEffect(() => {
     setInput(session?.youtube_url ?? "");
@@ -80,7 +105,6 @@ export function YoutubeBar({
       await loadYouTubeApi();
       if (cancelled || !window.YT) return;
       if (!hostRef.current) return;
-      // Make sure we have a target element
       let target = document.getElementById(containerId.current);
       if (!target) {
         target = document.createElement("div");
@@ -95,7 +119,13 @@ export function YoutubeBar({
         videoId: id,
         height: "180",
         width: "320",
-        playerVars: { controls: 0, disablekb: 1, modestbranding: 1, rel: 0, playsinline: 1 },
+        playerVars: {
+          controls: 0,
+          disablekb: 1,
+          modestbranding: 1,
+          rel: 0,
+          playsinline: 1,
+        },
         events: {
           onReady: (e: { target: YouTubePlayer }) => {
             e.target.setVolume(volume);
@@ -105,8 +135,13 @@ export function YoutubeBar({
             if (!window.YT) return;
             if (e.data === window.YT.PlayerState.PLAYING) setPlaying(true);
             else setPlaying(false);
-            if (e.data === window.YT.PlayerState.ENDED && loop) {
-              playerRef.current?.seekTo(0, true);
+            if (e.data === window.YT.PlayerState.ENDED && loopOn) {
+              const s = sessionRef.current;
+              const start =
+                s?.loop_start !== null && s?.loop_start !== undefined
+                  ? s.loop_start
+                  : 0;
+              playerRef.current?.seekTo(start, true);
               playerRef.current?.playVideo();
             }
           },
@@ -119,21 +154,27 @@ export function YoutubeBar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.youtube_url]);
 
-  // Polling time
+  // Polling time + loop A↔B clamp
   useEffect(() => {
     const t = window.setInterval(() => {
       const p = playerRef.current;
       if (!p) return;
       try {
-        setTime(p.getCurrentTime());
+        const now = p.getCurrentTime();
+        setTime(now);
         const d = p.getDuration();
         if (d && d !== duration) setDuration(d);
+        if (loopOn && hasLoopRange) {
+          if (now >= (loopEnd as number) - 0.05) {
+            p.seekTo(loopStart as number, true);
+          }
+        }
       } catch {
         // player not ready
       }
-    }, 500);
+    }, 250);
     return () => window.clearInterval(t);
-  }, [duration]);
+  }, [duration, loopOn, hasLoopRange, loopStart, loopEnd]);
 
   const togglePlay = useCallback(() => {
     const p = playerRef.current;
@@ -170,6 +211,9 @@ export function YoutubeBar({
       song_id: session?.song_id ?? "",
       youtube_url: url,
       youtube_title: title,
+      markers: session?.markers ?? [],
+      loop_start: session?.loop_start ?? null,
+      loop_end: session?.loop_end ?? null,
     });
     setExpanded(true);
   };
@@ -194,6 +238,78 @@ export function YoutubeBar({
     }
   };
 
+  const beginAddMarker = () => {
+    if (!session) return;
+    const p = playerRef.current;
+    let now = 0;
+    try {
+      now = p?.getCurrentTime() ?? 0;
+    } catch {
+      now = 0;
+    }
+    setDraftLabel({ time: now, label: "" });
+  };
+
+  const commitDraft = () => {
+    if (!session || !draftLabel) return;
+    const trimmed = draftLabel.label.trim() || fmt(draftLabel.time);
+    const next: YoutubeSession = {
+      ...session,
+      markers: [
+        ...(session.markers ?? []),
+        { id: newMarkerId(), time: draftLabel.time, label: trimmed },
+      ],
+    };
+    onChange(next);
+    setDraftLabel(null);
+  };
+
+  const cancelDraft = () => setDraftLabel(null);
+
+  const removeMarker = (id: string) => {
+    if (!session) return;
+    const next: YoutubeSession = {
+      ...session,
+      markers: (session.markers ?? []).filter((m) => m.id !== id),
+    };
+    onChange(next);
+  };
+
+  const setLoopPoint = (which: "A" | "B", t: number) => {
+    if (!session) return;
+    const next: YoutubeSession = {
+      ...session,
+      loop_start: which === "A" ? t : session.loop_start ?? null,
+      loop_end: which === "B" ? t : session.loop_end ?? null,
+    };
+    onChange(next);
+  };
+
+  const clearLoopRange = () => {
+    if (!session) return;
+    onChange({ ...session, loop_start: null, loop_end: null });
+    setLoopOn(false);
+  };
+
+  const onAnalyze = async () => {
+    if (!session) return;
+    try {
+      await navigator.clipboard.writeText(session.youtube_url);
+      toast("YouTube URL copied — paste into Tunebat", "ok");
+    } catch {
+      toast("Opening Tunebat — paste the URL there", "info");
+    }
+    window.open(
+      "https://tunebat.com/Analyzer",
+      "_blank",
+      "noopener,noreferrer"
+    );
+  };
+
+  const loopLabel = hasLoopRange
+    ? `loop ${fmt(loopStart as number)}↔${fmt(loopEnd as number)}`
+    : "loop";
+
   return (
     <div
       onMouseEnter={() => setExpanded(true)}
@@ -209,6 +325,106 @@ export function YoutubeBar({
         className="pointer-events-none absolute h-[180px] w-[320px] opacity-0"
         style={{ left: "-9999px", top: "-9999px" }}
       />
+
+      {session && (markers.length > 0 || draftLabel) ? (
+        <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-1.5 px-4 pt-2 text-[11px]">
+          {markers.map((m) => {
+            const isA = loopStart === m.time;
+            const isB = loopEnd === m.time;
+            return (
+              <span
+                key={m.id}
+                className={`group inline-flex items-center gap-1 rounded-full border px-2 py-0.5 transition-colors duration-150 ${
+                  isA || isB
+                    ? "border-amber-gold/60 bg-amber-gold/10 text-amber-gold"
+                    : "border-ink-line text-ink-mute hover:border-amber-gold/40 hover:text-ink-text"
+                }`}
+              >
+                <button
+                  onClick={() => onSeek(m.time)}
+                  title={`Jump to ${fmt(m.time)}`}
+                  className="font-mono text-[10px]"
+                >
+                  {fmt(m.time)}
+                </button>
+                <button
+                  onClick={() => onSeek(m.time)}
+                  title={`Jump to ${fmt(m.time)}`}
+                  className="max-w-[12rem] truncate"
+                >
+                  {m.label}
+                </button>
+                <span className="ml-1 hidden gap-1 group-hover:inline-flex">
+                  <button
+                    onClick={() => setLoopPoint("A", m.time)}
+                    title="Use as loop start"
+                    className={`rounded border border-ink-line px-1 text-[9px] uppercase tracking-wider hover:border-amber-gold/60 hover:text-amber-gold ${
+                      isA ? "border-amber-gold/60 text-amber-gold" : ""
+                    }`}
+                  >
+                    A
+                  </button>
+                  <button
+                    onClick={() => setLoopPoint("B", m.time)}
+                    title="Use as loop end"
+                    className={`rounded border border-ink-line px-1 text-[9px] uppercase tracking-wider hover:border-amber-gold/60 hover:text-amber-gold ${
+                      isB ? "border-amber-gold/60 text-amber-gold" : ""
+                    }`}
+                  >
+                    B
+                  </button>
+                  <button
+                    onClick={() => removeMarker(m.id)}
+                    title="Remove marker"
+                    className="rounded px-1 text-[10px] hover:text-ink-text"
+                  >
+                    ✕
+                  </button>
+                </span>
+              </span>
+            );
+          })}
+          {draftLabel ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                commitDraft();
+              }}
+              className="inline-flex items-center gap-1 rounded-full border border-amber-gold/60 bg-amber-gold/10 px-2 py-0.5"
+            >
+              <span className="font-mono text-[10px] text-amber-gold">
+                {fmt(draftLabel.time)}
+              </span>
+              <input
+                autoFocus
+                value={draftLabel.label}
+                onChange={(e) =>
+                  setDraftLabel({ ...draftLabel, label: e.target.value })
+                }
+                onBlur={commitDraft}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    cancelDraft();
+                  }
+                }}
+                placeholder="hook · verse 2 · drop…"
+                className="w-32 bg-transparent text-[11px] text-amber-gold outline-none placeholder:text-amber-gold/50"
+              />
+            </form>
+          ) : null}
+          {hasLoopRange ? (
+            <button
+              onClick={clearLoopRange}
+              title="Clear A↔B loop range"
+              className="ml-1 rounded border border-ink-line px-1.5 py-0.5 text-[10px] text-ink-mute hover:border-amber-gold/40 hover:text-ink-text"
+            >
+              clear A↔B
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
       <div
         className={`mx-auto flex max-w-3xl items-center gap-3 px-4 ${
           expanded || !session ? "py-3" : "py-1.5"
@@ -259,15 +475,33 @@ export function YoutubeBar({
               {fmt(time)} / {fmt(duration)}
             </span>
             <button
-              onClick={() => setLoop((v) => !v)}
-              title="Loop"
+              onClick={beginAddMarker}
+              title="Mark this moment with a custom label"
+              className="rounded border border-ink-line px-2 py-1 text-[11px] text-ink-mute transition-colors duration-150 hover:border-amber-gold/60 hover:text-amber-gold"
+            >
+              + mark
+            </button>
+            <button
+              onClick={() => setLoopOn((v) => !v)}
+              title={
+                hasLoopRange
+                  ? "Loop between marked A and B"
+                  : "Loop the whole track (set A and B markers for a custom range)"
+              }
               className={`rounded border px-2 py-1 text-[11px] transition-colors duration-150 ${
-                loop
+                loopOn
                   ? "border-amber-gold/60 text-amber-gold"
                   : "border-ink-line text-ink-mute hover:text-ink-text"
               }`}
             >
-              loop
+              {loopLabel}
+            </button>
+            <button
+              onClick={onAnalyze}
+              title="Copy URL + open Tunebat analyzer"
+              className="rounded border border-ink-line px-2 py-1 text-[11px] text-ink-mute transition-colors duration-150 hover:border-amber-gold/60 hover:text-amber-gold"
+            >
+              analyze ↗
             </button>
             <input
               type="range"

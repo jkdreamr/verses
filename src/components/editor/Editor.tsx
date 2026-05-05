@@ -355,6 +355,9 @@ export function Editor({ songId }: { songId: string }) {
                 song_id: song.id,
                 youtube_url: next.youtube_url,
                 youtube_title: next.youtube_title,
+                markers: next.markers ?? [],
+                loop_start: next.loop_start ?? null,
+                loop_end: next.loop_end ?? null,
               },
               { onConflict: "song_id" }
             );
