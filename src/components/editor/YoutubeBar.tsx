@@ -93,9 +93,9 @@ export function YoutubeBar({
       }
       playerRef.current = new window.YT.Player(containerId.current, {
         videoId: id,
-        height: "0",
-        width: "0",
-        playerVars: { controls: 0, disablekb: 1, modestbranding: 1, rel: 0 },
+        height: "180",
+        width: "320",
+        playerVars: { controls: 0, disablekb: 1, modestbranding: 1, rel: 0, playsinline: 1 },
         events: {
           onReady: (e: { target: YouTubePlayer }) => {
             e.target.setVolume(volume);
@@ -201,7 +201,12 @@ export function YoutubeBar({
       className="fade-idle fixed inset-x-0 bottom-0 z-20 border-t border-ink-line bg-ink-surface/85 backdrop-blur transition-all duration-150 print:hidden"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
-      <div ref={hostRef} className="hidden" />
+      <div
+        ref={hostRef}
+        aria-hidden
+        className="pointer-events-none absolute h-[180px] w-[320px] opacity-0"
+        style={{ left: "-9999px", top: "-9999px" }}
+      />
       <div
         className={`mx-auto flex max-w-3xl items-center gap-3 px-4 ${
           expanded || !session ? "py-3" : "py-1.5"
