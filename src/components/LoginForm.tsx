@@ -34,7 +34,7 @@ export function LoginForm() {
       } else if (mode === "signup") {
         toast("Check your email to confirm your account.", "ok");
       } else {
-        router.push("/");
+        router.push("/app");
         router.refresh();
       }
     } finally {

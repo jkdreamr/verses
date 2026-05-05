@@ -17,6 +17,7 @@ import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { ExportModal } from "./ExportModal";
 import { TagsModal } from "./TagsModal";
 import { SelectionTooltip } from "./SelectionTooltip";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 const AUTOSAVE_INTERVAL_MS = 10_000;
 const VERSION_INTERVAL_MS = 60_000; // create a version snapshot at most once a minute
@@ -197,16 +198,29 @@ export function Editor({ songId }: { songId: string }) {
     return () => window.clearInterval(t);
   }, [song, persist]);
 
-  // Save on unload
+  // Save on unload (page close, hide, route away). Uses pagehide for SPA route changes
+  // and visibilitychange so mobile/Safari catch it. Also persists synchronously to
+  // localStorage on unmount so client-side nav back to the dashboard never loses
+  // a freshly-typed title.
   useEffect(() => {
-    const onBeforeUnload = () => {
-      if (song) {
-        const updated = { ...song, updated_at: new Date().toISOString() };
+    const flush = () => {
+      if (!song) return;
+      const updated = { ...song, updated_at: new Date().toISOString() };
+      try {
         localStore.upsertSong(updated);
+      } catch {
+        /* ignore */
       }
     };
-    window.addEventListener("beforeunload", onBeforeUnload);
-    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+    window.addEventListener("beforeunload", flush);
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", flush);
+    return () => {
+      window.removeEventListener("beforeunload", flush);
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", flush);
+      flush();
+    };
   }, [song]);
 
   // Track text changes
@@ -382,7 +396,15 @@ export function Editor({ songId }: { songId: string }) {
       {/* Header */}
       <header className="z-10 flex items-center justify-between px-6 pt-5 print-hide">
         <Link
-          href="/"
+          href="/app"
+          onClick={() => {
+            if (song) {
+              localStore.upsertSong({
+                ...song,
+                updated_at: new Date().toISOString(),
+              });
+            }
+          }}
           className="font-serif text-sm tracking-tight text-ink-mute transition-colors duration-150 hover:text-amber-gold"
         >
           ← Verses
@@ -403,6 +425,7 @@ export function Editor({ songId }: { songId: string }) {
           {onSignedOut ? (
             <span className="opacity-50">guest mode</span>
           ) : null}
+          <ThemeToggle />
         </div>
       </header>
 
@@ -410,6 +433,9 @@ export function Editor({ songId }: { songId: string }) {
       <input
         value={song.title}
         onChange={(e) => setTitle(e.target.value)}
+        onBlur={() => {
+          if (song) void persist(song, { force: true });
+        }}
         placeholder="untitled"
         className="mx-auto mt-6 w-[min(720px,calc(100%-3rem))] bg-transparent text-center font-serif text-2xl tracking-tight text-ink-mute placeholder:text-ink-mute/50 focus:text-ink-text print:text-ink"
       />

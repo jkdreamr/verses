@@ -2,13 +2,24 @@
 
 A distraction-free lyric-writing tool for musicians. Think Freewrite, but built for songwriting — with rhyme suggestions, beat playback, and handwritten-paper scanning.
 
-- **Editor:** full-screen, dark, serif-by-default. Auto-saves every 10 seconds.
+- **Editor:** full-screen, light/dark, serif-by-default. Auto-saves every 10 seconds.
 - **Rhymes:** highlight any word → 🎵 chip → perfect / near / sounds-like results from [Datamuse](https://www.datamuse.com/api/), grouped by syllable count.
 - **YouTube:** paste any URL, write to the beat. Loop, seek, ⌘P to play/pause.
 - **OCR:** photo of handwritten lyrics → text, fully client-side via Tesseract.js.
 - **Versions:** every save creates a snapshot you can preview and restore.
 - **Export:** .txt, copy to clipboard, print view.
 - **Auth:** Supabase email/password + Google OAuth. Guest mode keeps songs in `localStorage`.
+- **Install anywhere:** PWA in the browser, native binaries via Tauri (`.dmg` / `.exe` / `.AppImage`).
+
+## Routes
+
+| Path | Purpose |
+| --- | --- |
+| `/` | Marketing / landing page (light theme, links to download) |
+| `/app` | Dashboard — list, search, tags, new song |
+| `/editor/[id]` | The writing surface |
+| `/login` | Email + Google sign-in |
+| `/print/[id]` | Printable view |
 
 ## Tech
 
@@ -151,12 +162,50 @@ That's it — the “Continue with Google” button on the login page will now w
 | `⌘ ⇧ H` | Open version history |
 | `Esc` | Close any open panel |
 
+## Themes
+
+Verses ships dark by default. Toggle with the sun/moon button in the editor header or on the dashboard. Preference persists in `localStorage` (`verses:theme`). The marketing site at `/` is always light.
+
+## Install as a PWA
+
+The app declares a manifest (`/manifest.webmanifest`) and registers a service worker (`/sw.js`) so Chrome / Edge / Safari surface an "Install" affordance. Click ⊕ in the address bar (Chrome / Edge) or the Share menu → Add to Home Screen (Safari) to install Verses as its own app with a dock icon.
+
+The service worker uses a network-first strategy for HTML and stale-while-revalidate for static assets, so once you've opened the editor you can keep writing offline. Datamuse, YouTube, and Supabase calls pass through the worker untouched and need a connection.
+
+## Native desktop apps (Tauri)
+
+Verses ships a Tauri scaffold for tiny native binaries on macOS, Windows, and Linux.
+
+**Prerequisites:** Rust toolchain (`rustup install stable`) and platform deps:
+
+- **macOS:** `xcode-select --install`
+- **Windows:** [WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/) and [Visual Studio C++ build tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/).
+- **Linux (Debian/Ubuntu):** `sudo apt install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libxdo-dev libssl-dev pkg-config`
+
+**Run in dev (loads `localhost:3000` in a native window):**
+
+```bash
+npm run tauri:dev
+```
+
+**Build production binaries:**
+
+The Tauri shell loads `${VERSES_REMOTE_URL}/app` in a native window. Set this to your deployed URL before building so the binaries point at production:
+
+```bash
+VERSES_REMOTE_URL=https://your-domain.com npm run tauri:build
+```
+
+The binaries are written to `src-tauri/target/release/bundle/` (`.dmg` / `.app` on macOS, `.msi` on Windows, `.AppImage` / `.deb` on Linux).
+
+> Why a remote URL? Verses uses dynamic routes (`/editor/[id]`) and a server route handler (`/auth/callback`) that aren't compatible with `next export`. Pointing the binary at the deployed Vercel app means rhymes, OCR, and auth all work without a backend running on the user's machine. A future change can convert the routes for full offline static export.
+
 ## Notes
 
 - Datamuse calls are debounced 300ms and cached in memory per session.
 - The Rhyme panel and OCR engine both lazy-load so the editor opens instantly.
-- The YouTube player is rendered with width/height 0 — controls live in our own bottom bar so the editor never loses focus.
+- The YouTube player is rendered offscreen at 320×180 (with `pointer-events:none`) so it stays "layouted" enough for the IFrame API to play, while the editor never loses focus.
 
 ## Deploy
 
-[Deploy to Vercel](https://vercel.com/new) → import this repo → set the two `NEXT_PUBLIC_SUPABASE_*` env vars → done.
+[Deploy to Vercel](https://vercel.com/new) → import this repo → set the two `NEXT_PUBLIC_SUPABASE_*` env vars → done. Then update `VERSES_REMOTE_URL` and rebuild Tauri to bake the new URL into the desktop binaries.

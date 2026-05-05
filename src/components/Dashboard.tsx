@@ -7,6 +7,7 @@ import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { localStore, newSongId } from "@/lib/storage";
 import type { Song } from "@/lib/types";
 import { useToast } from "./Toast";
+import { ThemeToggle } from "./ThemeToggle";
 
 export function Dashboard() {
   const router = useRouter();
@@ -111,7 +112,7 @@ export function Dashboard() {
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col px-6 pb-32 pt-10">
       <header className="mb-10 flex items-baseline justify-between">
         <Link
-          href="/"
+          href="/app"
           className="font-serif text-3xl tracking-tight text-amber-gold"
         >
           Verses
@@ -132,6 +133,7 @@ export function Dashboard() {
               Sign in
             </Link>
           )}
+          <ThemeToggle />
         </nav>
       </header>
 

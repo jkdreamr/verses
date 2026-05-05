@@ -10,14 +10,14 @@ const config: Config = {
     extend: {
       colors: {
         ink: {
-          DEFAULT: "#0d0d0d",
-          surface: "#1a1a1a",
-          line: "#262626",
-          mute: "#6b6b6b",
-          text: "#e8e8e8",
+          DEFAULT: "rgb(var(--bg) / <alpha-value>)",
+          surface: "rgb(var(--surface) / <alpha-value>)",
+          line: "rgb(var(--line) / <alpha-value>)",
+          mute: "rgb(var(--mute) / <alpha-value>)",
+          text: "rgb(var(--text) / <alpha-value>)",
         },
         amber: {
-          gold: "#c9a84c",
+          gold: "rgb(var(--accent) / <alpha-value>)",
         },
       },
       fontFamily: {

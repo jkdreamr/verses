@@ -198,7 +198,9 @@ export function YoutubeBar({
     <div
       onMouseEnter={() => setExpanded(true)}
       onMouseLeave={() => setExpanded(false)}
-      className="fade-idle fixed inset-x-0 bottom-0 z-20 border-t border-ink-line bg-ink-surface/85 backdrop-blur transition-all duration-150 print:hidden"
+      className={`${
+        session ? "fade-idle" : "fade-idle fade-idle--full"
+      } fixed inset-x-0 bottom-0 z-20 border-t border-ink-line bg-ink-surface/90 backdrop-blur transition-all duration-150 print:hidden`}
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
       <div
@@ -217,7 +219,10 @@ export function YoutubeBar({
             onSubmit={onLoad}
             className="flex w-full items-center gap-2"
           >
-            <span className="text-[11px] uppercase tracking-wider text-ink-mute">
+            <span className="hidden text-[11px] uppercase tracking-wider text-amber-gold sm:inline">
+              ♪ Add music
+            </span>
+            <span className="text-[11px] uppercase tracking-wider text-amber-gold sm:hidden">
               ♪
             </span>
             <input
@@ -228,7 +233,7 @@ export function YoutubeBar({
             />
             <button
               type="submit"
-              className="rounded border border-ink-line px-3 py-1.5 text-xs text-ink-mute transition-colors duration-150 hover:border-amber-gold/60 hover:text-amber-gold"
+              className="rounded border border-amber-gold/40 bg-amber-gold/5 px-3 py-1.5 text-xs text-amber-gold transition-colors duration-150 hover:bg-amber-gold/15"
             >
               load
             </button>

@@ -1,0 +1,47 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Verses",
+  "version": "0.1.0",
+  "identifier": "com.verses.app",
+  "build": {
+    "frontendDist": "../tauri-dist",
+    "devUrl": "http://localhost:3000",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run tauri:build:web"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Verses",
+        "width": 1100,
+        "height": 760,
+        "minWidth": 720,
+        "minHeight": 480,
+        "fullscreen": false,
+        "resizable": true,
+        "center": true,
+        "decorations": true,
+        "transparent": false,
+        "url": "/index.html"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["dmg", "app", "msi", "appimage", "deb"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Productivity",
+    "shortDescription": "A distraction-free lyric writing tool.",
+    "longDescription": "Verses is a quiet writing surface for songwriters. Rhymes when you highlight a word, a YouTube beat that never steals focus, OCR for the page in your notebook, and version history. No streaks, no notifications, no noise.",
+    "copyright": "© Verses contributors"
+  }
+}

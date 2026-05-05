@@ -3,18 +3,30 @@
 @tailwind utilities;
 
 :root {
-  --background: #0d0d0d;
-  --surface: #1a1a1a;
-  --line: #262626;
-  --text: #e8e8e8;
-  --mute: #6b6b6b;
-  --accent: #c9a84c;
+  /* dark theme (default) — RGB triples so Tailwind alpha modifiers work */
+  --bg: 13 13 13;
+  --surface: 26 26 26;
+  --line: 38 38 38;
+  --text: 232 232 232;
+  --mute: 107 107 107;
+  --accent: 201 168 76;
+  color-scheme: dark;
+}
+
+:root.light {
+  --bg: 250 250 247;
+  --surface: 255 255 255;
+  --line: 229 226 217;
+  --text: 26 26 26;
+  --mute: 117 117 117;
+  --accent: 176 138 44;
+  color-scheme: light;
 }
 
 html,
 body {
-  background: var(--background);
-  color: var(--text);
+  background: rgb(var(--bg));
+  color: rgb(var(--text));
   height: 100%;
 }
 
@@ -26,12 +38,12 @@ body {
 }
 
 * {
-  border-color: var(--line);
+  border-color: rgb(var(--line));
 }
 
 ::selection {
-  background: rgba(201, 168, 76, 0.25);
-  color: var(--text);
+  background: rgb(var(--accent) / 0.25);
+  color: rgb(var(--text));
 }
 
 .serif {
@@ -46,16 +58,19 @@ input {
 
 textarea::placeholder,
 input::placeholder {
-  color: #555;
+  color: rgb(var(--mute) / 0.85);
 }
 
-/* fade-only-when-not-hovered util */
+/* fade-only-when-not-hovered util — discoverable but quiet */
 .fade-idle {
-  opacity: 0.25;
+  opacity: 0.45;
   transition: opacity 150ms cubic-bezier(0, 0, 0.2, 1);
 }
 .fade-idle:hover,
 .fade-idle:focus-within {
+  opacity: 1;
+}
+.fade-idle--full {
   opacity: 1;
 }
 
@@ -64,7 +79,7 @@ input::placeholder {
   height: 6px;
 }
 .scrollbar-thin::-webkit-scrollbar-thumb {
-  background: #2a2a2a;
+  background: rgb(var(--line));
   border-radius: 3px;
 }
 .scrollbar-thin::-webkit-scrollbar-track {
