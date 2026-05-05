@@ -343,8 +343,9 @@ export function Editor({ songId }: { songId: string }) {
 
   // YouTube session handlers
   const onSetYoutube = useCallback(
-    async (next: YoutubeSession | null) => {
+    async (incoming: YoutubeSession | null) => {
       if (!song) return;
+      const next = incoming ? { ...incoming, song_id: song.id } : null;
       setYoutube(next);
       if (configured && !guestMode) {
         try {
