@@ -193,6 +193,35 @@ export function YoutubeBar({
     togglePlay();
   });
 
+  // External controllers (e.g. RecorderModal) can dispatch these events
+  // to play / pause the loaded YouTube beat.
+  useEffect(() => {
+    const onPlay = () => {
+      const p = playerRef.current;
+      if (!p) return;
+      try {
+        p.playVideo();
+      } catch {
+        /* ignore */
+      }
+    };
+    const onPause = () => {
+      const p = playerRef.current;
+      if (!p) return;
+      try {
+        p.pauseVideo();
+      } catch {
+        /* ignore */
+      }
+    };
+    window.addEventListener("verses:beat-play", onPlay);
+    window.addEventListener("verses:beat-pause", onPause);
+    return () => {
+      window.removeEventListener("verses:beat-play", onPlay);
+      window.removeEventListener("verses:beat-pause", onPause);
+    };
+  }, []);
+
   const onLoad = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const url = input.trim();

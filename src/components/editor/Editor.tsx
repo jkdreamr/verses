@@ -17,6 +17,8 @@ import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { ExportModal } from "./ExportModal";
 import { TagsModal } from "./TagsModal";
 import { SelectionTooltip } from "./SelectionTooltip";
+import { RecorderModal } from "./RecorderModal";
+import { TakesPanel } from "./TakesPanel";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 const AUTOSAVE_INTERVAL_MS = 10_000;
@@ -41,6 +43,9 @@ export function Editor({ songId }: { songId: string }) {
   const [exportOpen, setExportOpen] = useState(false);
   const [tagsOpen, setTagsOpen] = useState(false);
   const [structureOpen, setStructureOpen] = useState(false);
+  const [takesOpen, setTakesOpen] = useState(false);
+  const [recorderOpen, setRecorderOpen] = useState(false);
+  const [takesReloadKey, setTakesReloadKey] = useState(0);
 
   const [youtube, setYoutube] = useState<YoutubeSession | null>(null);
 
@@ -477,6 +482,7 @@ export function Editor({ songId }: { songId: string }) {
         onScan={() => setOcrOpen(true)}
         onRhymes={onTriggerRhymesFromSelection}
         onHistory={() => setHistoryOpen(true)}
+        onTakes={() => setTakesOpen(true)}
         onExport={() => setExportOpen(true)}
         onTags={() => setTagsOpen(true)}
         onToggleFont={() => setSerif((v) => !v)}
@@ -541,6 +547,25 @@ export function Editor({ songId }: { songId: string }) {
         tags={song.tags ?? []}
         onChange={setTags}
         onClose={() => setTagsOpen(false)}
+      />
+
+      <TakesPanel
+        open={takesOpen}
+        songId={song.id}
+        reloadKey={takesReloadKey}
+        onClose={() => setTakesOpen(false)}
+        onNewTake={() => setRecorderOpen(true)}
+      />
+
+      <RecorderModal
+        open={recorderOpen}
+        songId={song.id}
+        hasYoutube={!!youtube}
+        onClose={() => setRecorderOpen(false)}
+        onSaved={() => {
+          setTakesReloadKey((k) => k + 1);
+          setTakesOpen(true);
+        }}
       />
     </main>
   );

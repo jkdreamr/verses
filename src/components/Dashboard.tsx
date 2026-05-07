@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { localStore, newSongId } from "@/lib/storage";
+import { takesStore } from "@/lib/takes";
 import type { Song } from "@/lib/types";
 import { useToast } from "./Toast";
 import { ThemeToggle } from "./ThemeToggle";
@@ -135,6 +136,11 @@ export function Dashboard() {
         }
       }
       localStore.deleteSong(id);
+      try {
+        await takesStore.deleteAllForSong(id);
+      } catch {
+        // ignore: IndexedDB may be unavailable in some environments
+      }
       setSongs((prev) => prev.filter((s) => s.id !== id));
       toast(`Deleted \u201C${title}\u201D`, "info");
     } finally {

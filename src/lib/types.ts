@@ -36,3 +36,18 @@ export type DatamuseWord = {
   score: number;
   numSyllables?: number;
 };
+
+export type TakeMeta = {
+  id: string;
+  song_id: string;
+  label: string;
+  mime: string;
+  duration: number;
+  size: number;
+  has_video: boolean;
+  created_at: string;
+};
+
+export type Take = TakeMeta & {
+  blob: Blob;
+};

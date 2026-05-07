@@ -5,6 +5,7 @@ export function Toolbar({
   onScan,
   onRhymes,
   onHistory,
+  onTakes,
   onExport,
   onTags,
   onToggleFont,
@@ -14,6 +15,7 @@ export function Toolbar({
   onScan: () => void;
   onRhymes: () => void;
   onHistory: () => void;
+  onTakes: () => void;
   onExport: () => void;
   onTags: () => void;
   onToggleFont: () => void;
@@ -32,6 +34,10 @@ export function Toolbar({
         <Sep />
         <ToolBtn onClick={onScan} title="Scan handwritten lyrics">
           scan
+        </ToolBtn>
+        <Sep />
+        <ToolBtn onClick={onTakes} title="Recorded vocal takes">
+          takes
         </ToolBtn>
         <Sep />
         <ToolBtn onClick={onHistory} title="Version history (⌘⇧H)">
