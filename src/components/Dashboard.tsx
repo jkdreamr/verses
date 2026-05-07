@@ -8,6 +8,7 @@ import { localStore, newSongId } from "@/lib/storage";
 import type { Song } from "@/lib/types";
 import { useToast } from "./Toast";
 import { ThemeToggle } from "./ThemeToggle";
+import { Modal } from "./Modal";
 
 export function Dashboard() {
   const router = useRouter();
@@ -17,6 +18,9 @@ export function Dashboard() {
   const [user, setUser] = useState<{ email?: string | null } | null>(null);
   const [filter, setFilter] = useState("");
   const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<Song | null>(null);
+  const [armed, setArmed] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const configured = isSupabaseConfigured();
 
   const refresh = useCallback(async () => {
@@ -99,6 +103,45 @@ export function Dashboard() {
     }
     localStore.upsertSong(draft);
     router.push(`/editor/${draft.id}?guest=1`);
+  };
+
+  const askDelete = (song: Song) => {
+    setPendingDelete(song);
+    setArmed(false);
+  };
+
+  const cancelDelete = () => {
+    setPendingDelete(null);
+    setArmed(false);
+  };
+
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    if (!armed) {
+      setArmed(true);
+      return;
+    }
+    setDeleting(true);
+    const id = pendingDelete.id;
+    const title = pendingDelete.title?.trim() || "Untitled";
+    try {
+      if (configured && user) {
+        const supabase = createClient();
+        const { error } = await supabase.from("songs").delete().eq("id", id);
+        if (error) {
+          toast("Couldn't delete \u2014 try again", "error");
+          setDeleting(false);
+          return;
+        }
+      }
+      localStore.deleteSong(id);
+      setSongs((prev) => prev.filter((s) => s.id !== id));
+      toast(`Deleted \u201C${title}\u201D`, "info");
+    } finally {
+      setDeleting(false);
+      setPendingDelete(null);
+      setArmed(false);
+    }
   };
 
   const onSignOut = async () => {
@@ -193,14 +236,14 @@ export function Dashboard() {
       ) : (
         <ul className="flex flex-col divide-y divide-ink-line border-y border-ink-line">
           {filtered.map((s) => (
-            <li key={s.id}>
+            <li key={s.id} className="group relative">
               <Link
                 href={
                   user
                     ? `/editor/${s.id}`
                     : `/editor/${s.id}?guest=1`
                 }
-                className="block px-1 py-4 transition-colors duration-150 hover:bg-ink-surface"
+                className="block px-1 py-4 pr-16 transition-colors duration-150 hover:bg-ink-surface"
               >
                 <div className="flex items-baseline justify-between gap-4">
                   <div className="font-serif text-lg text-ink-text">
@@ -214,7 +257,7 @@ export function Dashboard() {
                   </div>
                 </div>
                 <div className="mt-1 truncate text-sm text-ink-mute">
-                  {firstNonEmptyLine(s.content) || "—"}
+                  {firstNonEmptyLine(s.content) || "\u2014"}
                 </div>
                 {(s.tags ?? []).length > 0 ? (
                   <div className="mt-2 flex flex-wrap gap-1.5">
@@ -229,10 +272,71 @@ export function Dashboard() {
                   </div>
                 ) : null}
               </Link>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  askDelete(s);
+                }}
+                title={`Delete \u201C${s.title?.trim() || "Untitled"}\u201D`}
+                aria-label={`Delete ${s.title?.trim() || "Untitled"}`}
+                className="absolute right-1 top-1/2 -translate-y-1/2 rounded border border-ink-line px-2 py-1 text-[11px] text-ink-mute opacity-0 transition-opacity duration-150 hover:border-red-400/60 hover:text-red-300 focus:opacity-100 group-hover:opacity-100"
+              >
+                delete
+              </button>
             </li>
           ))}
         </ul>
       )}
+
+      <Modal
+        open={pendingDelete !== null}
+        onClose={cancelDelete}
+        title="Delete song"
+      >
+        {pendingDelete ? (
+          <div>
+            <p className="font-serif text-lg text-ink-text">
+              {"Delete \u201C"}
+              <span className="text-amber-gold">
+                {pendingDelete.title?.trim() || "Untitled"}
+              </span>
+              {"\u201D?"}
+            </p>
+            <p className="mt-2 text-sm text-ink-mute">
+              Lyrics, version history, and the linked YouTube session for this
+              song will be removed. This cannot be undone.
+            </p>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={cancelDelete}
+                disabled={deleting}
+                className="rounded border border-ink-line px-3 py-1.5 text-sm text-ink-mute hover:text-ink-text"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDelete}
+                disabled={deleting}
+                className={`rounded border px-3 py-1.5 text-sm transition-colors duration-150 ${
+                  armed
+                    ? "border-red-400/80 bg-red-500/15 text-red-200 hover:bg-red-500/25"
+                    : "border-red-400/40 text-red-300 hover:border-red-400/70 hover:bg-red-500/10"
+                }`}
+              >
+                {deleting
+                  ? "Deleting\u2026"
+                  : armed
+                  ? "Tap once more to confirm"
+                  : "Delete this song"}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
 
       {!user && configured && loaded ? (
         <p className="mt-12 text-center text-xs text-ink-mute">
