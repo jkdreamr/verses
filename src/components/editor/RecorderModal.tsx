@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Modal } from "@/components/Modal";
 import { useToast } from "@/components/Toast";
 import { takesStore, newTakeId, formatBytes, formatDuration } from "@/lib/takes";
-import type { Take } from "@/lib/types";
+import type { Take, YoutubeMarker } from "@/lib/types";
 
 type RecState = "idle" | "preparing" | "recording" | "review";
 
@@ -33,16 +33,61 @@ const pickMime = (candidates: string[]): string | undefined => {
   return undefined;
 };
 
+const supportsTabAudio = (): boolean => {
+  if (typeof navigator === "undefined") return false;
+  if (!navigator.mediaDevices) return false;
+  if (typeof navigator.mediaDevices.getDisplayMedia !== "function") return false;
+  // Audio capture in getDisplayMedia is currently Chromium-only on desktop.
+  // We surface a checkbox either way; if the user chose this and it fails,
+  // we fall back gracefully.
+  return true;
+};
+
+const fmt = (seconds: number): string => {
+  const s = Math.max(0, Math.floor(seconds));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${r.toString().padStart(2, "0")}`;
+};
+
+const parseMmSs = (text: string): number | null => {
+  const t = text.trim();
+  if (!t) return null;
+  const m = t.match(/^(\d+):(\d{1,2})$/);
+  if (m) {
+    const min = parseInt(m[1], 10);
+    const sec = parseInt(m[2], 10);
+    if (Number.isFinite(min) && Number.isFinite(sec) && sec < 60) {
+      return min * 60 + sec;
+    }
+    return null;
+  }
+  const n = parseFloat(t);
+  if (Number.isFinite(n) && n >= 0) return n;
+  return null;
+};
+
+const defaultLabelForNow = (): string => {
+  const d = new Date();
+  const hh = d.getHours().toString().padStart(2, "0");
+  const mm = d.getMinutes().toString().padStart(2, "0");
+  return `take ${hh}:${mm}`;
+};
+
 export function RecorderModal({
   open,
   songId,
   hasYoutube,
+  markers,
+  loopStart,
   onClose,
   onSaved,
 }: {
   open: boolean;
   songId: string;
   hasYoutube: boolean;
+  markers: YoutubeMarker[];
+  loopStart: number | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -50,6 +95,7 @@ export function RecorderModal({
   const [state, setState] = useState<RecState>("idle");
   const [withVideo, setWithVideo] = useState(false);
   const [autoPlayBeat, setAutoPlayBeat] = useState(true);
+  const [captureBeat, setCaptureBeat] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [level, setLevel] = useState(0);
@@ -59,17 +105,58 @@ export function RecorderModal({
   const [reviewDuration, setReviewDuration] = useState<number>(0);
   const [label, setLabel] = useState<string>("");
 
-  const streamRef = useRef<MediaStream | null>(null);
+  // Start-at picker state
+  const [startAtSel, setStartAtSel] = useState<string>("0");
+  const [customStart, setCustomStart] = useState<string>("");
+  const [customStartError, setCustomStartError] = useState<string | null>(null);
+
   const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+  const sourceStreamsRef = useRef<MediaStream[]>([]);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const meterCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const rafRef = useRef<number | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
   const startedAtRef = useRef<number>(0);
   const tickRef = useRef<number | null>(null);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
 
-  const teardownStream = useCallback(() => {
+  const tabAudioSupported = useMemo(() => supportsTabAudio(), []);
+
+  // Build start-at options when markers/loop change
+  const startAtOptions = useMemo(() => {
+    const opts: { value: string; label: string }[] = [
+      { value: "0", label: "Beginning (0:00)" },
+    ];
+    for (const m of markers) {
+      opts.push({
+        value: String(m.time),
+        label: `${m.label} (${fmt(m.time)})`,
+      });
+    }
+    if (typeof loopStart === "number" && loopStart > 0) {
+      opts.push({
+        value: `loop:${loopStart}`,
+        label: `Loop A (${fmt(loopStart)})`,
+      });
+    }
+    opts.push({ value: "custom", label: "Custom\u2026" });
+    return opts;
+  }, [markers, loopStart]);
+
+  const resolvedStartAt = useMemo<number | null>(() => {
+    if (startAtSel === "custom") {
+      return parseMmSs(customStart);
+    }
+    if (startAtSel.startsWith("loop:")) {
+      const v = parseFloat(startAtSel.slice(5));
+      return Number.isFinite(v) ? v : 0;
+    }
+    const v = parseFloat(startAtSel);
+    return Number.isFinite(v) ? v : 0;
+  }, [startAtSel, customStart]);
+
+  const teardownStreams = useCallback(() => {
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
@@ -82,12 +169,18 @@ export function RecorderModal({
       analyserRef.current?.disconnect();
     } catch {}
     analyserRef.current = null;
+    if (meterCtxRef.current && meterCtxRef.current.state !== "closed") {
+      void meterCtxRef.current.close().catch(() => {});
+    }
+    meterCtxRef.current = null;
     if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
       void audioCtxRef.current.close().catch(() => {});
     }
     audioCtxRef.current = null;
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
+    sourceStreamsRef.current.forEach((s) => {
+      s.getTracks().forEach((t) => t.stop());
+    });
+    sourceStreamsRef.current = [];
     if (previewVideoRef.current) {
       previewVideoRef.current.srcObject = null;
     }
@@ -101,7 +194,7 @@ export function RecorderModal({
     }
     recorderRef.current = null;
     chunksRef.current = [];
-    teardownStream();
+    teardownStreams();
     setState("idle");
     setElapsed(0);
     setLevel(0);
@@ -113,7 +206,7 @@ export function RecorderModal({
     setReviewUrl(null);
     setReviewDuration(0);
     setLabel("");
-  }, [reviewUrl, teardownStream]);
+  }, [reviewUrl, teardownStreams]);
 
   // close on modal close
   useEffect(() => {
@@ -133,13 +226,16 @@ export function RecorderModal({
 
   const startMeter = useCallback((stream: MediaStream) => {
     try {
-      const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const Ctx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext })
+          .webkitAudioContext;
       const ctx = new Ctx();
       const src = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
       src.connect(analyser);
-      audioCtxRef.current = ctx;
+      meterCtxRef.current = ctx;
       analyserRef.current = analyser;
       const data = new Uint8Array(analyser.frequencyBinCount);
       const tick = () => {
@@ -162,27 +258,115 @@ export function RecorderModal({
   const beginRecording = useCallback(async () => {
     setError(null);
     setState("preparing");
+
+    if (startAtSel === "custom" && resolvedStartAt === null) {
+      setCustomStartError("Use mm:ss (e.g. 0:42)");
+      setState("idle");
+      return;
+    }
+    setCustomStartError(null);
+
+    let micStream: MediaStream | null = null;
+    let camStream: MediaStream | null = null;
+    let tabAudioStream: MediaStream | null = null;
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
+      // 1) Tab audio (optional). Done first so that if the user cancels the
+      //    share dialog, we haven't already triggered other prompts.
+      const wantsTabAudio =
+        captureBeat && hasYoutube && autoPlayBeat && tabAudioSupported;
+      if (wantsTabAudio) {
+        try {
+          const display = await navigator.mediaDevices.getDisplayMedia({
+            audio: true,
+            video: true,
+          });
+          const aTracks = display.getAudioTracks();
+          // Always stop the screen-video track; we only want audio.
+          display.getVideoTracks().forEach((t) => t.stop());
+          if (aTracks.length === 0) {
+            aTracks.forEach((t) => t.stop());
+            throw new Error(
+              'Tab audio share is missing — make sure "Also share tab audio" is checked when sharing.'
+            );
+          }
+          tabAudioStream = new MediaStream(aTracks);
+          sourceStreamsRef.current.push(tabAudioStream);
+        } catch (err) {
+          // If user cancelled, fall back to mic-only mode silently.
+          const msg = err instanceof Error ? err.message : String(err);
+          if (
+            /Permission denied|cancel|aborted|NotAllowed/i.test(msg) &&
+            !/share tab audio/i.test(msg)
+          ) {
+            // user cancelled the share picker — give a clear inline error
+            setError("Tab-audio share was cancelled. Recording mic only.");
+          } else if (/share tab audio/i.test(msg)) {
+            setError(msg);
+            setState("idle");
+            return;
+          } else {
+            setError(msg);
+          }
+          tabAudioStream = null;
+        }
+      }
+
+      // 2) Mic
+      micStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
         },
-        video: withVideo
-          ? { width: { ideal: 720 }, height: { ideal: 540 } }
-          : false,
       });
-      streamRef.current = stream;
-      if (withVideo && previewVideoRef.current) {
-        previewVideoRef.current.srcObject = stream;
-        previewVideoRef.current.muted = true;
-        await previewVideoRef.current.play().catch(() => {});
+      sourceStreamsRef.current.push(micStream);
+
+      // 3) Camera (separate getUserMedia call so we don't duplicate audio)
+      if (withVideo) {
+        camStream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 720 }, height: { ideal: 540 } },
+        });
+        sourceStreamsRef.current.push(camStream);
+        if (previewVideoRef.current) {
+          previewVideoRef.current.srcObject = camStream;
+          previewVideoRef.current.muted = true;
+          await previewVideoRef.current.play().catch(() => {});
+        }
       }
-      startMeter(stream);
+
+      // 4) Mix audio: tab audio + mic via AudioContext destination
+      let outputAudioTrack: MediaStreamTrack;
+      if (tabAudioStream) {
+        const Ctx =
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext: typeof AudioContext })
+            .webkitAudioContext;
+        const ac = new Ctx();
+        audioCtxRef.current = ac;
+        const dst = ac.createMediaStreamDestination();
+        ac.createMediaStreamSource(tabAudioStream).connect(dst);
+        ac.createMediaStreamSource(micStream).connect(dst);
+        outputAudioTrack = dst.stream.getAudioTracks()[0];
+      } else {
+        outputAudioTrack = micStream.getAudioTracks()[0];
+      }
+
+      // 5) Build final stream
+      const finalTracks: MediaStreamTrack[] = [outputAudioTrack];
+      if (camStream) {
+        finalTracks.push(camStream.getVideoTracks()[0]);
+      }
+      const finalStream = new MediaStream(finalTracks);
+
+      // 6) Mic-only level meter (so the bar reflects user's voice)
+      startMeter(micStream);
+
+      // 7) Pick MIME and start recorder
       const candidates = withVideo ? VIDEO_CANDIDATES : AUDIO_CANDIDATES;
-      const mime = pickMime(candidates) ?? (withVideo ? "video/webm" : "audio/webm");
-      const recorder = new MediaRecorder(stream, { mimeType: mime });
+      const mime =
+        pickMime(candidates) ?? (withVideo ? "video/webm" : "audio/webm");
+      const recorder = new MediaRecorder(finalStream, { mimeType: mime });
       chunksRef.current = [];
       recorder.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
@@ -191,7 +375,7 @@ export function RecorderModal({
         const finalDuration = (Date.now() - startedAtRef.current) / 1000;
         const blob = new Blob(chunksRef.current, { type: mime });
         chunksRef.current = [];
-        teardownStream();
+        teardownStreams();
         const url = URL.createObjectURL(blob);
         setReviewBlob(blob);
         setReviewUrl(url);
@@ -208,16 +392,32 @@ export function RecorderModal({
         setElapsed((Date.now() - startedAtRef.current) / 1000);
       }, 200);
       setState("recording");
+
+      // 8) Auto-play YouTube beat (with seek)
       if (autoPlayBeat && hasYoutube) {
-        window.dispatchEvent(new CustomEvent("verses:beat-play"));
+        const startAt =
+          typeof resolvedStartAt === "number" ? resolvedStartAt : 0;
+        window.dispatchEvent(
+          new CustomEvent("verses:beat-play", { detail: { startAt } })
+        );
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setError(message || "Could not access microphone/camera");
       setState("idle");
-      teardownStream();
+      teardownStreams();
     }
-  }, [autoPlayBeat, hasYoutube, startMeter, teardownStream, withVideo]);
+  }, [
+    autoPlayBeat,
+    captureBeat,
+    hasYoutube,
+    resolvedStartAt,
+    startAtSel,
+    startMeter,
+    tabAudioSupported,
+    teardownStreams,
+    withVideo,
+  ]);
 
   const stopRecording = useCallback(() => {
     if (autoPlayBeat && hasYoutube) {
@@ -281,20 +481,26 @@ export function RecorderModal({
 
   const isRecording = state === "recording";
   const isReview = state === "review";
-  const canStart = state === "idle" && !error;
+  const canStart = state === "idle";
 
   return (
     <Modal open={open} onClose={onClose} title="Record a take">
       <div className="flex flex-col gap-4">
         {!isReview ? (
           <>
-            <div className="rounded border border-amber-gold/30 bg-amber-gold/5 px-3 py-2 text-[12px] text-ink-text">
-              <div className="text-amber-gold">Headphones recommended.</div>
-              <div className="mt-1 text-ink-mute">
-                Browsers can&apos;t capture YouTube&apos;s audio directly, so
-                wear headphones to keep the beat out of your mic.
+            {hasYoutube ? (
+              <div className="rounded border border-amber-gold/30 bg-amber-gold/5 px-3 py-2 text-[12px] text-ink-text">
+                <div className="text-amber-gold">
+                  Recording captures the beat + your mic together.
+                </div>
+                <div className="mt-1 text-ink-mute">
+                  When the share prompt appears, pick{" "}
+                  <span className="text-ink-text">this tab</span> and check{" "}
+                  <span className="text-ink-text">Also share tab audio</span>{" "}
+                  before clicking Share. Works in Chrome &amp; Edge.
+                </div>
               </div>
-            </div>
+            ) : null}
 
             <div className="flex flex-wrap items-center gap-3 text-[12px] text-ink-mute">
               <label className="flex cursor-pointer items-center gap-2">
@@ -308,18 +514,83 @@ export function RecorderModal({
                 record video
               </label>
               {hasYoutube ? (
-                <label className="flex cursor-pointer items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={autoPlayBeat}
-                    disabled={isRecording || state === "preparing"}
-                    onChange={(e) => setAutoPlayBeat(e.target.checked)}
-                    className="accent-amber-gold"
-                  />
-                  auto-play YouTube beat
-                </label>
+                <>
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={autoPlayBeat}
+                      disabled={isRecording || state === "preparing"}
+                      onChange={(e) => setAutoPlayBeat(e.target.checked)}
+                      className="accent-amber-gold"
+                    />
+                    auto-play YouTube beat
+                  </label>
+                  <label
+                    className={`flex items-center gap-2 ${
+                      autoPlayBeat ? "cursor-pointer" : "opacity-50"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={captureBeat && autoPlayBeat}
+                      disabled={
+                        !autoPlayBeat ||
+                        isRecording ||
+                        state === "preparing"
+                      }
+                      onChange={(e) => setCaptureBeat(e.target.checked)}
+                      className="accent-amber-gold"
+                    />
+                    capture beat in recording
+                  </label>
+                </>
               ) : null}
             </div>
+
+            {hasYoutube && autoPlayBeat ? (
+              <div className="flex flex-wrap items-end gap-3">
+                <label className="flex flex-col gap-1 text-[12px] text-ink-mute">
+                  <span>Start at</span>
+                  <select
+                    value={startAtSel}
+                    onChange={(e) => setStartAtSel(e.target.value)}
+                    disabled={isRecording || state === "preparing"}
+                    className="rounded border border-ink-line bg-ink/40 px-2 py-1 text-sm text-ink-text outline-none"
+                  >
+                    {startAtOptions.map((o, i) => (
+                      <option key={`${o.value}-${i}`} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {startAtSel === "custom" ? (
+                  <label className="flex flex-col gap-1 text-[12px] text-ink-mute">
+                    <span>mm:ss</span>
+                    <input
+                      type="text"
+                      placeholder="0:42"
+                      value={customStart}
+                      onChange={(e) => {
+                        setCustomStart(e.target.value);
+                        setCustomStartError(null);
+                      }}
+                      disabled={isRecording || state === "preparing"}
+                      className={`w-24 rounded border bg-ink/40 px-2 py-1 text-sm text-ink-text outline-none ${
+                        customStartError
+                          ? "border-red-400/60"
+                          : "border-ink-line"
+                      }`}
+                    />
+                  </label>
+                ) : null}
+                {customStartError ? (
+                  <div className="text-[11px] text-red-300">
+                    {customStartError}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
 
             {withVideo ? (
               <div className="aspect-video w-full overflow-hidden rounded border border-ink-line bg-black">
@@ -457,10 +728,11 @@ function ReviewView({
       <label className="flex flex-col gap-1 text-[12px] text-ink-mute">
         <span>label</span>
         <input
+          autoFocus
           value={label}
           onChange={(e) => setLabel(e.target.value)}
-          placeholder="take 1 · verse 2 idea · hook …"
-          className="rounded border border-ink-line bg-ink/60 px-3 py-1.5 text-sm text-ink-text focus:border-amber-gold/60"
+          placeholder={defaultLabelForNow()}
+          className="rounded border border-ink-line bg-ink/40 px-3 py-1.5 text-sm text-ink-text outline-none"
         />
       </label>
 
@@ -475,17 +747,11 @@ function ReviewView({
         <button
           type="button"
           onClick={onSave}
-          className="rounded border border-amber-gold/50 bg-amber-gold/10 px-3 py-1.5 text-sm text-amber-gold hover:bg-amber-gold/20"
+          className="rounded border border-amber-gold/50 bg-amber-gold/10 px-4 py-1.5 text-sm text-amber-gold hover:bg-amber-gold/20"
         >
           Save take
         </button>
       </div>
     </div>
   );
-}
-
-function defaultLabelForNow(): string {
-  const d = new Date();
-  const time = `${d.getHours()}:${d.getMinutes().toString().padStart(2, "0")}`;
-  return `Take \u00b7 ${time}`;
 }

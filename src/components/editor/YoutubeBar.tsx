@@ -194,12 +194,18 @@ export function YoutubeBar({
   });
 
   // External controllers (e.g. RecorderModal) can dispatch these events
-  // to play / pause the loaded YouTube beat.
+  // to play / pause the loaded YouTube beat. The play event accepts an
+  // optional `detail.startAt` (seconds) to seek before playback.
   useEffect(() => {
-    const onPlay = () => {
+    const onPlay = (ev: Event) => {
       const p = playerRef.current;
       if (!p) return;
+      const detail = (ev as CustomEvent<{ startAt?: number }>).detail;
+      const startAt = detail?.startAt;
       try {
+        if (typeof startAt === "number" && Number.isFinite(startAt) && startAt >= 0) {
+          p.seekTo(startAt, true);
+        }
         p.playVideo();
       } catch {
         /* ignore */

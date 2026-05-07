@@ -11,12 +11,14 @@ export function TakesPanel({
   reloadKey,
   onClose,
   onNewTake,
+  onLyricsOverlay,
 }: {
   open: boolean;
   songId: string;
   reloadKey: number;
   onClose: () => void;
   onNewTake: () => void;
+  onLyricsOverlay?: (takeId: string) => void;
 }) {
   const { toast } = useToast();
   const [takes, setTakes] = useState<Take[]>([]);
@@ -272,6 +274,15 @@ export function TakesPanel({
                     >
                       ⬇ download
                     </button>
+                    {t.has_video && onLyricsOverlay ? (
+                      <button
+                        onClick={() => onLyricsOverlay(t.id)}
+                        className="rounded border border-amber-gold/40 px-2 py-0.5 text-[11px] text-amber-gold hover:bg-amber-gold/10"
+                        title="Burn the song lyrics into the video as captions"
+                      >
+                        ✎ lyrics
+                      </button>
+                    ) : null}
 
                     {isPendingDelete ? (
                       <span className="ml-auto flex items-center gap-1">

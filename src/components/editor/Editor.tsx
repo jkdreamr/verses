@@ -19,6 +19,7 @@ import { TagsModal } from "./TagsModal";
 import { SelectionTooltip } from "./SelectionTooltip";
 import { RecorderModal } from "./RecorderModal";
 import { TakesPanel } from "./TakesPanel";
+import { LyricsOverlayModal } from "./LyricsOverlayModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 const AUTOSAVE_INTERVAL_MS = 10_000;
@@ -46,6 +47,9 @@ export function Editor({ songId }: { songId: string }) {
   const [takesOpen, setTakesOpen] = useState(false);
   const [recorderOpen, setRecorderOpen] = useState(false);
   const [takesReloadKey, setTakesReloadKey] = useState(0);
+  const [lyricsOverlayTakeId, setLyricsOverlayTakeId] = useState<string | null>(
+    null
+  );
 
   const [youtube, setYoutube] = useState<YoutubeSession | null>(null);
 
@@ -555,16 +559,30 @@ export function Editor({ songId }: { songId: string }) {
         reloadKey={takesReloadKey}
         onClose={() => setTakesOpen(false)}
         onNewTake={() => setRecorderOpen(true)}
+        onLyricsOverlay={(id) => setLyricsOverlayTakeId(id)}
       />
 
       <RecorderModal
         open={recorderOpen}
         songId={song.id}
         hasYoutube={!!youtube}
+        markers={youtube?.markers ?? []}
+        loopStart={youtube?.loop_start ?? null}
         onClose={() => setRecorderOpen(false)}
         onSaved={() => {
           setTakesReloadKey((k) => k + 1);
           setTakesOpen(true);
+        }}
+      />
+
+      <LyricsOverlayModal
+        open={!!lyricsOverlayTakeId}
+        takeId={lyricsOverlayTakeId}
+        lyrics={song.content}
+        onClose={() => setLyricsOverlayTakeId(null)}
+        onSaved={() => {
+          setTakesReloadKey((k) => k + 1);
+          setLyricsOverlayTakeId(null);
         }}
       />
     </main>
