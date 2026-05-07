@@ -20,6 +20,7 @@ import { SelectionTooltip } from "./SelectionTooltip";
 import { RecorderModal } from "./RecorderModal";
 import { TakesPanel } from "./TakesPanel";
 import { LyricsOverlayModal } from "./LyricsOverlayModal";
+import { StudioModal } from "./StudioModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 const AUTOSAVE_INTERVAL_MS = 10_000;
@@ -50,6 +51,7 @@ export function Editor({ songId }: { songId: string }) {
   const [lyricsOverlayTakeId, setLyricsOverlayTakeId] = useState<string | null>(
     null
   );
+  const [studioOpen, setStudioOpen] = useState(false);
 
   const [youtube, setYoutube] = useState<YoutubeSession | null>(null);
 
@@ -497,6 +499,7 @@ export function Editor({ songId }: { songId: string }) {
       <YoutubeBar
         session={youtube}
         onChange={onSetYoutube}
+        onOpenStudio={() => setStudioOpen(true)}
       />
 
       {/* Right panels */}
@@ -568,6 +571,7 @@ export function Editor({ songId }: { songId: string }) {
         hasYoutube={!!youtube}
         markers={youtube?.markers ?? []}
         loopStart={youtube?.loop_start ?? null}
+        lyrics={song.content}
         onClose={() => setRecorderOpen(false)}
         onSaved={() => {
           setTakesReloadKey((k) => k + 1);
@@ -584,6 +588,13 @@ export function Editor({ songId }: { songId: string }) {
           setTakesReloadKey((k) => k + 1);
           setLyricsOverlayTakeId(null);
         }}
+      />
+
+      <StudioModal
+        open={studioOpen}
+        songId={song.id}
+        songTitle={song.title}
+        onClose={() => setStudioOpen(false)}
       />
     </main>
   );

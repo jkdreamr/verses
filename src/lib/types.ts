@@ -51,3 +51,24 @@ export type TakeMeta = {
 export type Take = TakeMeta & {
   blob: Blob;
 };
+
+export type StudioTrack = {
+  id: string;
+  label: string;
+  blob: Blob;
+  mime: string;
+  duration: number;
+  /** 0..1.5 (allow small over-unity to compensate for quiet mics) */
+  volume: number;
+  muted: boolean;
+  solo: boolean;
+  created_at: string;
+};
+
+export type StudioSession = {
+  id: string;
+  song_id: string;
+  master_volume: number;
+  tracks: StudioTrack[];
+  updated_at: string;
+};

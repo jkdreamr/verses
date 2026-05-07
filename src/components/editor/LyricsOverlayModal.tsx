@@ -221,6 +221,24 @@ export function LyricsOverlayModal({
     let audioCtx: AudioContext | null = null;
 
     try {
+      // Make sure Lora is loaded before we start rendering, otherwise the
+      // very first frames will fall back to Georgia/serif and pop in.
+      try {
+        const fontPx = Math.max(18, Math.round((720) * 0.06));
+        let loraFamily = "Lora";
+        const v = getComputedStyle(document.documentElement)
+          .getPropertyValue("--font-lora")
+          .trim();
+        if (v) loraFamily = v.replace(/['"]/g, "");
+        await (
+          document as unknown as {
+            fonts?: { load: (s: string) => Promise<unknown> };
+          }
+        ).fonts?.load(`600 italic ${fontPx}px ${loraFamily}`);
+      } catch {
+        // optional pre-warm; ignore
+      }
+
       videoEl = document.createElement("video") as CaptureStreamableVideo;
       videoEl.src = takeUrl;
       videoEl.crossOrigin = "anonymous";
@@ -276,7 +294,12 @@ export function LyricsOverlayModal({
       }
 
       const mime = pickMime(VIDEO_CANDIDATES) ?? "video/webm";
-      const recorder = new MediaRecorder(canvasStream, { mimeType: mime });
+      // High export bitrates for clean social-ready downloads.
+      const recorder = new MediaRecorder(canvasStream, {
+        mimeType: mime,
+        videoBitsPerSecond: 5_000_000,
+        audioBitsPerSecond: 192_000,
+      });
       const chunks: Blob[] = [];
       recorder.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) chunks.push(e.data);
@@ -778,7 +801,19 @@ function drawCaption(
   const lineHeight = Math.round(fontSize * 1.25);
   const padding = Math.round(vh * 0.045);
 
-  ctx.font = `bold ${fontSize}px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+  // Aesthetic serif. next/font loads Lora under a generated family name
+  // exposed via CSS var `--font-lora`; resolve it at draw time so canvas
+  // gets the real font instead of falling back to a generic serif.
+  let loraFamily = "Lora";
+  try {
+    const v = getComputedStyle(document.documentElement)
+      .getPropertyValue("--font-lora")
+      .trim();
+    if (v) loraFamily = v.replace(/['"]/g, "");
+  } catch {
+    // ignore
+  }
+  ctx.font = `600 italic ${fontSize}px ${loraFamily}, Georgia, "Times New Roman", serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
 

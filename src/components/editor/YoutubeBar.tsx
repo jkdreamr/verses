@@ -50,9 +50,11 @@ const newMarkerId = () =>
 export function YoutubeBar({
   session,
   onChange,
+  onOpenStudio,
 }: {
   session: YoutubeSession | null;
   onChange: (s: YoutubeSession | null) => void;
+  onOpenStudio?: () => void;
 }) {
   const { toast } = useToast();
   const [expanded, setExpanded] = useState(false);
@@ -360,6 +362,18 @@ export function YoutubeBar({
         className="pointer-events-none absolute h-[180px] w-[320px] opacity-0"
         style={{ left: "-9999px", top: "-9999px" }}
       />
+
+      {onOpenStudio ? (
+        <button
+          type="button"
+          onClick={onOpenStudio}
+          title="Open studio (multitrack vocal recorder)"
+          aria-label="Open studio"
+          className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-t-md border border-b-0 border-ink-line bg-ink-surface/95 px-3 py-1 text-[11px] uppercase tracking-wider text-ink-mute backdrop-blur transition-colors duration-150 hover:border-amber-gold/60 hover:text-amber-gold"
+        >
+          ▲ studio
+        </button>
+      ) : null}
 
       {session && (markers.length > 0 || draftLabel) ? (
         <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-1.5 px-4 pt-2 text-[11px]">

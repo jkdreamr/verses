@@ -7,11 +7,14 @@ export function Modal({
   onClose,
   children,
   title,
+  width,
 }: {
   open: boolean;
   onClose: () => void;
   children: React.ReactNode;
   title?: string;
+  /** Optional max-width override (default 640px). Use e.g. "900px". */
+  width?: string;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -30,7 +33,10 @@ export function Modal({
         className="absolute inset-0 bg-black/70 transition-opacity duration-150"
         onClick={onClose}
       />
-      <div className="relative z-10 w-[min(640px,calc(100vw-2rem))] rounded-md border border-ink-line bg-ink-surface p-5">
+      <div
+        className="relative z-10 max-h-[calc(100vh-3rem)] overflow-y-auto rounded-md border border-ink-line bg-ink-surface p-5"
+        style={{ width: `min(${width ?? "640px"}, calc(100vw - 2rem))` }}
+      >
         {title ? (
           <div className="mb-3 font-sans text-sm uppercase tracking-wider text-ink-mute">
             {title}

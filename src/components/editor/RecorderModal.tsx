@@ -21,6 +21,10 @@ const AUDIO_CANDIDATES = [
   "audio/ogg;codecs=opus",
 ];
 
+// High export bitrates so downloads look/sound clean for social posts.
+const VIDEO_BITS_PER_SECOND = 4_500_000;
+const AUDIO_BITS_PER_SECOND = 192_000;
+
 const pickMime = (candidates: string[]): string | undefined => {
   if (typeof MediaRecorder === "undefined") return undefined;
   for (const m of candidates) {
@@ -31,16 +35,6 @@ const pickMime = (candidates: string[]): string | undefined => {
     }
   }
   return undefined;
-};
-
-const supportsTabAudio = (): boolean => {
-  if (typeof navigator === "undefined") return false;
-  if (!navigator.mediaDevices) return false;
-  if (typeof navigator.mediaDevices.getDisplayMedia !== "function") return false;
-  // Audio capture in getDisplayMedia is currently Chromium-only on desktop.
-  // We surface a checkbox either way; if the user chose this and it fails,
-  // we fall back gracefully.
-  return true;
 };
 
 const fmt = (seconds: number): string => {
@@ -74,12 +68,19 @@ const defaultLabelForNow = (): string => {
   return `take ${hh}:${mm}`;
 };
 
+const splitLyricLines = (lyrics: string): string[] =>
+  lyrics
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
 export function RecorderModal({
   open,
   songId,
   hasYoutube,
   markers,
   loopStart,
+  lyrics,
   onClose,
   onSaved,
 }: {
@@ -88,6 +89,7 @@ export function RecorderModal({
   hasYoutube: boolean;
   markers: YoutubeMarker[];
   loopStart: number | null;
+  lyrics: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -95,7 +97,6 @@ export function RecorderModal({
   const [state, setState] = useState<RecState>("idle");
   const [withVideo, setWithVideo] = useState(false);
   const [autoPlayBeat, setAutoPlayBeat] = useState(true);
-  const [captureBeat, setCaptureBeat] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [level, setLevel] = useState(0);
@@ -110,9 +111,12 @@ export function RecorderModal({
   const [customStart, setCustomStart] = useState<string>("");
   const [customStartError, setCustomStartError] = useState<string | null>(null);
 
+  // Teleprompter state
+  const [secondsPerLine, setSecondsPerLine] = useState<number>(3);
+  const [manualLineOffset, setManualLineOffset] = useState<number>(0);
+
   const recorderRef = useRef<MediaRecorder | null>(null);
   const sourceStreamsRef = useRef<MediaStream[]>([]);
-  const audioCtxRef = useRef<AudioContext | null>(null);
   const meterCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -121,9 +125,9 @@ export function RecorderModal({
   const tickRef = useRef<number | null>(null);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
 
-  const tabAudioSupported = useMemo(() => supportsTabAudio(), []);
+  const lyricLines = useMemo(() => splitLyricLines(lyrics), [lyrics]);
+  const hasLyrics = lyricLines.length > 0;
 
-  // Build start-at options when markers/loop change
   const startAtOptions = useMemo(() => {
     const opts: { value: string; label: string }[] = [
       { value: "0", label: "Beginning (0:00)" },
@@ -173,10 +177,6 @@ export function RecorderModal({
       void meterCtxRef.current.close().catch(() => {});
     }
     meterCtxRef.current = null;
-    if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
-      void audioCtxRef.current.close().catch(() => {});
-    }
-    audioCtxRef.current = null;
     sourceStreamsRef.current.forEach((s) => {
       s.getTracks().forEach((t) => t.stop());
     });
@@ -199,6 +199,7 @@ export function RecorderModal({
     setElapsed(0);
     setLevel(0);
     setError(null);
+    setManualLineOffset(0);
     if (reviewUrl) {
       URL.revokeObjectURL(reviewUrl);
     }
@@ -268,51 +269,9 @@ export function RecorderModal({
 
     let micStream: MediaStream | null = null;
     let camStream: MediaStream | null = null;
-    let tabAudioStream: MediaStream | null = null;
 
     try {
-      // 1) Tab audio (optional). Done first so that if the user cancels the
-      //    share dialog, we haven't already triggered other prompts.
-      const wantsTabAudio =
-        captureBeat && hasYoutube && autoPlayBeat && tabAudioSupported;
-      if (wantsTabAudio) {
-        try {
-          const display = await navigator.mediaDevices.getDisplayMedia({
-            audio: true,
-            video: true,
-          });
-          const aTracks = display.getAudioTracks();
-          // Always stop the screen-video track; we only want audio.
-          display.getVideoTracks().forEach((t) => t.stop());
-          if (aTracks.length === 0) {
-            aTracks.forEach((t) => t.stop());
-            throw new Error(
-              'Tab audio share is missing — make sure "Also share tab audio" is checked when sharing.'
-            );
-          }
-          tabAudioStream = new MediaStream(aTracks);
-          sourceStreamsRef.current.push(tabAudioStream);
-        } catch (err) {
-          // If user cancelled, fall back to mic-only mode silently.
-          const msg = err instanceof Error ? err.message : String(err);
-          if (
-            /Permission denied|cancel|aborted|NotAllowed/i.test(msg) &&
-            !/share tab audio/i.test(msg)
-          ) {
-            // user cancelled the share picker — give a clear inline error
-            setError("Tab-audio share was cancelled. Recording mic only.");
-          } else if (/share tab audio/i.test(msg)) {
-            setError(msg);
-            setState("idle");
-            return;
-          } else {
-            setError(msg);
-          }
-          tabAudioStream = null;
-        }
-      }
-
-      // 2) Mic
+      // Mic — always required.
       micStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -322,10 +281,10 @@ export function RecorderModal({
       });
       sourceStreamsRef.current.push(micStream);
 
-      // 3) Camera (separate getUserMedia call so we don't duplicate audio)
+      // Camera (separate getUserMedia call so we don't double up audio).
       if (withVideo) {
         camStream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 720 }, height: { ideal: 540 } },
+          video: { width: { ideal: 1280 }, height: { ideal: 720 } },
         });
         sourceStreamsRef.current.push(camStream);
         if (previewVideoRef.current) {
@@ -335,38 +294,25 @@ export function RecorderModal({
         }
       }
 
-      // 4) Mix audio: tab audio + mic via AudioContext destination
-      let outputAudioTrack: MediaStreamTrack;
-      if (tabAudioStream) {
-        const Ctx =
-          window.AudioContext ||
-          (window as unknown as { webkitAudioContext: typeof AudioContext })
-            .webkitAudioContext;
-        const ac = new Ctx();
-        audioCtxRef.current = ac;
-        const dst = ac.createMediaStreamDestination();
-        ac.createMediaStreamSource(tabAudioStream).connect(dst);
-        ac.createMediaStreamSource(micStream).connect(dst);
-        outputAudioTrack = dst.stream.getAudioTracks()[0];
-      } else {
-        outputAudioTrack = micStream.getAudioTracks()[0];
-      }
-
-      // 5) Build final stream
-      const finalTracks: MediaStreamTrack[] = [outputAudioTrack];
+      // Build final stream — mic audio + (optional) camera video.
+      const finalTracks: MediaStreamTrack[] = [
+        micStream.getAudioTracks()[0],
+      ];
       if (camStream) {
         finalTracks.push(camStream.getVideoTracks()[0]);
       }
       const finalStream = new MediaStream(finalTracks);
 
-      // 6) Mic-only level meter (so the bar reflects user's voice)
       startMeter(micStream);
 
-      // 7) Pick MIME and start recorder
       const candidates = withVideo ? VIDEO_CANDIDATES : AUDIO_CANDIDATES;
       const mime =
         pickMime(candidates) ?? (withVideo ? "video/webm" : "audio/webm");
-      const recorder = new MediaRecorder(finalStream, { mimeType: mime });
+      const recorder = new MediaRecorder(finalStream, {
+        mimeType: mime,
+        videoBitsPerSecond: VIDEO_BITS_PER_SECOND,
+        audioBitsPerSecond: AUDIO_BITS_PER_SECOND,
+      });
       chunksRef.current = [];
       recorder.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
@@ -388,12 +334,12 @@ export function RecorderModal({
       recorder.start(250);
       startedAtRef.current = Date.now();
       setElapsed(0);
+      setManualLineOffset(0);
       tickRef.current = window.setInterval(() => {
         setElapsed((Date.now() - startedAtRef.current) / 1000);
       }, 200);
       setState("recording");
 
-      // 8) Auto-play YouTube beat (with seek)
       if (autoPlayBeat && hasYoutube) {
         const startAt =
           typeof resolvedStartAt === "number" ? resolvedStartAt : 0;
@@ -409,12 +355,10 @@ export function RecorderModal({
     }
   }, [
     autoPlayBeat,
-    captureBeat,
     hasYoutube,
     resolvedStartAt,
     startAtSel,
     startMeter,
-    tabAudioSupported,
     teardownStreams,
     withVideo,
   ]);
@@ -442,6 +386,7 @@ export function RecorderModal({
     setReviewDuration(0);
     setLabel("");
     setElapsed(0);
+    setManualLineOffset(0);
     setState("idle");
   }, [reviewUrl]);
 
@@ -483,21 +428,54 @@ export function RecorderModal({
   const isReview = state === "review";
   const canStart = state === "idle";
 
+  // Effective teleprompter line index: auto by elapsed time + manual offset.
+  const autoLineIndex = useMemo(() => {
+    if (!isRecording || lyricLines.length === 0) return 0;
+    const idx = Math.floor(elapsed / Math.max(0.5, secondsPerLine));
+    return Math.max(0, Math.min(lyricLines.length - 1, idx));
+  }, [elapsed, isRecording, lyricLines.length, secondsPerLine]);
+
+  const currentLineIndex = useMemo(() => {
+    return Math.max(
+      0,
+      Math.min(lyricLines.length - 1, autoLineIndex + manualLineOffset)
+    );
+  }, [autoLineIndex, manualLineOffset, lyricLines.length]);
+
+  // Manual nudge with arrow keys / space while recording.
+  useEffect(() => {
+    if (!isRecording || lyricLines.length === 0) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement
+      )
+        return;
+      if (e.key === "ArrowDown" || e.key === " ") {
+        e.preventDefault();
+        setManualLineOffset((v) => v + 1);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setManualLineOffset((v) => v - 1);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isRecording, lyricLines.length]);
+
   return (
-    <Modal open={open} onClose={onClose} title="Record a take">
+    <Modal open={open} onClose={onClose} title="Record a take" width="900px">
       <div className="flex flex-col gap-4">
         {!isReview ? (
           <>
             {hasYoutube ? (
               <div className="rounded border border-amber-gold/30 bg-amber-gold/5 px-3 py-2 text-[12px] text-ink-text">
                 <div className="text-amber-gold">
-                  Recording captures the beat + your mic together.
+                  Records what your microphone hears — like Photo Booth.
                 </div>
                 <div className="mt-1 text-ink-mute">
-                  When the share prompt appears, pick{" "}
-                  <span className="text-ink-text">this tab</span> and check{" "}
-                  <span className="text-ink-text">Also share tab audio</span>{" "}
-                  before clicking Share. Works in Chrome &amp; Edge.
+                  The YouTube beat plays through your speakers; the mic picks
+                  up the beat + your vocals together. No share-screen prompt.
                 </div>
               </div>
             ) : null}
@@ -514,36 +492,16 @@ export function RecorderModal({
                 record video
               </label>
               {hasYoutube ? (
-                <>
-                  <label className="flex cursor-pointer items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={autoPlayBeat}
-                      disabled={isRecording || state === "preparing"}
-                      onChange={(e) => setAutoPlayBeat(e.target.checked)}
-                      className="accent-amber-gold"
-                    />
-                    auto-play YouTube beat
-                  </label>
-                  <label
-                    className={`flex items-center gap-2 ${
-                      autoPlayBeat ? "cursor-pointer" : "opacity-50"
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={captureBeat && autoPlayBeat}
-                      disabled={
-                        !autoPlayBeat ||
-                        isRecording ||
-                        state === "preparing"
-                      }
-                      onChange={(e) => setCaptureBeat(e.target.checked)}
-                      className="accent-amber-gold"
-                    />
-                    capture beat in recording
-                  </label>
-                </>
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={autoPlayBeat}
+                    disabled={isRecording || state === "preparing"}
+                    onChange={(e) => setAutoPlayBeat(e.target.checked)}
+                    className="accent-amber-gold"
+                  />
+                  auto-play YouTube beat
+                </label>
               ) : null}
             </div>
 
@@ -592,43 +550,55 @@ export function RecorderModal({
               </div>
             ) : null}
 
-            {withVideo ? (
-              <div className="aspect-video w-full overflow-hidden rounded border border-ink-line bg-black">
-                {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-                <video
-                  ref={previewVideoRef}
-                  className="h-full w-full object-cover"
-                  playsInline
-                  muted
-                />
-              </div>
-            ) : (
-              <div className="rounded border border-ink-line bg-ink/40 px-3 py-6 text-center text-[12px] text-ink-mute">
-                audio-only take
-              </div>
-            )}
+            <div className="flex flex-col gap-3 lg:flex-row">
+              <div className="flex flex-1 flex-col gap-3">
+                {withVideo ? (
+                  <div className="aspect-video w-full overflow-hidden rounded border border-ink-line bg-black">
+                    {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                    <video
+                      ref={previewVideoRef}
+                      className="h-full w-full object-cover"
+                      playsInline
+                      muted
+                    />
+                  </div>
+                ) : (
+                  <div className="rounded border border-ink-line bg-ink/40 px-3 py-6 text-center text-[12px] text-ink-mute">
+                    audio-only take
+                  </div>
+                )}
 
-            <div className="flex items-center gap-3">
-              <div className="flex-1">
-                <div className="h-2 w-full overflow-hidden rounded bg-ink-line">
-                  <div
-                    className={`h-full transition-[width] duration-75 ${
-                      isRecording ? "bg-red-400" : "bg-amber-gold"
-                    }`}
-                    style={{ width: `${Math.round(level * 100)}%` }}
-                  />
-                </div>
-                <div className="mt-1 flex justify-between text-[11px] text-ink-mute">
-                  <span>mic</span>
-                  <span className="font-mono">
-                    {isRecording
-                      ? `\u25CF ${formatDuration(elapsed)}`
-                      : state === "preparing"
-                      ? "preparing\u2026"
-                      : "ready"}
-                  </span>
+                <div>
+                  <div className="h-2 w-full overflow-hidden rounded bg-ink-line">
+                    <div
+                      className={`h-full transition-[width] duration-75 ${
+                        isRecording ? "bg-red-400" : "bg-amber-gold"
+                      }`}
+                      style={{ width: `${Math.round(level * 100)}%` }}
+                    />
+                  </div>
+                  <div className="mt-1 flex justify-between text-[11px] text-ink-mute">
+                    <span>mic</span>
+                    <span className="font-mono">
+                      {isRecording
+                        ? `\u25CF ${formatDuration(elapsed)}`
+                        : state === "preparing"
+                        ? "preparing\u2026"
+                        : "ready"}
+                    </span>
+                  </div>
                 </div>
               </div>
+
+              <Teleprompter
+                lines={lyricLines}
+                hasLyrics={hasLyrics}
+                isRecording={isRecording}
+                currentLineIndex={currentLineIndex}
+                secondsPerLine={secondsPerLine}
+                onChangeSecondsPerLine={setSecondsPerLine}
+                onNudge={(d) => setManualLineOffset((v) => v + d)}
+              />
             </div>
 
             {error ? (
@@ -682,6 +652,126 @@ export function RecorderModal({
         )}
       </div>
     </Modal>
+  );
+}
+
+function Teleprompter({
+  lines,
+  hasLyrics,
+  isRecording,
+  currentLineIndex,
+  secondsPerLine,
+  onChangeSecondsPerLine,
+  onNudge,
+}: {
+  lines: string[];
+  hasLyrics: boolean;
+  isRecording: boolean;
+  currentLineIndex: number;
+  secondsPerLine: number;
+  onChangeSecondsPerLine: (v: number) => void;
+  onNudge: (delta: number) => void;
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+  useEffect(() => {
+    const el = lineRefs.current[currentLineIndex];
+    const c = containerRef.current;
+    if (!el || !c) return;
+    const top = el.offsetTop - c.clientHeight / 2 + el.clientHeight / 2;
+    c.scrollTo({ top, behavior: "smooth" });
+  }, [currentLineIndex]);
+
+  return (
+    <div className="flex w-full flex-col gap-2 lg:w-[44%]">
+      <div className="flex items-center justify-between text-[11px] uppercase tracking-wider text-ink-mute">
+        <span>lyrics</span>
+        {hasLyrics ? (
+          <span className="font-mono normal-case tracking-normal text-ink-mute">
+            line {Math.min(currentLineIndex + 1, lines.length)}/{lines.length}
+          </span>
+        ) : null}
+      </div>
+      <div
+        ref={containerRef}
+        className="font-serif leading-relaxed h-64 overflow-y-auto rounded border border-ink-line bg-ink/30 px-4 py-3 text-ink-text"
+      >
+        {hasLyrics ? (
+          <div className="flex flex-col gap-3">
+            <div className="h-20" aria-hidden />
+            {lines.map((ln, i) => {
+              const isCur = i === currentLineIndex;
+              const dist = Math.abs(i - currentLineIndex);
+              const opacity = isCur ? 1 : Math.max(0.25, 1 - dist * 0.2);
+              return (
+                <div
+                  key={i}
+                  ref={(el) => {
+                    lineRefs.current[i] = el;
+                  }}
+                  className={
+                    isCur
+                      ? "text-xl font-medium text-amber-gold"
+                      : "text-base text-ink-text"
+                  }
+                  style={{ opacity }}
+                >
+                  {ln}
+                </div>
+              );
+            })}
+            <div className="h-20" aria-hidden />
+          </div>
+        ) : (
+          <div className="font-sans text-[12px] text-ink-mute">
+            Write some lyrics in the editor and they&apos;ll show up here as a
+            teleprompter while you record.
+          </div>
+        )}
+      </div>
+      {hasLyrics ? (
+        <div className="flex items-center justify-between gap-2 text-[11px] text-ink-mute">
+          <label className="flex items-center gap-2">
+            <span>pace</span>
+            <input
+              type="range"
+              min={1.2}
+              max={6}
+              step={0.2}
+              value={secondsPerLine}
+              onChange={(e) =>
+                onChangeSecondsPerLine(parseFloat(e.target.value))
+              }
+              className="w-24 accent-amber-gold"
+            />
+            <span className="font-mono">
+              {secondsPerLine.toFixed(1)}s/line
+            </span>
+          </label>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => onNudge(-1)}
+              disabled={!isRecording}
+              className="rounded border border-ink-line px-2 py-0.5 text-[11px] text-ink-mute hover:text-ink-text disabled:opacity-40"
+              title="Previous line (up arrow)"
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              onClick={() => onNudge(1)}
+              disabled={!isRecording}
+              className="rounded border border-ink-line px-2 py-0.5 text-[11px] text-ink-mute hover:text-ink-text disabled:opacity-40"
+              title="Next line (down arrow or space)"
+            >
+              ↓
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -747,7 +837,7 @@ function ReviewView({
         <button
           type="button"
           onClick={onSave}
-          className="rounded border border-amber-gold/50 bg-amber-gold/10 px-4 py-1.5 text-sm text-amber-gold hover:bg-amber-gold/20"
+          className="rounded border border-amber-gold/60 bg-amber-gold/10 px-4 py-1.5 text-sm text-amber-gold hover:bg-amber-gold/20"
         >
           Save take
         </button>
