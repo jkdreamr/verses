@@ -9,7 +9,8 @@ import type { Song, SongVersion, YoutubeSession } from "@/lib/types";
 import { useToast } from "@/components/Toast";
 import { useShortcut } from "@/hooks/useShortcut";
 import { RhymePanel } from "./RhymePanel";
-import { RhymeLens } from "./RhymeLens";
+import { RhymeLens, buildCharHighlights, FAMILY_COLORS, type CharHighlight } from "./RhymeLens";
+import type { RhymeLensResult } from "@/lib/rhymeLens";
 import { Toolbar } from "./Toolbar";
 import { StructurePicker } from "./StructurePicker";
 import { YoutubeBar } from "./YoutubeBar";
@@ -56,10 +57,31 @@ export function Editor({ songId }: { songId: string }) {
   const [youtube, setYoutube] = useState<YoutubeSession | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const highlightRef = useRef<HTMLDivElement>(null);
   const lastVersionAt = useRef<number>(0);
   const lastSavedSnapshot = useRef<{ title: string; content: string } | null>(
     null
   );
+
+  // RhymeLens inline highlight data
+  const [rhymeLensAnalysis, setRhymeLensAnalysis] = useState<RhymeLensResult | null>(null);
+  const charHighlights = useMemo(
+    () => buildCharHighlights(rhymeLensAnalysis),
+    [rhymeLensAnalysis]
+  );
+  const onRhymeLensAnalysis = useCallback((result: RhymeLensResult | null) => {
+    setRhymeLensAnalysis(result);
+  }, []);
+
+  // Sync scroll between textarea and highlight mirror
+  const syncScroll = useCallback(() => {
+    const ta = textareaRef.current;
+    const hl = highlightRef.current;
+    if (ta && hl) {
+      hl.scrollTop = ta.scrollTop;
+      hl.scrollLeft = ta.scrollLeft;
+    }
+  }, []);
 
   // Load song — only depend on songId so we don't refetch when guestMode flips
   const initialGuestParam = searchParams.get("guest") === "1";
@@ -416,7 +438,7 @@ export function Editor({ songId }: { songId: string }) {
       }}
     >
       {/* Header */}
-      <header className="z-10 flex items-center justify-between px-6 pt-5 print-hide">
+      <header className="z-10 flex items-center justify-between px-8 pt-6 print-hide">
         <Link
           href="/app"
           onClick={() => {
@@ -427,25 +449,25 @@ export function Editor({ songId }: { songId: string }) {
               });
             }
           }}
-          className="font-serif text-sm tracking-tight text-ink-mute transition-colors duration-150 hover:text-amber-gold"
+          className="font-serif text-sm tracking-tight text-ink-mute/60 transition-colors duration-200 hover:text-amber-gold"
         >
-          ← Verses
+          Verses
         </Link>
-        <div className="flex items-center gap-3 text-xs text-ink-mute">
+        <div className="flex items-center gap-4 text-xs text-ink-mute/50">
           {savingFlash ? (
-            <span className="text-amber-gold">saving…</span>
+            <span className="font-mono text-[9px] text-amber-gold/70">saving</span>
           ) : savedAt ? (
-            <span className="opacity-50">
+            <span className="font-mono text-[9px] opacity-40">
               saved {timeAgo(savedAt)}
             </span>
           ) : null}
           {guestMode && configured ? (
-            <Link href="/login" className="underline hover:text-ink-text">
-              guest — sign in to sync
+            <Link href="/login" className="font-mono text-[9px] text-ink-mute/40 transition-colors hover:text-ink-text/60">
+              guest
             </Link>
           ) : null}
           {onSignedOut ? (
-            <span className="opacity-50">guest mode</span>
+            <span className="font-mono text-[9px] opacity-30">guest</span>
           ) : null}
           <ThemeToggle />
         </div>
@@ -459,24 +481,46 @@ export function Editor({ songId }: { songId: string }) {
           if (song) void persist(song, { force: true });
         }}
         placeholder="untitled"
-        className="mx-auto mt-6 w-[min(720px,calc(100%-3rem))] bg-transparent text-center font-serif text-2xl tracking-tight text-ink-mute placeholder:text-ink-mute/50 focus:text-ink-text print:text-ink"
+        className="mx-auto mt-8 w-[min(720px,calc(100%-3rem))] bg-transparent text-center font-serif text-2xl tracking-tight text-ink-mute/70 placeholder:text-ink-mute/25 focus:text-ink-text transition-colors duration-200 print:text-ink"
       />
 
       {/* Canvas */}
       <div className="mx-auto mt-4 flex w-[min(720px,calc(100%-3rem))] flex-1 flex-col">
-        <textarea
-          ref={textareaRef}
-          value={song.content}
-          onChange={(e) => setContent(e.target.value)}
-          onSelect={onSelectionChange}
-          spellCheck
-          autoFocus
-          placeholder="start writing…"
-          className={`w-full flex-1 resize-none bg-transparent py-4 leading-[1.85] tracking-wide outline-none placeholder:text-ink-mute/40 ${
-            serif ? "serif text-[18px]" : "font-mono text-[15px]"
-          }`}
-          style={{ minHeight: "60vh" }}
-        />
+        {/* Layered editor: highlight mirror behind transparent textarea */}
+        <div className="relative flex-1" style={{ minHeight: "60vh" }}>
+          {/* Highlight mirror layer */}
+          <div
+            ref={highlightRef}
+            aria-hidden
+            className={`pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words py-4 leading-[1.85] tracking-wide ${
+              serif ? "serif text-[18px]" : "font-mono text-[15px]"
+            }`}
+            style={{ color: "transparent", wordBreak: "break-word" }}
+          >
+            {charHighlights.size > 0
+              ? renderHighlightedText(song.content, charHighlights)
+              : song.content + "\n"}
+          </div>
+          {/* Actual textarea */}
+          <textarea
+            ref={textareaRef}
+            value={song.content}
+            onChange={(e) => setContent(e.target.value)}
+            onSelect={onSelectionChange}
+            onScroll={syncScroll}
+            spellCheck
+            autoFocus
+            placeholder="start writing…"
+            className={`relative z-[1] w-full resize-none bg-transparent py-4 leading-[1.85] tracking-wide outline-none placeholder:text-ink-mute/40 ${
+              serif ? "serif text-[18px]" : "font-mono text-[15px]"
+            }`}
+            style={{
+              minHeight: "60vh",
+              height: "100%",
+              caretColor: "var(--ink-text, #e5e5e5)",
+            }}
+          />
+        </div>
 
         <SelectionTooltip
           textareaRef={textareaRef}
@@ -484,8 +528,8 @@ export function Editor({ songId }: { songId: string }) {
         />
 
         {/* Counts */}
-        <div className="fade-idle pointer-events-none fixed bottom-24 right-4 z-10 select-none rounded border border-ink-line bg-ink-surface/70 px-2 py-1 font-mono text-[11px] text-ink-mute backdrop-blur print:hidden">
-          {stats.lines} lines · {stats.words} words
+        <div className="fade-idle pointer-events-none fixed bottom-24 right-4 z-10 select-none px-2 py-1 font-mono text-[9px] tracking-wider text-ink-mute/30 print:hidden">
+          {stats.lines}L · {stats.words}W
         </div>
       </div>
 
@@ -605,6 +649,7 @@ export function Editor({ songId }: { songId: string }) {
         lyrics={song.content}
         open={rhymeLensOpen}
         onToggle={() => setRhymeLensOpen((v) => !v)}
+        onAnalysis={onRhymeLensAnalysis}
       />
     </main>
   );
@@ -639,4 +684,62 @@ function cryptoId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto)
     return crypto.randomUUID();
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+// ---------------------------------------------------------------------------
+// Render highlighted text as React elements for the mirror layer
+// Groups consecutive same-family chars into <mark> spans for efficiency
+// ---------------------------------------------------------------------------
+
+import { createElement, Fragment } from "react";
+
+function renderHighlightedText(
+  text: string,
+  highlights: Map<number, CharHighlight>
+): React.ReactNode {
+  if (!text) return "\n";
+
+  const nodes: React.ReactNode[] = [];
+  let i = 0;
+
+  while (i < text.length) {
+    const h = highlights.get(i);
+
+    if (!h) {
+      // Gather consecutive unhighlighted chars
+      let j = i + 1;
+      while (j < text.length && !highlights.has(j)) j++;
+      nodes.push(text.slice(i, j));
+      i = j;
+    } else {
+      // Gather consecutive chars with same familyId
+      const familyId = h.familyId;
+      let j = i + 1;
+      while (j < text.length) {
+        const hj = highlights.get(j);
+        if (!hj || hj.familyId !== familyId) break;
+        j++;
+      }
+      const color = FAMILY_COLORS[h.colorIndex % FAMILY_COLORS.length];
+      nodes.push(
+        createElement(
+          "mark",
+          {
+            key: `${i}-${familyId}`,
+            style: {
+              backgroundColor: color,
+              color: "transparent",
+              borderRadius: "2px",
+            },
+          },
+          text.slice(i, j)
+        )
+      );
+      i = j;
+    }
+  }
+
+  // Always end with a newline so the mirror sizing matches the textarea
+  nodes.push("\n");
+  return createElement(Fragment, null, ...nodes);
 }

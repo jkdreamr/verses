@@ -646,21 +646,15 @@ function nextFamilyId(): string {
 
 const COLOR_COUNT = 16;
 
-function stableColorIndex(label: string, existingIndices: Set<number>): number {
-  // Hash the label to a color
-  let hash = 0;
-  for (let i = 0; i < label.length; i++) {
-    hash = (hash * 31 + label.charCodeAt(i)) & 0xffffffff;
+function stableColorIndex(_label: string, existingIndices: Set<number>): number {
+  // Sequential assignment: pick the first unused color index
+  // This guarantees maximum color diversity across families
+  for (let idx = 0; idx < COLOR_COUNT; idx++) {
+    if (!existingIndices.has(idx)) return idx;
   }
-  const base = Math.abs(hash) % COLOR_COUNT;
-  // Avoid color collisions with nearby families
-  let idx = base;
-  let tries = 0;
-  while (existingIndices.has(idx) && tries < COLOR_COUNT) {
-    idx = (idx + 3) % COLOR_COUNT; // step by 3 to spread nicely
-    tries++;
-  }
-  return idx;
+  // All 16 used — wrap around, pick least-recently-used
+  const offset = existingIndices.size % COLOR_COUNT;
+  return offset;
 }
 
 // ---------------------------------------------------------------------------

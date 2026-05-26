@@ -1199,26 +1199,29 @@ export function PerformModal({
   const currentPreset = DRUM_PRESETS.find((p) => p.name === drum.presetName) ?? DRUM_PRESETS[0];
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-ink/95 backdrop-blur-md print:hidden">
+    <div className="fixed inset-0 z-50 flex flex-col bg-ink/98 backdrop-blur-lg print:hidden">
       {/* ── Header ── */}
-      <div className="flex items-center justify-between border-b border-ink-line px-5 py-3">
-        <div className="flex items-center gap-3">
-          <span className="font-mono text-xs uppercase tracking-widest text-amber-gold">
-            VERSES / PERFORM
+      <div className="flex items-center justify-between border-b border-ink-line/40 px-6 py-3">
+        <div className="flex items-center gap-4">
+          <span className="font-serif text-sm tracking-tight text-ink-text/80">
+            Perform
+          </span>
+          <span className="font-mono text-[8px] uppercase tracking-[0.3em] text-amber-gold/60">
+            gesture control
           </span>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
           {recording && (
-            <span className="flex items-center gap-1.5 font-mono text-xs text-red-400">
-              <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-red-500" />
+            <span className="flex items-center gap-1.5 font-mono text-[10px] text-red-400/80">
+              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />
               REC {fmtTime(recElapsed)}
             </span>
           )}
           <button
             onClick={onClose}
-            className="border border-ink-line px-3 py-1 font-mono text-xs uppercase tracking-wider text-ink-mute transition-colors hover:border-ink-text hover:text-ink-text"
+            className="px-3 py-1 font-mono text-[9px] uppercase tracking-[0.2em] text-ink-mute/50 transition-colors hover:text-ink-text"
           >
-            × CLOSE
+            Close
           </button>
         </div>
       </div>
@@ -1227,9 +1230,9 @@ export function PerformModal({
       <div className="flex min-h-0 flex-1 overflow-hidden">
 
         {/* ── Left: Camera + guide ── */}
-        <div className="flex w-[400px] flex-shrink-0 flex-col border-r border-ink-line">
-          <div className="border-b border-ink-line px-3 py-2">
-            <span className="font-mono text-[10px] uppercase tracking-widest text-ink-mute">Camera Feed</span>
+        <div className="flex w-[400px] flex-shrink-0 flex-col border-r border-ink-line/30">
+          <div className="border-b border-ink-line/30 px-4 py-2">
+            <span className="font-mono text-[8px] uppercase tracking-[0.3em] text-ink-mute/50">Camera Feed</span>
           </div>
           <div className="relative flex-1 overflow-hidden bg-black">
             <video
@@ -1312,8 +1315,8 @@ export function PerformModal({
 
         {/* ── Center: Performance status ── */}
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="border-b border-ink-line px-4 py-2">
-            <span className="font-mono text-[10px] uppercase tracking-widest text-ink-mute">Performance</span>
+          <div className="border-b border-ink-line/30 px-5 py-2">
+            <span className="font-mono text-[8px] uppercase tracking-[0.3em] text-ink-mute/50">Performance</span>
           </div>
           <div className="scrollbar-thin flex flex-1 flex-col gap-4 overflow-y-auto p-5">
 
@@ -1505,20 +1508,20 @@ export function PerformModal({
         </div>
 
         {/* ── Right: Controls ── */}
-        <div className="w-72 flex-shrink-0 border-l border-ink-line">
-          <div className="border-b border-ink-line">
+        <div className="w-72 flex-shrink-0 border-l border-ink-line/30">
+          <div className="border-b border-ink-line/30">
             <div className="flex">
               {(['sound', 'chords', 'guide'] as const).map(tab => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
-                  className={`flex-1 px-3 py-2 font-mono text-xs uppercase tracking-wider transition-colors ${
+                  className={`flex-1 px-3 py-2.5 font-mono text-[9px] uppercase tracking-[0.2em] transition-colors ${
                     activeTab === tab
-                      ? 'border-b-2 border-amber-gold text-amber-gold'
-                      : 'text-ink-mute hover:text-ink-text'
+                      ? 'border-b border-amber-gold/60 text-amber-gold/90'
+                      : 'text-ink-mute/40 hover:text-ink-text/70'
                   }`}
                 >
-                  {tab.toUpperCase()}
+                  {tab}
                 </button>
               ))}
             </div>
@@ -1802,7 +1805,7 @@ export function PerformModal({
       </div>
 
       {/* ── Transport strip ── */}
-      <div className="flex items-center justify-between border-t border-ink-line px-5 py-3">
+      <div className="flex items-center justify-between border-t border-ink-line/30 px-6 py-3">
         <div className="flex items-center gap-2">
           <button
             onClick={camActive ? stopCamera : startCamera}

@@ -3,24 +3,30 @@
 @tailwind utilities;
 
 :root {
-  /* dark theme (default) — RGB triples so Tailwind alpha modifiers work */
-  --bg: 13 13 13;
-  --surface: 26 26 26;
-  --line: 38 38 38;
-  --text: 232 232 232;
-  --mute: 107 107 107;
+  /* dark theme (default) — near-black, editorial */
+  --bg: 10 10 10;
+  --surface: 20 20 20;
+  --line: 32 32 32;
+  --text: 230 230 228;
+  --mute: 100 100 100;
   --accent: 201 168 76;
+  --ink-text: 230 230 228;
   color-scheme: dark;
 }
 
 :root.light {
-  --bg: 250 250 247;
+  --bg: 252 251 248;
   --surface: 255 255 255;
-  --line: 229 226 217;
-  --text: 26 26 26;
-  --mute: 117 117 117;
-  --accent: 176 138 44;
+  --line: 232 228 218;
+  --text: 22 22 22;
+  --mute: 110 110 110;
+  --accent: 172 134 40;
+  --ink-text: 22 22 22;
   color-scheme: light;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 html,
