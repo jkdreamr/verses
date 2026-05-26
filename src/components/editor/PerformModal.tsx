@@ -378,7 +378,11 @@ function useDrumEngine(destNode: AudioNode | null) {
   const [currentBpm, setCurrentBpmState] = useState(DRUM_PRESETS[0].bpm);
 
   const ensureCtx = useCallback(() => {
-    if (ctxRef.current) return ctxRef.current;
+    if (ctxRef.current) {
+      // Resume if suspended (browser requires user gesture)
+      if (ctxRef.current.state === "suspended") ctxRef.current.resume();
+      return ctxRef.current;
+    }
     const ctx = new AudioContext();
     ctxRef.current = ctx;
 
@@ -595,7 +599,12 @@ function useDrumEngine(destNode: AudioNode | null) {
   }, []);
 
   const getMasterGain = useCallback(() => masterGainRef.current, []);
-  const getCtx = useCallback(() => ctxRef.current, []);
+  // getCtx ensures the AudioContext exists — creates it if needed.
+  // This allows chord synth to share the same context before drums start.
+  const getCtx = useCallback(() => {
+    if (!ctxRef.current) ensureCtx();
+    return ctxRef.current;
+  }, [ensureCtx]);
 
   return {
     playing,
@@ -618,28 +627,71 @@ function useDrumEngine(destNode: AudioNode | null) {
 }
 
 // ─── Chord Synth Hook ─────────────────────────────────────────────────────────
+// Uses the SAME AudioContext as the drum engine to ensure chords play while drums run.
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function useChordSynth(destNode: AudioNode | null, _getCtx?: () => AudioContext | null) {
-  const ctxRef = useRef<AudioContext | null>(null);
+function useChordSynth(destNode: AudioNode | null, getSharedCtx: () => AudioContext | null) {
   const activeNotesRef = useRef<number[]>([]);
   const currentChordRef = useRef<string | null>(null);
+  const chordGainRef = useRef<GainNode | null>(null);
+  const activeVoicesRef = useRef<{ osc: OscillatorNode; env: GainNode }[]>([]);
 
   const [activeNotes, setActiveNotes] = useState<number[]>([]);
 
-  const ensureCtx = useCallback(() => {
-    if (ctxRef.current) return ctxRef.current;
+  const ensureCtx = useCallback((): AudioContext => {
+    // Use the shared AudioContext from the drum engine
+    const shared = getSharedCtx();
+    if (shared) {
+      // Resume if suspended (browser policy)
+      if (shared.state === "suspended") shared.resume();
+      return shared;
+    }
+    // Fallback: create standalone context (should not happen in normal flow)
     const ctx = new AudioContext();
-    ctxRef.current = ctx;
     return ctx;
-  }, []);
+  }, [getSharedCtx]);
+
+  const ensureChordGain = useCallback((ctx: AudioContext): GainNode => {
+    if (chordGainRef.current) return chordGainRef.current;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.7;
+    // Connect chord gain → destination (speakers)
+    gain.connect(ctx.destination);
+    // Also connect to recording destination if available
+    if (destNode) {
+      try { gain.connect(destNode); } catch { /* already connected or invalid */ }
+    }
+    chordGainRef.current = gain;
+    return gain;
+  }, [destNode]);
+
+  const releaseChord = useCallback(() => {
+    // Fade out and stop all active voices
+    const voices = activeVoicesRef.current;
+    if (voices.length > 0) {
+      const ctx = getSharedCtx();
+      const now = ctx?.currentTime ?? 0;
+      for (const v of voices) {
+        try {
+          v.env.gain.cancelScheduledValues(now);
+          v.env.gain.setValueAtTime(v.env.gain.value, now);
+          v.env.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+          v.osc.stop(now + 0.1);
+        } catch { /* already stopped */ }
+      }
+      activeVoicesRef.current = [];
+    }
+    activeNotesRef.current = [];
+    setActiveNotes([]);
+    currentChordRef.current = null;
+  }, [getSharedCtx]);
 
   const playChord = useCallback((chord: { root: string; quality: ChordQuality; octave: number; inversion: "root" | "first" | "second" }) => {
     const ctx = ensureCtx();
+    const chordGain = ensureChordGain(ctx);
     const { root, quality, octave, inversion } = chord;
     const chordName = chordLabel(root, quality);
 
-    // Release previous chord
+    // Release previous chord cleanly
     releaseChord();
 
     const freqs = chordFrequencies(root, octave, quality, inversion);
@@ -647,8 +699,12 @@ function useChordSynth(destNode: AudioNode | null, _getCtx?: () => AudioContext 
     setActiveNotes(activeNotesRef.current);
     currentChordRef.current = chordName;
 
-    const preset = INSTRUMENT_PRESETS[0]; // Default to Warm Keys
+    const preset = INSTRUMENT_PRESETS[0]; // Warm Keys
     const reverb = createReverb(ctx, preset.reverbWet);
+    // Route reverb output → chordGain (which goes to speakers + recording)
+    reverb.output.connect(chordGain);
+
+    const newVoices: { osc: OscillatorNode; env: GainNode }[] = [];
 
     freqs.forEach((freq, i) => {
       const osc = ctx.createOscillator();
@@ -661,29 +717,18 @@ function useChordSynth(destNode: AudioNode | null, _getCtx?: () => AudioContext 
 
       const env = ctx.createGain();
       env.gain.setValueAtTime(0, ctx.currentTime);
-      env.gain.linearRampToValueAtTime(0.3, ctx.currentTime + preset.attackTime);
+      env.gain.linearRampToValueAtTime(0.28, ctx.currentTime + preset.attackTime);
       env.connect(reverb.input);
 
       osc.connect(env);
       osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + preset.attackTime + preset.releaseTime + 1);
-
-      setTimeout(() => {
-        env.gain.cancelScheduledValues(ctx.currentTime);
-        env.gain.setValueAtTime(0.3, ctx.currentTime);
-        env.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + preset.releaseTime);
-      }, preset.attackTime * 1000);
+      // Don't auto-stop; we control release explicitly
+      newVoices.push({ osc, env });
     });
 
-    reverb.output.connect(destNode || ctx.destination);
+    activeVoicesRef.current = newVoices;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ensureCtx, destNode]);
-
-  const releaseChord = useCallback(() => {
-    activeNotesRef.current = [];
-    setActiveNotes([]);
-    currentChordRef.current = null;
-  }, []);
+  }, [ensureCtx, ensureChordGain, releaseChord]);
 
   return {
     activeNotes,
@@ -709,9 +754,9 @@ function PianoKeyboard({ activeNotes }: { activeNotes: number[] }) {
   };
 
   return (
-    <div className="relative h-16 w-full overflow-hidden rounded-sm">
-      {/* White keys */}
-      <div className="absolute inset-0 flex gap-px">
+    <div className="relative h-16 w-full overflow-hidden rounded-sm border border-ink-line/20">
+      {/* White keys — clearly white/ivory */}
+      <div className="absolute inset-0 flex gap-px bg-ink-line/30">
         {whiteKeys.map((note) => {
           const active = isWhiteActive(note);
           return (
@@ -719,29 +764,35 @@ function PianoKeyboard({ activeNotes }: { activeNotes: number[] }) {
               key={note}
               className={`flex flex-1 flex-col items-center justify-end pb-1 transition-colors duration-75 ${
                 active
-                  ? "bg-amber-gold/30 shadow-[inset_0_-2px_0_rgba(201,168,76,0.6)]"
-                  : "bg-ink-surface/80"
+                  ? "bg-amber-400/40 shadow-[inset_0_-3px_0_rgba(251,191,36,0.7)]"
+                  : "bg-[#f5f3ef]"
               }`}
             >
-              <span className={`font-mono text-[7px] ${active ? "text-amber-gold" : "text-ink-mute/30"}`}>
+              <span className={`font-mono text-[7px] ${active ? "text-amber-700" : "text-neutral-400"}`}>
                 {note}
               </span>
             </div>
           );
         })}
       </div>
-      {/* Black keys */}
+      {/* Black keys — clearly black */}
       <div className="absolute inset-x-0 top-0 flex px-[7%]">
         {blackKeys.map((note, i) => (
           <div key={i} className="relative flex-1">
             {note && (
               <div
-                className={`absolute left-1/2 top-0 h-9 w-[70%] -translate-x-1/2 rounded-b-sm transition-colors duration-75 ${
+                className={`absolute left-1/2 top-0 h-10 w-[65%] -translate-x-1/2 rounded-b-sm shadow-md transition-colors duration-75 ${
                   isBlackActive(note)
-                    ? "bg-amber-gold/50 shadow-[0_2px_4px_rgba(201,168,76,0.3)]"
-                    : "bg-ink/90"
+                    ? "bg-amber-500/80 shadow-[0_2px_6px_rgba(251,191,36,0.4)]"
+                    : "bg-[#1a1a1a]"
                 }`}
-              />
+              >
+                {isBlackActive(note) && (
+                  <span className="absolute bottom-1 left-1/2 -translate-x-1/2 font-mono text-[6px] text-amber-200">
+                    {note}
+                  </span>
+                )}
+              </div>
             )}
           </div>
         ))}
@@ -1212,41 +1263,38 @@ export function PerformModal({
   const currentPreset = DRUM_PRESETS.find((p) => p.name === drum.presetName) ?? DRUM_PRESETS[0];
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-ink/98 backdrop-blur-lg print:hidden">
+    <div className="fixed inset-0 z-50 flex flex-col bg-[#0d0d0f] print:hidden">
       {/* ── Header ── */}
-      <div className="flex items-center justify-between border-b border-ink-line/40 px-6 py-3">
-        <div className="flex items-center gap-4">
-          <span className="font-serif text-sm tracking-tight text-ink-text/80">
+      <div className="flex items-center justify-between px-5 py-2.5">
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-medium tracking-tight text-ink-text/90">
             Perform
           </span>
-          <span className="font-mono text-[8px] uppercase tracking-[0.3em] text-amber-gold/60">
-            gesture control
-          </span>
-        </div>
-        <div className="flex items-center gap-4">
           {recording && (
-            <span className="flex items-center gap-1.5 font-mono text-[10px] text-red-400/80">
+            <span className="flex items-center gap-1.5 rounded bg-red-500/10 px-2 py-0.5 font-mono text-[10px] text-red-400">
               <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />
-              REC {fmtTime(recElapsed)}
+              {fmtTime(recElapsed)}
             </span>
           )}
-          <button
-            onClick={onClose}
-            className="px-3 py-1 font-mono text-[9px] uppercase tracking-[0.2em] text-ink-mute/50 transition-colors hover:text-ink-text"
-          >
-            Close
-          </button>
+          {!recording && camActive && (
+            <span className="rounded bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-400">
+              Live
+            </span>
+          )}
         </div>
+        <button
+          onClick={onClose}
+          className="rounded px-2.5 py-1 text-[11px] text-ink-mute/50 transition-colors hover:bg-ink-surface/40 hover:text-ink-text"
+        >
+          Close
+        </button>
       </div>
 
-      {/* ── Main 3-column layout ── */}
+      {/* ── Main 2-column layout: Camera (hero) + Right panel ── */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
 
-        {/* ── Left: Camera + guide ── */}
-        <div className="flex w-[400px] flex-shrink-0 flex-col border-r border-ink-line/30">
-          <div className="border-b border-ink-line/30 px-4 py-2">
-            <span className="font-mono text-[8px] uppercase tracking-[0.3em] text-ink-mute/50">Camera Feed</span>
-          </div>
+        {/* ── Left/Center: Camera stage (dominates — 60%+) ── */}
+        <div className="flex min-w-0 flex-[3] flex-col">
           <div className="relative flex-1 overflow-hidden bg-black">
             <video
               ref={videoRef}
@@ -1261,277 +1309,157 @@ export function PerformModal({
               style={{ transform: "scaleX(-1)" }}
             />
             {!camActive && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-ink/90">
-                <span className="text-[13px] text-ink-mute/50">Start camera to control rhythm and harmony.</span>
-                <span className="text-[10px] text-ink-mute/30">Keep both hands in frame.</span>
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-ink/92">
+                <span className="text-sm text-ink-mute/60">Start camera to control rhythm and harmony.</span>
+                <span className="text-[11px] text-ink-mute/35">Keep both hands in frame for gesture control.</span>
               </div>
             )}
             {mediaPipeLoading && (
-              <div className="absolute bottom-2 left-2 right-2 border border-amber-gold/40 bg-ink/80 px-2 py-1">
-                <span className="font-mono text-[10px] text-amber-gold">Loading hand tracking…</span>
+              <div className="absolute bottom-3 left-3 right-3 rounded bg-ink/85 px-3 py-2 backdrop-blur">
+                <span className="text-[11px] text-amber-gold">Loading hand tracking…</span>
               </div>
             )}
             {camError && (
-              <div className="absolute bottom-2 left-2 right-2 border border-red-500/40 bg-ink/90 px-2 py-1">
-                <span className="font-mono text-[10px] text-red-400">{camError}</span>
+              <div className="absolute bottom-3 left-3 right-3 rounded bg-ink/90 px-3 py-2 backdrop-blur">
+                <span className="text-[11px] text-red-400">{camError}</span>
               </div>
             )}
             {camActive && (
-              <div className="absolute right-2 top-2 flex gap-1.5">
-                <span className="border border-amber-gold/30 bg-ink/70 px-1.5 py-0.5 font-mono text-[9px] text-amber-gold">
-                  L: {leftHand.present ? (leftHand.gesture ?? "—") : "—"}
+              <div className="absolute left-3 top-3 flex gap-2">
+                <span className="rounded bg-ink/60 px-2 py-1 font-mono text-[10px] text-amber-gold backdrop-blur-sm">
+                  L: {leftHand.present ? (GESTURE_LABELS[leftHand.gesture as GestureId] ?? "—") : "—"}
                 </span>
-                <span className="border border-indigo-400/30 bg-ink/70 px-1.5 py-0.5 font-mono text-[9px] text-indigo-400">
-                  R: {rightHand.present ? (rightHand.gesture ?? "—") : "—"}
+                <span className="rounded bg-ink/60 px-2 py-1 font-mono text-[10px] text-cyan-400 backdrop-blur-sm">
+                  R: {rightHand.present ? (GESTURE_LABELS[rightHand.gesture as GestureId] ?? "—") : "—"}
                 </span>
               </div>
             )}
+            {/* Zone overlay indicator at bottom of camera */}
+            {camActive && (
+              <div className="absolute bottom-3 left-3 right-3 flex gap-1">
+                {[0, 1, 2, 3].map((z) => (
+                  <div
+                    key={z}
+                    className={`flex-1 rounded py-1 text-center font-mono text-[9px] transition-all duration-100 ${
+                      rightZone === z && rightHand.present
+                        ? "bg-cyan-400/25 text-cyan-300 shadow-[0_0_8px_rgba(34,211,238,0.2)]"
+                        : "bg-ink/40 text-ink-mute/30 backdrop-blur-sm"
+                    }`}
+                  >
+                    {z + 1}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-          {/* Gesture guide — compact */}
-          <div className="scrollbar-thin overflow-y-auto border-t border-ink-line/20 px-4 py-3">
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[9px]">
-              <div className="col-span-2 mb-1 text-ink-mute/40">Quick reference</div>
-              <div className="text-amber-gold/60">L: Open 0.4s</div><div className="text-ink-mute/50">Start beat</div>
-              <div className="text-amber-gold/60">L: Fist 0.4s</div><div className="text-ink-mute/50">Stop beat</div>
-              <div className="text-amber-gold/60">L: Pinch</div><div className="text-ink-mute/50">Mute toggle</div>
-              <div className="text-amber-gold/60">L: Height/X</div><div className="text-ink-mute/50">Vol / Filter</div>
-              <div className="text-cyan-400/60">R: Open + zone</div><div className="text-ink-mute/50">Slots 1–4</div>
-              <div className="text-cyan-400/60">R: Two + zone</div><div className="text-ink-mute/50">Slots 5–8</div>
-              <div className="text-cyan-400/60">R: Fist</div><div className="text-ink-mute/50">Silence</div>
-              <div className="text-cyan-400/60">R: Pinch</div><div className="text-ink-mute/50">Sustain</div>
+          {/* Bottom bar: Chord display + gesture quick-ref */}
+          <div className="flex items-center gap-4 border-t border-ink-line/15 bg-ink-surface/30 px-5 py-3">
+            <div className="flex-1">
+              <div className="text-[9px] text-ink-mute/40">Current chord</div>
+              <div className="font-serif text-2xl font-bold tracking-tight text-ink-text/90">
+                {isSilenced ? <span className="text-ink-mute/40">SILENCE</span> :
+                 activeSlot ? chordLabel(
+                   chordSlots.find((s) => s.slot === activeSlot)?.root ?? "C",
+                   chordSlots.find((s) => s.slot === activeSlot)?.quality ?? "major"
+                 ) : <span className="text-ink-mute/30">—</span>}
+              </div>
             </div>
-            <div className="mt-2 text-[8px] text-ink-mute/25">
-              Local processing only. Camera never leaves device.
+            <div className="w-48">
+              <PianoKeyboard activeNotes={chord.activeNotes} />
+            </div>
+            <div className="flex gap-3 text-[8px]">
+              <div><span className="text-amber-gold/50">L Open</span> <span className="text-ink-mute/35">Play</span></div>
+              <div><span className="text-amber-gold/50">L Fist</span> <span className="text-ink-mute/35">Stop</span></div>
+              <div><span className="text-cyan-400/50">R Open</span> <span className="text-ink-mute/35">Chord</span></div>
+              <div><span className="text-cyan-400/50">R Fist</span> <span className="text-ink-mute/35">Mute</span></div>
             </div>
           </div>
         </div>
 
-        {/* ── Center: Performance status ── */}
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div className="scrollbar-thin flex flex-1 flex-col gap-5 overflow-y-auto p-6">
-
-            {/* Beat source selector */}
-            <div className="flex gap-2">
+        {/* ── Right panel: Controls ── */}
+        <div className="flex w-80 flex-shrink-0 flex-col border-l border-ink-line/10 bg-ink-surface/20">
+          {/* Tabs */}
+          <div className="flex border-b border-ink-line/10">
+            {(['sound', 'chords', 'guide'] as const).map(tab => (
               <button
-                onClick={() => {
-                  if (beatSource === 'youtube') {
-                    window.dispatchEvent(new CustomEvent('verses:beat-pause'));
-                  }
-                  setBeatSource('drums');
-                  beatLatchRef.current = 'stopped';
-                }}
-                className={`flex-1 py-2.5 text-[11px] tracking-wide transition-colors ${
-                  beatSource === 'drums'
-                    ? 'bg-amber-gold/10 text-amber-gold border-b-2 border-amber-gold/50'
-                    : 'text-ink-mute/50 hover:text-ink-text/70 border-b-2 border-transparent'
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`flex-1 px-3 py-2.5 text-[10px] uppercase tracking-[0.15em] transition-colors ${
+                  activeTab === tab
+                    ? 'bg-ink-surface/40 text-amber-gold'
+                    : 'text-ink-mute/40 hover:text-ink-text/70'
                 }`}
               >
-                Drum Machine
+                {tab}
               </button>
-              <button
-                onClick={() => {
-                  drum.stop();
-                  setBeatSource('youtube');
-                  beatLatchRef.current = 'stopped';
-                }}
-                disabled={!youtubeSession}
-                className={`flex-1 py-2.5 text-[11px] tracking-wide transition-colors ${
-                  beatSource === 'youtube'
-                    ? 'bg-amber-gold/10 text-amber-gold border-b-2 border-amber-gold/50'
-                    : youtubeSession
-                    ? 'text-ink-mute/50 hover:text-ink-text/70 border-b-2 border-transparent'
-                    : 'text-ink-mute/20 cursor-not-allowed border-b-2 border-transparent'
-                }`}
-              >
-                YouTube Beat
-              </button>
-            </div>
+            ))}
+          </div>
 
-            {beatSource === 'youtube' && !youtubeSession && (
-              <div className="text-center text-[12px] text-ink-mute/40">
-                Load a YouTube beat in the editor first.
-              </div>
-            )}
+          {/* Beat source toggle */}
+          <div className="flex border-b border-ink-line/10">
+            <button
+              onClick={() => {
+                if (beatSource === 'youtube') {
+                  window.dispatchEvent(new CustomEvent('verses:beat-pause'));
+                }
+                setBeatSource('drums');
+                beatLatchRef.current = 'stopped';
+              }}
+              className={`flex-1 py-2 text-[10px] tracking-wide transition-colors ${
+                beatSource === 'drums' ? 'text-amber-gold bg-amber-gold/5' : 'text-ink-mute/40'
+              }`}
+            >
+              Drums
+            </button>
+            <button
+              onClick={() => {
+                drum.stop();
+                setBeatSource('youtube');
+                beatLatchRef.current = 'stopped';
+              }}
+              disabled={!youtubeSession}
+              className={`flex-1 py-2 text-[10px] tracking-wide transition-colors ${
+                beatSource === 'youtube' ? 'text-amber-gold bg-amber-gold/5' :
+                youtubeSession ? 'text-ink-mute/40' : 'text-ink-mute/20 cursor-not-allowed'
+              }`}
+            >
+              YouTube
+            </button>
+          </div>
 
-            {beatSource === 'youtube' && youtubeSession && (
-              <div className="text-center text-[12px] text-ink-mute/60">
-                {youtubeSession.youtube_title}
-              </div>
-            )}
-
-            {/* Beat status — large and dominant */}
-            <div className="py-4 text-center">
-              <div className={`font-mono text-[13px] tracking-wider ${
+          {/* Beat status compact */}
+          <div className="flex items-center justify-between border-b border-ink-line/10 px-4 py-2.5">
+            <div>
+              <div className={`font-mono text-[10px] tracking-wider ${
                 beatLatchRef.current === 'playing' ? 'text-amber-gold' :
-                beatLatchRef.current === 'muted' ? 'text-amber-gold/40' :
-                'text-ink-mute/40'
+                beatLatchRef.current === 'muted' ? 'text-amber-gold/40' : 'text-ink-mute/30'
               }`}>
-                {beatLatchRef.current === 'playing' ? 'LOOPING' :
+                {beatLatchRef.current === 'playing' ? 'PLAYING' :
                  beatLatchRef.current === 'muted' ? 'MUTED' : 'STOPPED'}
               </div>
-              <div className="mt-2 font-serif text-3xl tracking-tight text-ink-text/90">
-                {beatLatchRef.current !== 'stopped' ? (
-                  <>{currentPreset.name} <span className="font-mono text-lg text-ink-mute/50">{drum.currentBpm}</span></>
-                ) : (
-                  <span className="text-ink-mute/20">—</span>
-                )}
+              <div className="text-sm text-ink-text/80">
+                {currentPreset.name}
               </div>
             </div>
-
-            {/* Guidance text */}
-            {beatLatchRef.current === 'stopped' && !activeSlot && (
-              <div className="text-center text-[12px] leading-relaxed text-ink-mute/40">
-                Open left palm to start the loop. Use right hand zones for chords.
-              </div>
-            )}
-
-            {/* Chord display */}
-            <div className="rounded-sm bg-ink-surface/40 p-5">
-              <div className="mb-2 text-[10px] text-ink-mute/40">Current chord</div>
-              <div className="font-serif text-5xl font-bold tracking-tight text-ink-text/90">
-                {isSilenced ? (
-                  <span className="text-ink-mute">SILENCE</span>
-                ) : activeSlot ? (
-                  (() => {
-                    const slot = chordSlots.find(s => s.slot === activeSlot);
-                    return slot ? chordLabel(slot.root, slot.quality) : <span className="text-ink-mute">—</span>;
-                  })()
-                ) : (
-                  <span className="text-ink-mute">—</span>
-                )}
-              </div>
-              <div className="mt-3">
-                <PianoKeyboard activeNotes={chord.activeNotes} />
-              </div>
-            </div>
-
-            {/* Chord slot pads */}
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-3">
-                <span className="w-16 text-[9px] text-ink-mute/40">Open hand</span>
-                <div className="flex flex-1 gap-1">
-                  {[1, 2, 3, 4].map(slot => {
-                    const slotData = chordSlots.find(s => s.slot === slot);
-                    return (
-                      <div
-                        key={slot}
-                        className={`flex-1 rounded-sm py-2 text-center font-mono text-[11px] transition-all duration-75 ${
-                          activeSlot === slot
-                            ? 'bg-amber-gold/20 text-amber-gold shadow-[inset_0_0_0_1px_rgba(201,168,76,0.4)]'
-                            : 'bg-ink-surface/40 text-ink-mute/60'
-                        }`}
-                      >
-                        {slotData ? chordLabel(slotData.root, slotData.quality) : slot}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="w-16 text-[9px] text-ink-mute/40">Two fingers</span>
-                <div className="flex flex-1 gap-1">
-                  {[5, 6, 7, 8].map(slot => {
-                    const slotData = chordSlots.find(s => s.slot === slot);
-                    return (
-                      <div
-                        key={slot}
-                        className={`flex-1 rounded-sm py-2 text-center font-mono text-[11px] transition-all duration-75 ${
-                          activeSlot === slot
-                            ? 'bg-amber-gold/20 text-amber-gold shadow-[inset_0_0_0_1px_rgba(201,168,76,0.4)]'
-                            : 'bg-ink-surface/40 text-ink-mute/60'
-                        }`}
-                      >
-                        {slotData ? chordLabel(slotData.root, slotData.quality) : slot}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            {/* Zone indicator */}
-            <div className="flex gap-1">
-              {[0, 1, 2, 3].map(zone => (
-                <div
-                  key={zone}
-                  className={`flex-1 rounded-sm py-1.5 text-center font-mono text-[9px] transition-all duration-75 ${
-                    rightZone === zone
-                      ? 'bg-cyan-400/15 text-cyan-400 shadow-[inset_0_0_0_1px_rgba(34,211,238,0.3)]'
-                      : 'bg-ink-surface/20 text-ink-mute/30'
-                  }`}
-                >
-                  {zone + 1}
-                </div>
-              ))}
-            </div>
-
-            {/* Hand tracking status */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-sm bg-ink-surface/30 p-3">
-                <div className="text-[9px] text-amber-gold/60">Left — Rhythm</div>
-                <div className="mt-1 font-mono text-base text-ink-text/80">
-                  {leftHand.present && leftHand.gesture ? 
-                    GESTURE_LABELS[leftHand.gesture as GestureId] : "—"}
-                </div>
-                <div className="mt-0.5 font-mono text-[9px] text-ink-mute/40">
-                  {leftHand.present ? "Tracking" : "Not detected"}
-                </div>
-              </div>
-              <div className="rounded-sm bg-ink-surface/30 p-3">
-                <div className="text-[9px] text-cyan-400/60">Right — Harmony</div>
-                <div className="mt-1 font-mono text-base text-ink-text/80">
-                  {rightHand.present && rightHand.gesture ? 
-                    GESTURE_LABELS[rightHand.gesture as GestureId] : "—"}
-                </div>
-                <div className="mt-0.5 font-mono text-[9px] text-ink-mute/40">
-                  {activeSlot ? `Slot ${activeSlot}` : rightHand.present ? "Tracking" : "Not detected"}
-                </div>
-              </div>
-            </div>
-
-            {beatSource === 'youtube' && (
-              <div className="rounded-sm bg-amber-gold/5 px-4 py-2.5 text-[11px] text-amber-gold/60">
-                YouTube audio cannot be captured in recordings due to browser restrictions.
-              </div>
-            )}
-
-          </div>
-        </div>
-
-        {/* ── Right: Controls ── */}
-        <div className="w-72 flex-shrink-0 border-l border-ink-line/30">
-          <div className="border-b border-ink-line/30">
-            <div className="flex">
-              {(['sound', 'chords', 'guide'] as const).map(tab => (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`flex-1 px-3 py-2.5 font-mono text-[9px] uppercase tracking-[0.2em] transition-colors ${
-                    activeTab === tab
-                      ? 'border-b border-amber-gold/60 text-amber-gold/90'
-                      : 'text-ink-mute/40 hover:text-ink-text/70'
-                  }`}
-                >
-                  {tab}
-                </button>
-              ))}
-            </div>
+            <div className="font-mono text-lg text-ink-mute/50">{drum.currentBpm}</div>
           </div>
 
-          <div className="scrollbar-thin h-full overflow-y-auto p-4">
+          {/* Scrollable tab content */}
+          <div className="scrollbar-thin flex-1 overflow-y-auto p-4">
             {activeTab === 'sound' && (
               <div className="space-y-4">
+                {/* Drum presets */}
                 <div>
-                  <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute">Drum Preset</div>
-                  <div className="space-y-1">
+                  <div className="mb-1.5 text-[9px] uppercase tracking-widest text-ink-mute/50">Preset</div>
+                  <div className="flex flex-wrap gap-1">
                     {DRUM_PRESETS.map(preset => (
                       <button
                         key={preset.name}
                         onClick={() => drum.setPreset(preset.name)}
-                        className={`w-full border px-2 py-1 font-mono text-xs text-left transition-colors ${
+                        className={`rounded px-2 py-1 text-[10px] transition-colors ${
                           drum.presetName === preset.name
-                            ? 'border-amber-gold bg-amber-gold/20 text-amber-gold'
-                            : 'border-ink-line text-ink-mute hover:border-ink-text hover:text-ink-text'
+                            ? 'bg-amber-gold/15 text-amber-gold'
+                            : 'bg-ink-surface/40 text-ink-mute/60 hover:text-ink-text'
                         }`}
                       >
                         {preset.name}
@@ -1540,106 +1468,71 @@ export function PerformModal({
                   </div>
                 </div>
 
-                <div>
-                  <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute">Instrument</div>
-                  <div className="space-y-1">
-                    {INSTRUMENT_PRESETS.map(preset => (
-                      <button
-                        key={preset.name}
-                        className="w-full border border-ink-line px-2 py-1 font-mono text-xs text-left text-ink-mute transition-colors hover:border-ink-text hover:text-ink-text"
-                      >
-                        {preset.name}
-                      </button>
-                    ))}
+                {/* Volumes */}
+                <div className="space-y-2">
+                  <div>
+                    <div className="mb-1 flex items-center justify-between text-[9px] text-ink-mute/50">
+                      <span>Master</span><span>{Math.round(drum.masterVolume * 100)}%</span>
+                    </div>
+                    <input type="range" min="0" max="1" step="0.01" value={drum.masterVolume}
+                      onChange={(e) => drum.setMasterVolume(parseFloat(e.target.value))} className="w-full" />
+                  </div>
+                  <div>
+                    <div className="mb-1 flex items-center justify-between text-[9px] text-ink-mute/50">
+                      <span>Chords</span><span>{Math.round(chordVolume * 100)}%</span>
+                    </div>
+                    <input type="range" min="0" max="1" step="0.01" value={chordVolume}
+                      onChange={(e) => setChordVolumeState(parseFloat(e.target.value))} className="w-full" />
                   </div>
                 </div>
 
+                {/* BPM */}
                 <div>
-                  <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute">
-                    Master Volume: {Math.round(drum.masterVolume * 100)}%
+                  <div className="mb-1.5 text-[9px] uppercase tracking-widest text-ink-mute/50">BPM</div>
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={() => drum.setBpm(drum.currentBpm - 5)}
+                      className="rounded bg-ink-surface/40 px-2 py-1 text-xs text-ink-mute hover:text-ink-text">-5</button>
+                    <button onClick={() => drum.setBpm(drum.currentBpm - 1)}
+                      className="rounded bg-ink-surface/40 px-2 py-1 text-xs text-ink-mute hover:text-ink-text">-</button>
+                    <span className="min-w-[2.5rem] text-center font-mono text-base text-ink-text">{drum.currentBpm}</span>
+                    <button onClick={() => drum.setBpm(drum.currentBpm + 1)}
+                      className="rounded bg-ink-surface/40 px-2 py-1 text-xs text-ink-mute hover:text-ink-text">+</button>
+                    <button onClick={() => drum.setBpm(drum.currentBpm + 5)}
+                      className="rounded bg-ink-surface/40 px-2 py-1 text-xs text-ink-mute hover:text-ink-text">+5</button>
+                    <button onClick={() => drum.setBpm(currentPreset.bpm)}
+                      className="ml-auto rounded bg-ink-surface/40 px-2 py-1 text-[9px] uppercase text-ink-mute hover:text-ink-text"
+                      title="Reset to preset default">rst</button>
                   </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value={drum.masterVolume}
-                    onChange={(e) => drum.setMasterVolume(parseFloat(e.target.value))}
-                    className="w-full"
-                  />
                 </div>
 
+                {/* Step Sequencer (read-only visualization) */}
                 <div>
-                  <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute">
-                    Chord Volume: {Math.round(chordVolume * 100)}%
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value={chordVolume}
-                    onChange={(e) => setChordVolumeState(parseFloat(e.target.value))}
-                    className="w-full"
-                  />
-                </div>
-
-                <div>
-                  <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute">Step Sequencer</div>
-                  <div className="space-y-1">
+                  <div className="mb-1.5 text-[9px] uppercase tracking-widest text-ink-mute/50">Pattern</div>
+                  <div className="space-y-0.5">
                     {['kick', 'snare', 'hihat', 'perc'].map(drum => (
-                      <div key={drum} className="flex gap-1">
+                      <div key={drum} className="flex gap-0.5">
                         {currentPreset.pattern[drum as keyof typeof currentPreset.pattern].map((step, i) => (
-                          <div
-                            key={i}
-                            className={`h-4 w-4 border ${
-                              step ? 'bg-amber-gold border-amber-gold' : 'border-ink-line'
-                            }`}
-                          />
+                          <div key={i} className={`h-3 w-3 rounded-sm ${
+                            step ? 'bg-amber-gold/60' : 'bg-ink-surface/30'
+                          }`} />
                         ))}
                       </div>
                     ))}
                   </div>
                 </div>
 
-                {/* BPM controls */}
+                {/* Instrument presets */}
                 <div>
-                  <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute">BPM</div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => drum.setBpm(drum.currentBpm - 5)}
-                      className="border border-ink-line px-2 py-0.5 font-mono text-sm text-ink-mute hover:border-ink-text hover:text-ink-text"
-                    >
-                      -5
-                    </button>
-                    <button
-                      onClick={() => drum.setBpm(drum.currentBpm - 1)}
-                      className="border border-ink-line px-2 py-0.5 font-mono text-sm text-ink-mute hover:border-ink-text hover:text-ink-text"
-                    >
-                      -
-                    </button>
-                    <span className="min-w-[3rem] text-center font-mono text-lg text-ink-text">
-                      {drum.currentBpm}
-                    </span>
-                    <button
-                      onClick={() => drum.setBpm(drum.currentBpm + 1)}
-                      className="border border-ink-line px-2 py-0.5 font-mono text-sm text-ink-mute hover:border-ink-text hover:text-ink-text"
-                    >
-                      +
-                    </button>
-                    <button
-                      onClick={() => drum.setBpm(drum.currentBpm + 5)}
-                      className="border border-ink-line px-2 py-0.5 font-mono text-sm text-ink-mute hover:border-ink-text hover:text-ink-text"
-                    >
-                      +5
-                    </button>
-                    <button
-                      onClick={() => drum.setBpm(currentPreset.bpm)}
-                      className="ml-1 border border-ink-line px-2 py-0.5 font-mono text-[10px] uppercase text-ink-mute hover:border-ink-text hover:text-ink-text"
-                      title="Reset to preset default"
-                    >
-                      rst
-                    </button>
+                  <div className="mb-1.5 text-[9px] uppercase tracking-widest text-ink-mute/50">Instrument</div>
+                  <div className="flex flex-wrap gap-1">
+                    {INSTRUMENT_PRESETS.map(preset => (
+                      <button
+                        key={preset.name}
+                        className="rounded bg-ink-surface/40 px-2 py-1 text-[10px] text-ink-mute/60 hover:text-ink-text"
+                      >
+                        {preset.name}
+                      </button>
+                    ))}
                   </div>
                 </div>
               </div>
@@ -1647,17 +1540,53 @@ export function PerformModal({
 
             {activeTab === 'chords' && (
               <div className="space-y-4">
+                {/* Chord slots (compact pads) */}
                 <div>
-                  <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute">Slot Preset</div>
+                  <div className="mb-1.5 text-[9px] uppercase tracking-widest text-ink-mute/50">Chord Pads</div>
                   <div className="space-y-1">
+                    <div className="flex gap-1">
+                      {[1, 2, 3, 4].map(slot => {
+                        const slotData = chordSlots.find(s => s.slot === slot);
+                        return (
+                          <div key={slot} className={`flex-1 rounded py-2 text-center font-mono text-[10px] transition-all duration-75 ${
+                            activeSlot === slot
+                              ? 'bg-amber-gold/20 text-amber-gold shadow-[0_0_6px_rgba(201,168,76,0.15)]'
+                              : 'bg-ink-surface/40 text-ink-mute/60'
+                          }`}>
+                            {slotData ? chordLabel(slotData.root, slotData.quality) : slot}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="flex gap-1">
+                      {[5, 6, 7, 8].map(slot => {
+                        const slotData = chordSlots.find(s => s.slot === slot);
+                        return (
+                          <div key={slot} className={`flex-1 rounded py-2 text-center font-mono text-[10px] transition-all duration-75 ${
+                            activeSlot === slot
+                              ? 'bg-amber-gold/20 text-amber-gold shadow-[0_0_6px_rgba(201,168,76,0.15)]'
+                              : 'bg-ink-surface/40 text-ink-mute/60'
+                          }`}>
+                            {slotData ? chordLabel(slotData.root, slotData.quality) : slot}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Slot preset */}
+                <div>
+                  <div className="mb-1.5 text-[9px] uppercase tracking-widest text-ink-mute/50">Progression</div>
+                  <div className="flex flex-wrap gap-1">
                     {Object.keys(SLOT_PRESETS).map(preset => (
                       <button
                         key={preset}
                         onClick={() => setChordSlots(SLOT_PRESETS[preset])}
-                        className={`w-full border px-2 py-1 font-mono text-xs text-left transition-colors ${
+                        className={`rounded px-2 py-1 text-[10px] transition-colors ${
                           chordSlots === SLOT_PRESETS[preset]
-                            ? 'border-amber-gold bg-amber-gold/20 text-amber-gold'
-                            : 'border-ink-line text-ink-mute hover:border-ink-text hover:text-ink-text'
+                            ? 'bg-amber-gold/15 text-amber-gold'
+                            : 'bg-ink-surface/40 text-ink-mute/60 hover:text-ink-text'
                         }`}
                       >
                         {preset}
@@ -1666,84 +1595,49 @@ export function PerformModal({
                   </div>
                 </div>
 
+                {/* Slot editor */}
                 <div>
-                  <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute">Slot Editor</div>
-                  <div className="space-y-2">
+                  <div className="mb-1.5 text-[9px] uppercase tracking-widest text-ink-mute/50">Edit Slots</div>
+                  <div className="space-y-1.5">
                     {chordSlots.map(slot => (
-                      <div key={slot.slot} className="border border-ink-line p-2">
-                        <div className="mb-1 font-mono text-xs text-ink-mute">Slot {slot.slot}</div>
-                        <div className="grid grid-cols-2 gap-1">
-                          <select
-                            value={slot.root}
-                            onChange={(e) => {
-                              const newSlots = [...chordSlots];
-                              const idx = newSlots.findIndex(s => s.slot === slot.slot);
-                              if (idx !== -1) {
-                                newSlots[idx] = { ...newSlots[idx], root: e.target.value };
-                                setChordSlots(newSlots);
-                              }
-                            }}
-                            className="border border-ink-line bg-ink px-1 py-0.5 font-mono text-xs text-ink-text"
-                          >
-                            {ROOTS.map(root => (
-                              <option key={root} value={root}>{root}</option>
-                            ))}
+                      <div key={slot.slot} className="rounded bg-ink-surface/30 p-2">
+                        <div className="mb-1 flex items-center justify-between">
+                          <span className="font-mono text-[9px] text-ink-mute/50">Slot {slot.slot}</span>
+                          <button onClick={() => chord.playChord(slot)}
+                            className="text-[9px] text-ink-mute/40 hover:text-amber-gold">Preview</button>
+                        </div>
+                        <div className="grid grid-cols-4 gap-1">
+                          <select value={slot.root} onChange={(e) => {
+                            const newSlots = [...chordSlots];
+                            const idx = newSlots.findIndex(s => s.slot === slot.slot);
+                            if (idx !== -1) { newSlots[idx] = { ...newSlots[idx], root: e.target.value }; setChordSlots(newSlots); }
+                          }} className="rounded border-none bg-ink/60 px-1 py-0.5 font-mono text-[10px] text-ink-text">
+                            {ROOTS.map(root => (<option key={root} value={root}>{root}</option>))}
                           </select>
-                          <select
-                            value={slot.quality}
-                            onChange={(e) => {
-                              const newSlots = [...chordSlots];
-                              const idx = newSlots.findIndex(s => s.slot === slot.slot);
-                              if (idx !== -1) {
-                                newSlots[idx] = { ...newSlots[idx], quality: e.target.value as ChordQuality };
-                                setChordSlots(newSlots);
-                              }
-                            }}
-                            className="border border-ink-line bg-ink px-1 py-0.5 font-mono text-xs text-ink-text"
-                          >
-                            {QUALITIES.map(quality => (
-                              <option key={quality} value={quality}>{quality}</option>
-                            ))}
+                          <select value={slot.quality} onChange={(e) => {
+                            const newSlots = [...chordSlots];
+                            const idx = newSlots.findIndex(s => s.slot === slot.slot);
+                            if (idx !== -1) { newSlots[idx] = { ...newSlots[idx], quality: e.target.value as ChordQuality }; setChordSlots(newSlots); }
+                          }} className="rounded border-none bg-ink/60 px-1 py-0.5 font-mono text-[10px] text-ink-text">
+                            {QUALITIES.map(quality => (<option key={quality} value={quality}>{quality}</option>))}
                           </select>
-                          <select
-                            value={slot.octave}
-                            onChange={(e) => {
-                              const newSlots = [...chordSlots];
-                              const idx = newSlots.findIndex(s => s.slot === slot.slot);
-                              if (idx !== -1) {
-                                newSlots[idx] = { ...newSlots[idx], octave: parseInt(e.target.value) };
-                                setChordSlots(newSlots);
-                              }
-                            }}
-                            className="border border-ink-line bg-ink px-1 py-0.5 font-mono text-xs text-ink-text"
-                          >
-                            {[1, 2, 3, 4, 5].map(oct => (
-                              <option key={oct} value={oct}>Oct {oct}</option>
-                            ))}
+                          <select value={slot.octave} onChange={(e) => {
+                            const newSlots = [...chordSlots];
+                            const idx = newSlots.findIndex(s => s.slot === slot.slot);
+                            if (idx !== -1) { newSlots[idx] = { ...newSlots[idx], octave: parseInt(e.target.value) }; setChordSlots(newSlots); }
+                          }} className="rounded border-none bg-ink/60 px-1 py-0.5 font-mono text-[10px] text-ink-text">
+                            {[1, 2, 3, 4, 5].map(oct => (<option key={oct} value={oct}>O{oct}</option>))}
                           </select>
-                          <select
-                            value={slot.inversion}
-                            onChange={(e) => {
-                              const newSlots = [...chordSlots];
-                              const idx = newSlots.findIndex(s => s.slot === slot.slot);
-                              if (idx !== -1) {
-                                newSlots[idx] = { ...newSlots[idx], inversion: e.target.value as 'root' | 'first' | 'second' };
-                                setChordSlots(newSlots);
-                              }
-                            }}
-                            className="border border-ink-line bg-ink px-1 py-0.5 font-mono text-xs text-ink-text"
-                          >
+                          <select value={slot.inversion} onChange={(e) => {
+                            const newSlots = [...chordSlots];
+                            const idx = newSlots.findIndex(s => s.slot === slot.slot);
+                            if (idx !== -1) { newSlots[idx] = { ...newSlots[idx], inversion: e.target.value as 'root' | 'first' | 'second' }; setChordSlots(newSlots); }
+                          }} className="rounded border-none bg-ink/60 px-1 py-0.5 font-mono text-[10px] text-ink-text">
                             <option value="root">Root</option>
                             <option value="first">1st</option>
                             <option value="second">2nd</option>
                           </select>
                         </div>
-                        <button
-                          onClick={() => chord.playChord(slot)}
-                          className="mt-1 w-full border border-ink-line px-1 py-0.5 font-mono text-xs text-ink-mute transition-colors hover:border-ink-text hover:text-ink-text"
-                        >
-                          Preview
-                        </button>
                       </div>
                     ))}
                   </div>
@@ -1752,120 +1646,89 @@ export function PerformModal({
             )}
 
             {activeTab === 'guide' && (
-              <div className="space-y-4 font-mono text-xs text-ink-mute">
+              <div className="space-y-4 text-[11px] text-ink-mute/70">
                 <div>
-                  <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute">Gesture Reference</div>
-                  <div className="space-y-2">
-                    <div>
-                      <div className="text-amber-gold">LEFT HAND</div>
-                      <div>OPEN: Hold 0.4s to start beat (latches)</div>
-                      <div>FIST: Hold 0.4s to stop beat</div>
-                      <div>PINCH: Toggle mute/unmute</div>
-                      <div>HEIGHT: Control volume</div>
-                      <div>X POSITION: Control filter</div>
-                    </div>
-                    <div>
-                      <div className="text-indigo-400">RIGHT HAND</div>
-                      <div>OPEN + ZONE: Slots 1-4</div>
-                      <div>TWO + ZONE: Slots 5-8</div>
-                      <div>FIST: Silence all chords</div>
-                      <div>PINCH: Toggle sustain</div>
-                      <div>POINT: Same as OPEN (slots 1-4)</div>
-                    </div>
+                  <div className="mb-2 text-[9px] uppercase tracking-widest text-ink-mute/40">Left Hand — Rhythm</div>
+                  <div className="space-y-1">
+                    <div><span className="text-amber-gold/70">Open palm</span> — Start beat loop</div>
+                    <div><span className="text-amber-gold/70">Fist</span> — Stop beat</div>
+                    <div><span className="text-amber-gold/70">Pinch</span> — Mute toggle</div>
+                    <div><span className="text-amber-gold/70">Height</span> — Volume</div>
+                    <div><span className="text-amber-gold/70">X position</span> — Filter</div>
                   </div>
                 </div>
-
                 <div>
-                  <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute">Beat Source</div>
-                  <div>DRUM PRESET: Built-in drum machine</div>
-                  <div>YOUTUBE BEAT: External audio from editor</div>
-                  <div>Note: YouTube audio cannot be recorded</div>
+                  <div className="mb-2 text-[9px] uppercase tracking-widest text-ink-mute/40">Right Hand — Harmony</div>
+                  <div className="space-y-1">
+                    <div><span className="text-cyan-400/70">Open + zone</span> — Slots 1-4</div>
+                    <div><span className="text-cyan-400/70">Two + zone</span> — Slots 5-8</div>
+                    <div><span className="text-cyan-400/70">Fist</span> — Silence chords</div>
+                    <div><span className="text-cyan-400/70">Pinch</span> — Sustain</div>
+                  </div>
                 </div>
-
-                <div>
-                  <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute">Recording</div>
-                  <div>Audio is captured from drum engine</div>
-                  <div>and chord synthesizer only.</div>
-                  <div>YouTube beats are excluded due to</div>
-                  <div>browser security restrictions.</div>
+                <div className="rounded bg-ink-surface/20 p-2 text-[10px] text-ink-mute/40">
+                  Camera processes locally. Never leaves device.
                 </div>
+                {beatSource === 'youtube' && (
+                  <div className="rounded bg-amber-gold/5 p-2 text-[10px] text-amber-gold/50">
+                    YouTube audio cannot be captured in recordings.
+                  </div>
+                )}
               </div>
             )}
           </div>
         </div>
       </div>
 
-      {/* ── Transport strip ── */}
-      <div className="flex items-center justify-between border-t border-ink-line/30 px-6 py-3">
+      {/* ── Transport bar ── */}
+      <div className="flex items-center justify-between border-t border-ink-line/10 bg-ink-surface/20 px-5 py-2.5">
         <div className="flex items-center gap-2">
           <button
             onClick={camActive ? stopCamera : startCamera}
-            className={`border px-3 py-1 font-mono text-xs uppercase tracking-wider transition-colors ${
+            className={`rounded px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider transition-all ${
               camActive
-                ? 'border-red-500 text-red-500 hover:bg-red-500/10'
-                : 'border-amber-gold text-amber-gold hover:bg-amber-gold/10'
+                ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20'
+                : 'bg-amber-gold/10 text-amber-gold hover:bg-amber-gold/20'
             }`}
           >
-            {camActive ? 'STOP CAMERA' : 'START CAMERA'}
+            {camActive ? 'Stop Camera' : 'Start Camera'}
           </button>
 
           {beatSource === 'drums' && (
             <button
               onClick={drum.playing ? drum.stop : drum.play}
-              className={`border px-3 py-1 font-mono text-xs uppercase tracking-wider transition-colors ${
+              className={`rounded px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider transition-all ${
                 drum.playing
-                  ? 'border-red-500 text-red-500 hover:bg-red-500/10'
-                  : 'border-amber-gold text-amber-gold hover:bg-amber-gold/10'
+                  ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20'
+                  : 'bg-amber-gold/10 text-amber-gold hover:bg-amber-gold/20'
               }`}
             >
-              {drum.playing ? 'STOP' : 'PLAY DRUMS'}
+              {drum.playing ? 'Stop' : 'Play'}
             </button>
           )}
-
-          <select
-            value={drum.presetName}
-            onChange={(e) => drum.setPreset(e.target.value)}
-            className="border border-ink-line bg-ink px-2 py-1 font-mono text-xs text-ink-text"
-          >
-            {DRUM_PRESETS.map(preset => (
-              <option key={preset.name} value={preset.name}>{preset.name}</option>
-            ))}
-          </select>
-
-          <select
-            className="border border-ink-line bg-ink px-2 py-1 font-mono text-xs text-ink-text"
-          >
-            {INSTRUMENT_PRESETS.map(preset => (
-              <option key={preset.name} value={preset.name}>{preset.name}</option>
-            ))}
-          </select>
         </div>
 
         <div className="flex items-center gap-2">
           <button
             onClick={recording ? stopRecording : startRecording}
             disabled={!camActive}
-            className={`border px-3 py-1 font-mono text-xs uppercase tracking-wider transition-colors ${
+            className={`rounded px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider transition-all ${
               recording
-                ? 'border-red-500 text-red-500 hover:bg-red-500/10'
+                ? 'bg-red-500/15 text-red-400 hover:bg-red-500/25'
                 : camActive
-                ? 'border-amber-gold text-amber-gold hover:bg-amber-gold/10'
-                : 'border-ink-line/40 text-ink-mute/40 cursor-not-allowed'
+                ? 'bg-amber-gold/10 text-amber-gold hover:bg-amber-gold/20'
+                : 'text-ink-mute/30 cursor-not-allowed'
             }`}
           >
-            {recording ? '■ STOP' : '● RECORD'}
+            {recording ? 'Stop Rec' : 'Record'}
           </button>
 
           <button
             onClick={onClose}
-            className="border border-ink-line px-3 py-1 font-mono text-xs uppercase tracking-wider text-ink-mute transition-colors hover:border-ink-text hover:text-ink-text"
+            className="rounded bg-ink-surface/40 px-3 py-1.5 text-[11px] text-ink-mute transition-colors hover:text-ink-text"
           >
-            SAVE TAKE
+            Done
           </button>
-
-          <div className="border border-ink-line px-3 py-1 font-mono text-xs text-ink-mute">
-            BPM: {drum.currentBpm}
-          </div>
         </div>
       </div>
     </div>

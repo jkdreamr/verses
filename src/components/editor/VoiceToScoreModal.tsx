@@ -40,11 +40,11 @@ function detectPitchYIN(
   const W = buffer.length;
   const tau_max = Math.floor(W / 2);
 
-  // RMS check for silence
+  // RMS check for silence (lowered to catch softer singing)
   let rms = 0;
   for (let i = 0; i < W; i++) rms += buffer[i] * buffer[i];
   rms = Math.sqrt(rms / W);
-  if (rms < 0.015) return null;
+  if (rms < 0.01) return null;
 
   // Step 1: difference function
   const d = new Float32Array(tau_max);
@@ -66,8 +66,8 @@ function detectPitchYIN(
     cmnd[tau] = runningSum > 0 ? (d[tau] * tau) / runningSum : 0;
   }
 
-  // Step 3: find first dip below threshold
-  const threshold = 0.15;
+  // Step 3: find first dip below threshold (relaxed for untrained singers)
+  const threshold = 0.2;
   let tau_estimate = -1;
   for (let tau = 2; tau < tau_max; tau++) {
     if (cmnd[tau] < threshold) {
@@ -87,7 +87,7 @@ function detectPitchYIN(
         tau_estimate = tau;
       }
     }
-    if (min > 0.5) return null; // too noisy
+    if (min > 0.6) return null; // too noisy
   }
 
   // Step 4: parabolic interpolation for sub-sample accuracy
@@ -104,7 +104,7 @@ function detectPitchYIN(
 
   const freq = sampleRate / tau_estimate;
   const cmndAtTau = cmnd[Math.round(Math.max(1, Math.min(tau_max - 1, tau_estimate)))];
-  const confidence = 1 - Math.min(1, cmndAtTau / threshold);
+  const confidence = 1 - Math.min(1, cmndAtTau / 0.2);
 
   // Frequency range: 80–1200 Hz (full vocal range)
   if (freq < 80 || freq > 1200) return null;
@@ -139,18 +139,33 @@ interface RawSample {
 function samplesToNotes(samples: RawSample[]): NoteEvent[] {
   if (samples.length === 0) return [];
 
-  // Step 1: median smoothing over a 5-sample window
+  // Step 0.5: octave-error correction — if a sample jumps exactly ±12 semitones
+  // from its neighbors but the neighbors agree, snap it back
+  for (let i = 1; i < samples.length - 1; i++) {
+    const prev = samples[i - 1].midi;
+    const cur = samples[i].midi;
+    const next = samples[i + 1].midi;
+    if (Math.abs(prev - next) <= 2) {
+      if (Math.abs(cur - prev - 12) <= 1) samples[i] = { ...samples[i], midi: prev };
+      else if (Math.abs(cur - prev + 12) <= 1) samples[i] = { ...samples[i], midi: prev };
+    }
+  }
+
+  // Step 1: median smoothing over a 7-sample window (broader for vocal vibrato)
   const smoothed = samples.map((s, i) => {
-    const window = samples.slice(Math.max(0, i - 2), Math.min(samples.length, i + 3));
-    const midis = window.map((x) => x.midi).sort((a, b) => a - b);
+    const win = samples.slice(Math.max(0, i - 3), Math.min(samples.length, i + 4));
+    const midis = win.map((x) => x.midi).sort((a, b) => a - b);
     return { ...s, midi: midis[Math.floor(midis.length / 2)] };
   });
 
-  // Step 2: group into segments where midi stays within ±1 semitone
+  // Step 2: group into segments where midi stays within ±2 semitones (handles vibrato)
   const segments: RawSample[][] = [];
   let current: RawSample[] = [smoothed[0]];
   for (let i = 1; i < smoothed.length; i++) {
-    if (Math.abs(smoothed[i].midi - current[current.length - 1].midi) <= 1) {
+    // Compare against the segment's median pitch (more stable than last sample)
+    const segMidis = current.map(s => s.midi).sort((a, b) => a - b);
+    const segMedian = segMidis[Math.floor(segMidis.length / 2)];
+    if (Math.abs(smoothed[i].midi - segMedian) <= 2) {
       current.push(smoothed[i]);
     } else {
       segments.push(current);
@@ -160,7 +175,7 @@ function samplesToNotes(samples: RawSample[]): NoteEvent[] {
   segments.push(current);
 
   // Step 3: build note events, filtering short blips
-  const MIN_SAMPLES = 5; // at 20ms intervals = 100ms minimum
+  const MIN_SAMPLES = 4; // at 20ms intervals = 80ms minimum (catches faster passages)
   const notes: NoteEvent[] = [];
 
   for (const seg of segments) {
@@ -182,7 +197,7 @@ function samplesToNotes(samples: RawSample[]): NoteEvent[] {
     const confidence = seg.reduce((s, x) => s + x.confidence, 0) / seg.length;
 
     // Skip very low confidence
-    if (confidence < 0.15) continue;
+    if (confidence < 0.1) continue;
 
     notes.push({
       midi,
@@ -193,12 +208,12 @@ function samplesToNotes(samples: RawSample[]): NoteEvent[] {
     });
   }
 
-  // Step 4: merge adjacent notes with same pitch (vibrato handling)
+  // Step 4: merge adjacent notes with same pitch (vibrato handling — wider gap)
   const merged: NoteEvent[] = [];
   for (const note of notes) {
     const prev = merged[merged.length - 1];
     const gap = prev ? note.startTime - (prev.startTime + prev.duration) : Infinity;
-    if (prev && prev.midi === note.midi && gap < 0.15) {
+    if (prev && Math.abs(prev.midi - note.midi) <= 1 && gap < 0.25) {
       // merge
       prev.duration =
         Math.round((note.startTime + note.duration - prev.startTime) * 100) / 100;
