@@ -115,6 +115,7 @@ export function useDrumEngine(destNode: AudioNode | null) {
       if (ctxRef.current.state === "suspended") ctxRef.current.resume();
       return ctxRef.current;
     }
+    // Use shared bus context when destNode is provided (avoids cross-context issues)
     const sharedCtx = destNode?.context && "currentTime" in destNode.context
       ? (destNode.context as AudioContext)
       : null;
@@ -133,24 +134,17 @@ export function useDrumEngine(destNode: AudioNode | null) {
 
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
-    filter.frequency.value = 4000; // default
+    filter.frequency.value = 4000;
     filterRef.current = filter;
 
-    // DynamicsCompressorNode — glues the mix together
-    const comp = ctx.createDynamicsCompressor();
-    comp.threshold.value = -10;
-    comp.knee.value      = 8;
-    comp.ratio.value     = 4;
-    comp.attack.value    = 0.003;
-    comp.release.value   = 0.1;
-
+    // Route: drumGain → filter → masterGain → destNode (or ctx.destination)
+    // No local compressor — shared bus already has compressor+limiter
     drumGain.connect(filter);
     filter.connect(masterGain);
-    masterGain.connect(comp);
     if (destNode) {
-      comp.connect(destNode);
+      masterGain.connect(destNode);
     } else {
-      comp.connect(ctx.destination);
+      masterGain.connect(ctx.destination);
     }
 
     return ctx;

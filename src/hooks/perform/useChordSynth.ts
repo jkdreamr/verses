@@ -43,80 +43,80 @@ export const INSTRUMENT_PRESETS: InstrumentPreset[] = [
     name: "Warm Keys",
     oscillatorTypes: ["sine", "triangle"],
     detuneSpread: 5,
-    filterFreq: 3000,
-    reverbWet: 0.2,
-    attackTime: 0.04,
+    filterFreq: 1800,
+    reverbWet: 0.18,
+    attackTime: 0.05,
     releaseTime: 0.5,
   },
   {
     name: "Soft Pad",
     oscillatorTypes: ["sine", "sine"],
     detuneSpread: 10,
-    filterFreq: 1500,
-    reverbWet: 0.5,
+    filterFreq: 1200,
+    reverbWet: 0.4,
     attackTime: 0.15,
     releaseTime: 1.0,
   },
   {
     name: "Glass Synth",
-    oscillatorTypes: ["sine", "triangle", "sawtooth"],
+    oscillatorTypes: ["sine", "triangle"],
     detuneSpread: 3,
-    filterFreq: 5000,
-    reverbWet: 0.3,
+    filterFreq: 3000,
+    reverbWet: 0.25,
     attackTime: 0.01,
     releaseTime: 0.4,
   },
   {
     name: "Bass",
-    oscillatorTypes: ["sawtooth", "square"],
+    oscillatorTypes: ["sine", "triangle"],
     detuneSpread: 0,
-    filterFreq: 800,
+    filterFreq: 500,
     reverbWet: 0,
     attackTime: 0.02,
     releaseTime: 0.2,
   },
   {
     name: "Brass-ish",
-    oscillatorTypes: ["sawtooth", "triangle"],
+    oscillatorTypes: ["triangle", "triangle"],
     detuneSpread: 8,
-    filterFreq: 2500,
+    filterFreq: 2000,
     reverbWet: 0.1,
     attackTime: 0.06,
     releaseTime: 0.3,
   },
   {
     name: "Electric Piano",
-    oscillatorTypes: ["sine", "square"],
+    oscillatorTypes: ["sine", "triangle"],
     detuneSpread: 2,
-    filterFreq: 2400,
+    filterFreq: 2000,
     reverbWet: 0.18,
     attackTime: 0.015,
     releaseTime: 0.35,
   },
   {
     name: "Organ",
-    oscillatorTypes: ["sine", "sine", "square"],
+    oscillatorTypes: ["sine", "sine", "triangle"],
     detuneSpread: 0,
-    filterFreq: 4200,
+    filterFreq: 3200,
     reverbWet: 0.12,
     attackTime: 0.006,
     releaseTime: 0.18,
   },
   {
     name: "Pluck",
-    oscillatorTypes: ["triangle", "sawtooth"],
+    oscillatorTypes: ["triangle", "sine"],
     detuneSpread: 3,
-    filterFreq: 3600,
+    filterFreq: 2800,
     reverbWet: 0.12,
     attackTime: 0.004,
     releaseTime: 0.12,
   },
   {
     name: "Strings",
-    oscillatorTypes: ["sawtooth", "triangle"],
+    oscillatorTypes: ["triangle", "triangle"],
     detuneSpread: 12,
-    filterFreq: 1900,
-    reverbWet: 0.42,
+    filterFreq: 1600,
+    reverbWet: 0.35,
     attackTime: 0.12,
     releaseTime: 0.9,
   },
@@ -124,8 +124,8 @@ export const INSTRUMENT_PRESETS: InstrumentPreset[] = [
     name: "Choir Pad",
     oscillatorTypes: ["sine", "triangle"],
     detuneSpread: 14,
-    filterFreq: 1600,
-    reverbWet: 0.55,
+    filterFreq: 1400,
+    reverbWet: 0.45,
     attackTime: 0.2,
     releaseTime: 1.1,
   },
@@ -133,16 +133,16 @@ export const INSTRUMENT_PRESETS: InstrumentPreset[] = [
     name: "Bell",
     oscillatorTypes: ["sine", "triangle"],
     detuneSpread: 20,
-    filterFreq: 6500,
-    reverbWet: 0.45,
+    filterFreq: 4500,
+    reverbWet: 0.35,
     attackTime: 0.006,
     releaseTime: 0.8,
   },
   {
     name: "Analog Lead",
-    oscillatorTypes: ["sawtooth", "square"],
+    oscillatorTypes: ["triangle", "sine"],
     detuneSpread: 6,
-    filterFreq: 3200,
+    filterFreq: 2200,
     reverbWet: 0.08,
     attackTime: 0.02,
     releaseTime: 0.22,
@@ -151,7 +151,7 @@ export const INSTRUMENT_PRESETS: InstrumentPreset[] = [
     name: "Deep Sub",
     oscillatorTypes: ["sine", "triangle"],
     detuneSpread: 0,
-    filterFreq: 500,
+    filterFreq: 400,
     reverbWet: 0,
     attackTime: 0.02,
     releaseTime: 0.24,
@@ -388,17 +388,19 @@ export function useChordSynth(
   }, [destNode, chordVolume]);
 
   const releaseChord = useCallback(() => {
-    // Fade out and stop all active voices
+    // Fade out and stop all active voices smoothly
     const voices = activeVoicesRef.current;
     if (voices.length > 0) {
       const ctx = getSharedCtx ? getSharedCtx() : ctxRef.current;
       const now = ctx?.currentTime ?? 0;
+      const preset = INSTRUMENT_PRESETS[presetIndexRef.current];
+      const releaseTC = Math.max(0.04, (preset?.releaseTime ?? 0.3) * 0.3);
       for (const v of voices) {
         try {
           v.env.gain.cancelScheduledValues(now);
           v.env.gain.setValueAtTime(v.env.gain.value, now);
-          v.env.gain.setTargetAtTime(0.0001, now, 0.04);
-          v.osc.stop(now + 0.16);
+          v.env.gain.setTargetAtTime(0.0001, now, releaseTC);
+          v.osc.stop(now + releaseTC * 5 + 0.1);
         } catch { /* already stopped */ }
       }
       activeVoicesRef.current = [];
@@ -429,10 +431,21 @@ export function useChordSynth(
       currentChordRef.current = chordName;
 
       const preset = INSTRUMENT_PRESETS[presetIndexRef.current];
-      const reverb = createReverb(ctx, preset.reverbWet);
+      const reverb = createReverb(ctx, Math.min(0.35, preset.reverbWet));
+
+      // Lowpass filter to remove harshness — uses preset.filterFreq
+      const filter = ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.value = preset.filterFreq;
+      filter.Q.value = 0.7;
+
+      filter.connect(reverb.input);
       reverb.output.connect(chordGain);
 
       const newVoices: { osc: OscillatorNode; env: GainNode }[] = [];
+
+      // Per-voice gain: soft envelope peak (~0.07-0.09 per voice)
+      const voiceGain = Math.min(0.09, 0.28 / Math.max(1, freqs.length));
 
       freqs.forEach((freq, i) => {
         const osc     = ctx.createOscillator();
@@ -447,12 +460,12 @@ export function useChordSynth(
         const now = ctx.currentTime;
         env.gain.cancelScheduledValues(now);
         env.gain.setValueAtTime(0.0001, now);
-        env.gain.linearRampToValueAtTime(0.18, now + Math.max(0.01, preset.attackTime));
-        env.connect(reverb.input);
+        // Gentle attack with setTargetAtTime for smooth onset (no clicks)
+        env.gain.setTargetAtTime(voiceGain, now, Math.max(0.01, preset.attackTime * 0.7));
+        env.connect(filter);
 
         osc.connect(env);
         osc.start(now);
-        // Don't auto-stop; we control release explicitly via releaseChord()
         newVoices.push({ osc, env });
       });
 

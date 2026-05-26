@@ -14,13 +14,12 @@ import type { Take, YoutubeMarker } from "@/lib/types";
 import { DRUM_PRESETS, useDrumEngine } from "@/hooks/perform/useDrumEngine";
 import { usePerformAudioBus } from "@/hooks/perform/usePerformAudioBus";
 import {
-  NOTE_NAMES,
   SLOT_PRESETS,
   chordLabel,
-  createReverb,
   useChordSynth,
 } from "@/hooks/perform/useChordSynth";
 import type { ChordSlot } from "@/hooks/perform/useChordSynth";
+import { useLiveTrumpet, TRUMPET_PRESETS } from "@/hooks/perform/useLiveTrumpet";
 import { useIsMobile } from "@/hooks/useIsMobile";
 
 // ─── Recording state ──────────────────────────────────────────────────────────
@@ -111,263 +110,11 @@ const LATCH_HOLD_MS = 400;
 const LATCH_COOLDOWN_MS = 800;
 
 
-// ─── Local music helpers (used by inline trumpet synth) ──────────────────────
 
-function freqToNoteName(freq: number): string {
-  if (freq <= 0) return "--";
-  const midi = Math.round(69 + 12 * Math.log2(freq / 440));
-  const name = NOTE_NAMES[((midi % 12) + 12) % 12];
-  const oct = Math.floor(midi / 12) - 1;
-  return `${name}${oct}`;
-}
 
-// ─── Trumpet presets ──────────────────────────────────────────────────────────
 
-type TrumpetPreset = {
-  name: string;
-  brightness: number;
-  vibrato: number;
-  gain: number;
-};
 
-const TRUMPET_PRESETS: TrumpetPreset[] = [
-  { name: "Trumpet Sketch",   brightness: 0.6, vibrato: 0.25, gain: 0.8 },
-  { name: "Muted Trumpet",    brightness: 0.2, vibrato: 0.15, gain: 0.6 },
-  { name: "Brass Section",    brightness: 0.8, vibrato: 0.2,  gain: 0.9 },
-  { name: "Soft Flugelhorn",  brightness: 0.3, vibrato: 0.35, gain: 0.7 },
-  { name: "Synth Brass",      brightness: 1.0, vibrato: 0.0,  gain: 0.85 },
-  { name: "Miles Lead",       brightness: 0.45, vibrato: 0.2, gain: 0.75 },
-];
 
-// ─── Inline trumpet synth hook ────────────────────────────────────────────────
-
-type TrumpetSynthState = {
-  active: boolean;
-  noteName: string;
-  confidence: number;
-  inputLevel: number;
-};
-
-function useTrumpetSynth(
-  micStream: MediaStream | null,
-  destNode: AudioNode | null,
-  brightness: number,
-  vibrato: number,
-  outputGain: number,
-  rawVoiceInTake: boolean,
-  monitorRawVoice: boolean,
-  enabled: boolean
-): TrumpetSynthState {
-  const ctxRef = useRef<AudioContext | null>(null);
-  const oscARef = useRef<OscillatorNode | null>(null);
-  const oscBRef = useRef<OscillatorNode | null>(null);
-  const oscCRef = useRef<OscillatorNode | null>(null);
-  const masterGainRef = useRef<GainNode | null>(null);
-  const bpFilterRef = useRef<BiquadFilterNode | null>(null);
-  const vibratoOscRef = useRef<OscillatorNode | null>(null);
-  const vibratoGainRef = useRef<GainNode | null>(null);
-  const rafIdRef = useRef<number | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const silenceTimerRef = useRef<number>(0);
-
-  const [synthState, setSynthState] = useState<TrumpetSynthState>({
-    active: false,
-    noteName: "--",
-    confidence: 0,
-    inputLevel: 0,
-  });
-
-  const detectPitch = useCallback((buf: Float32Array, sampleRate: number): { freq: number; confidence: number } => {
-    // YIN-inspired autocorrelation
-    const SIZE = buf.length;
-    const HALF = Math.floor(SIZE / 2);
-    let bestOffset = -1;
-    let bestCorr = -1;
-
-    for (let offset = 20; offset < HALF; offset++) {
-      let corr = 0;
-      for (let i = 0; i < HALF; i++) {
-        corr += buf[i] * buf[i + offset];
-      }
-      if (corr > bestCorr) {
-        bestCorr = corr;
-        bestOffset = offset;
-      }
-    }
-
-    if (bestOffset === -1 || bestCorr < 0.01) return { freq: 0, confidence: 0 };
-    const freq = sampleRate / bestOffset;
-    if (freq < 80 || freq > 1200) return { freq: 0, confidence: 0 };
-    const confidence = Math.min(1, bestCorr * 2);
-    return { freq, confidence };
-  }, []);
-
-  useEffect(() => {
-    if (!enabled || !micStream) {
-      // Teardown
-      if (rafIdRef.current !== null) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null; }
-      if (oscARef.current) { try { oscARef.current.stop(); } catch {} oscARef.current = null; }
-      if (oscBRef.current) { try { oscBRef.current.stop(); } catch {} oscBRef.current = null; }
-      if (oscCRef.current) { try { oscCRef.current.stop(); } catch {} oscCRef.current = null; }
-      if (vibratoOscRef.current) { try { vibratoOscRef.current.stop(); } catch {} vibratoOscRef.current = null; }
-      if (ctxRef.current && ctxRef.current.state !== "closed") { void ctxRef.current.close().catch(() => {}); ctxRef.current = null; }
-      setSynthState({ active: false, noteName: "--", confidence: 0, inputLevel: 0 });
-      return;
-    }
-
-    let ctx: AudioContext;
-    try {
-      const Ctx =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      ctx = new Ctx();
-      ctxRef.current = ctx;
-    } catch { return; }
-
-    // Mic analysis chain
-    const micSrc = ctx.createMediaStreamSource(micStream);
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 2048;
-    analyser.smoothingTimeConstant = 0.5;
-    analyserRef.current = analyser;
-
-    // Monitor raw voice (low volume to speakers only)
-    if (monitorRawVoice) {
-      const monGain = ctx.createGain();
-      monGain.gain.value = 0.08;
-      micSrc.connect(monGain);
-      monGain.connect(ctx.destination);
-    }
-
-    // Raw voice to recording dest
-    if (rawVoiceInTake && destNode) {
-      const rawGain = ctx.createGain();
-      rawGain.gain.value = 0.5;
-      micSrc.connect(rawGain);
-      rawGain.connect(destNode as AudioNode);
-    }
-
-    micSrc.connect(analyser);
-
-    // Synth chain
-    const masterGain = ctx.createGain();
-    masterGain.gain.value = outputGain;
-    masterGainRef.current = masterGain;
-
-    const bpFilter = ctx.createBiquadFilter();
-    bpFilter.type = "bandpass";
-    bpFilter.frequency.value = 800 + brightness * 2400;
-    bpFilter.Q.value = 1.5;
-    bpFilterRef.current = bpFilter;
-
-    const reverb = createReverb(ctx, 0.15);
-
-    // Trumpet oscillators
-    const oscA = ctx.createOscillator();
-    oscA.type = "sawtooth";
-    const oscB = ctx.createOscillator();
-    oscB.type = "square";
-    oscB.detune.value = 7;
-    const oscC = ctx.createOscillator();
-    oscC.type = "sawtooth";
-    oscC.detune.value = -5;
-
-    // Vibrato LFO
-    const vibratoOsc = ctx.createOscillator();
-    vibratoOsc.frequency.value = 5.5;
-    const vibratoGain = ctx.createGain();
-    vibratoGain.gain.value = vibrato * 15;
-    vibratoOsc.connect(vibratoGain);
-    vibratoGain.connect(oscA.frequency);
-    vibratoGain.connect(oscB.frequency);
-    vibratoGain.connect(oscC.frequency);
-    vibratoOsc.start();
-    vibratoOscRef.current = vibratoOsc;
-    vibratoGainRef.current = vibratoGain;
-
-    const mixGain = ctx.createGain();
-    mixGain.gain.value = 0;
-
-    oscA.connect(mixGain);
-    oscB.connect(mixGain);
-    oscC.connect(mixGain);
-    mixGain.connect(bpFilter);
-    bpFilter.connect(reverb.input);
-    reverb.output.connect(masterGain);
-    masterGain.connect(ctx.destination);
-    if (destNode) masterGain.connect(destNode as AudioNode);
-
-    oscA.start(); oscB.start(); oscC.start();
-    oscARef.current = oscA;
-    oscBRef.current = oscB;
-    oscCRef.current = oscC;
-
-    const pcmBuf = new Float32Array(analyser.fftSize);
-    const timeBuf = new Uint8Array(analyser.frequencyBinCount);
-
-    const loop = () => {
-      if (!analyserRef.current) return;
-      analyser.getFloatTimeDomainData(pcmBuf);
-      analyser.getByteTimeDomainData(timeBuf);
-
-      // Input level
-      let peak = 0;
-      for (const v of timeBuf) { const d = Math.abs(v - 128); if (d > peak) peak = d; }
-      const inputLevel = Math.min(1, peak / 96);
-
-      const { freq, confidence } = detectPitch(pcmBuf, ctx.sampleRate);
-      const now = performance.now();
-
-      if (confidence > 0.15 && freq > 0) {
-        silenceTimerRef.current = now;
-        // Set oscillator frequencies
-        const targetFreq = freq;
-        oscA.frequency.setTargetAtTime(targetFreq, ctx.currentTime, 0.02);
-        oscB.frequency.setTargetAtTime(targetFreq, ctx.currentTime, 0.02);
-        oscC.frequency.setTargetAtTime(targetFreq * 2, ctx.currentTime, 0.02);
-        // Fade in synth
-        mixGain.gain.setTargetAtTime(0.25, ctx.currentTime, 0.03);
-        setSynthState({
-          active: true,
-          noteName: freqToNoteName(freq),
-          confidence,
-          inputLevel,
-        });
-      } else {
-        // Silence fade
-        const silentMs = now - silenceTimerRef.current;
-        if (silentMs > 80) {
-          mixGain.gain.setTargetAtTime(0, ctx.currentTime, 0.05);
-          setSynthState(prev => ({ ...prev, active: false, confidence: 0, inputLevel }));
-        }
-      }
-
-      rafIdRef.current = requestAnimationFrame(loop);
-    };
-    rafIdRef.current = requestAnimationFrame(loop);
-
-    return () => {
-      if (rafIdRef.current !== null) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null; }
-      try { oscA.stop(); oscB.stop(); oscC.stop(); vibratoOsc.stop(); } catch {}
-      if (ctx.state !== "closed") void ctx.close().catch(() => {});
-      ctxRef.current = null;
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, micStream, destNode]);
-
-  // Sync params when they change
-  useEffect(() => {
-    if (masterGainRef.current) masterGainRef.current.gain.value = outputGain;
-  }, [outputGain]);
-  useEffect(() => {
-    if (bpFilterRef.current) bpFilterRef.current.frequency.value = 800 + brightness * 2400;
-  }, [brightness]);
-  useEffect(() => {
-    if (vibratoGainRef.current) vibratoGainRef.current.gain.value = vibrato * 15;
-  }, [vibrato]);
-
-  return synthState;
-}
 
 // ─── Default label helper ─────────────────────────────────────────────────────
 
@@ -446,10 +193,9 @@ export function RecorderModal({
 
   // ── Trumpet layer setup ──
   const [trumpetPresetName, setTrumpetPresetName] = useState("Trumpet Sketch");
-  const [trumpetBrightness, setTrumpetBrightness] = useState(0.7);
-  const [trumpetVibrato, setTrumpetVibrato] = useState(0.3);
-  const [trumpetGain, setTrumpetGain] = useState(0.8);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [rawVoiceInTake, setRawVoiceInTake] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [monitorRawVoice, setMonitorRawVoice] = useState(false);
 
   // ── Lyric follow ──
@@ -520,19 +266,20 @@ export function RecorderModal({
   const stopDrums = drum.stop;
   const playDrums = drum.play;
 
-  // ── Trumpet synth ──
+  // ── Trumpet synth (shared bus context — no cross-context crash) ──
   const trumpetEnabled =
     (performLayer === "trumpet" || performLayer === "both") && state === "recording";
-  const trumpetState = useTrumpetSynth(
-    capturedMicStreamRef.current,
-    recDestNode,
-    trumpetBrightness,
-    trumpetVibrato,
-    trumpetGain,
-    rawVoiceInTake,
-    monitorRawVoice,
-    trumpetEnabled
-  );
+  const trumpet = useLiveTrumpet({
+    micStream: capturedMicStreamRef.current,
+    destNode: bus?.trumpetGain ?? null,
+    enabled: trumpetEnabled,
+  });
+  const trumpetState = {
+    active: trumpet.isActive,
+    noteName: trumpet.detectedNote ?? "--",
+    confidence: trumpet.confidence,
+    inputLevel: trumpet.inputLevel,
+  };
 
   // ─── Lyric data ───────────────────────────────────────────────────────────
   const lyricLines = useMemo(() => splitLyricLines(lyrics), [lyrics]);
@@ -1667,9 +1414,7 @@ export function RecorderModal({
                               disabled={isRecording || isPaused}
                               onClick={() => {
                                 setTrumpetPresetName(p.name);
-                                setTrumpetBrightness(p.brightness);
-                                setTrumpetVibrato(p.vibrato);
-                                setTrumpetGain(p.gain);
+                                trumpet.applyPreset(p);
                               }}
                               className={`rounded border px-2 py-0.5 font-mono text-[11px] transition-colors ${
                                 trumpetPresetName === p.name
@@ -1686,26 +1431,26 @@ export function RecorderModal({
                       {/* Sliders */}
                       <div className="grid grid-cols-3 gap-3">
                         <label className="flex flex-col gap-1">
-                          <span className="font-mono text-[10px] text-ink-mute">Brightness {Math.round(trumpetBrightness * 100)}%</span>
+                          <span className="font-mono text-[10px] text-ink-mute">Brightness {Math.round(trumpet.brightness * 100)}%</span>
                           <input type="range" min="0" max="1" step="0.01"
-                            value={trumpetBrightness}
-                            onChange={(e) => setTrumpetBrightness(parseFloat(e.target.value))}
+                            value={trumpet.brightness}
+                            onChange={(e) => trumpet.setBrightness(parseFloat(e.target.value))}
                             className="w-full accent-amber-gold"
                           />
                         </label>
                         <label className="flex flex-col gap-1">
-                          <span className="font-mono text-[10px] text-ink-mute">Vibrato {Math.round(trumpetVibrato * 100)}%</span>
+                          <span className="font-mono text-[10px] text-ink-mute">Vibrato {Math.round(trumpet.vibratoAmount * 100)}%</span>
                           <input type="range" min="0" max="1" step="0.01"
-                            value={trumpetVibrato}
-                            onChange={(e) => setTrumpetVibrato(parseFloat(e.target.value))}
+                            value={trumpet.vibratoAmount}
+                            onChange={(e) => trumpet.setVibratoAmount(parseFloat(e.target.value))}
                             className="w-full accent-amber-gold"
                           />
                         </label>
                         <label className="flex flex-col gap-1">
-                          <span className="font-mono text-[10px] text-ink-mute">Output {Math.round(trumpetGain * 100)}%</span>
+                          <span className="font-mono text-[10px] text-ink-mute">Output {Math.round(trumpet.outputGain * 100)}%</span>
                           <input type="range" min="0" max="1" step="0.01"
-                            value={trumpetGain}
-                            onChange={(e) => setTrumpetGain(parseFloat(e.target.value))}
+                            value={trumpet.outputGain}
+                            onChange={(e) => trumpet.setOutputGain(parseFloat(e.target.value))}
                             className="w-full accent-amber-gold"
                           />
                         </label>
@@ -1883,33 +1628,39 @@ export function RecorderModal({
 
                   {/* Trumpet status bar */}
                   {(performLayer === "trumpet" || performLayer === "both") && isRecording ? (
-                    <div className={`flex items-center gap-3 rounded border px-3 py-2 text-[11px] ${
-                      trumpetState.active
-                        ? "border-amber-gold/50 bg-amber-gold/5"
-                        : "border-ink-line"
-                    }`}>
-                      <span className="font-mono text-[10px] uppercase tracking-wider text-ink-mute">Trumpet</span>
-                      {trumpetState.active ? (
-                        <>
-                          <span className="font-mono text-amber-gold">{trumpetState.noteName}</span>
-                          <div className="flex h-2 flex-1 overflow-hidden rounded bg-ink-line">
-                            <div
-                              className="h-full bg-amber-gold/70 transition-[width] duration-75"
-                              style={{ width: `${Math.round(trumpetState.confidence * 100)}%` }}
-                            />
-                          </div>
-                          <span className="font-mono text-[10px] text-amber-gold">ACTIVE</span>
-                        </>
-                      ) : (
-                        <span className="font-mono text-ink-mute">listening...</span>
-                      )}
-                      <div className="h-2 w-16 overflow-hidden rounded bg-ink-line">
-                        <div
-                          className="h-full bg-indigo-400/60 transition-[width] duration-75"
-                          style={{ width: `${Math.round(trumpetState.inputLevel * 100)}%` }}
-                        />
+                    trumpet.error ? (
+                      <div className="rounded border border-red-400/50 bg-red-400/5 px-3 py-2 font-mono text-[11px] text-red-400">
+                        {trumpet.error}
                       </div>
-                    </div>
+                    ) : (
+                      <div className={`flex items-center gap-3 rounded border px-3 py-2 text-[11px] ${
+                        trumpetState.active
+                          ? "border-amber-gold/50 bg-amber-gold/5"
+                          : "border-ink-line"
+                      }`}>
+                        <span className="font-mono text-[10px] uppercase tracking-wider text-ink-mute">Trumpet</span>
+                        {trumpetState.active ? (
+                          <>
+                            <span className="font-mono text-amber-gold">{trumpetState.noteName}</span>
+                            <div className="flex h-2 flex-1 overflow-hidden rounded bg-ink-line">
+                              <div
+                                className="h-full bg-amber-gold/70 transition-[width] duration-75"
+                                style={{ width: `${Math.round(trumpetState.confidence * 100)}%` }}
+                              />
+                            </div>
+                            <span className="font-mono text-[10px] text-amber-gold">ACTIVE</span>
+                          </>
+                        ) : (
+                          <span className="font-mono text-ink-mute">listening...</span>
+                        )}
+                        <div className="h-2 w-16 overflow-hidden rounded bg-ink-line">
+                          <div
+                            className="h-full bg-indigo-400/60 transition-[width] duration-75"
+                            style={{ width: `${Math.round(trumpetState.inputLevel * 100)}%` }}
+                          />
+                        </div>
+                      </div>
+                    )
                   ) : null}
                 </div>
 

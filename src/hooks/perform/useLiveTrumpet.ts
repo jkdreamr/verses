@@ -16,107 +16,116 @@ export type TrumpetPreset = {
   description: string;
 };
 
-// ─── Presets ──────────────────────────────────────────────────────────────────
+// ─── Presets (softer defaults) ───────────────────────────────────────────────
 
 export const TRUMPET_PRESETS: TrumpetPreset[] = [
   {
     name: "Trumpet Sketch",
-    brightness: 0.6,
-    vibratoAmount: 0.25,
-    vibratoDelay: 0.3,
-    outputGain: 0.8,
-    portamento: 0.05,
-    breathiness: 0.15,
-    attackBurst: 0.4,
+    brightness: 0.45,
+    vibratoAmount: 0.2,
+    vibratoDelay: 0.35,
+    outputGain: 0.55,
+    portamento: 0.06,
+    breathiness: 0.12,
+    attackBurst: 0.25,
     dynamicFollow: 0.5,
-    description: "Clean bright trumpet with natural expression",
+    description: "Clean trumpet with natural expression",
   },
   {
     name: "Muted Trumpet",
-    brightness: 0.2,
-    vibratoAmount: 0.15,
+    brightness: 0.18,
+    vibratoAmount: 0.12,
     vibratoDelay: 0.4,
-    outputGain: 0.6,
-    portamento: 0.1,
+    outputGain: 0.45,
+    portamento: 0.12,
     breathiness: 0.05,
-    attackBurst: 0.1,
+    attackBurst: 0.08,
     dynamicFollow: 0.7,
     description: "Dark harmon-mute character",
   },
   {
     name: "Brass Section",
-    brightness: 0.8,
-    vibratoAmount: 0.2,
-    vibratoDelay: 0.2,
-    outputGain: 0.9,
-    portamento: 0.02,
-    breathiness: 0.1,
-    attackBurst: 0.6,
+    brightness: 0.6,
+    vibratoAmount: 0.15,
+    vibratoDelay: 0.25,
+    outputGain: 0.55,
+    portamento: 0.03,
+    breathiness: 0.08,
+    attackBurst: 0.35,
     dynamicFollow: 0.3,
-    description: "Full brass chorus with bite",
+    description: "Full brass chorus",
   },
   {
     name: "Soft Flugelhorn",
-    brightness: 0.3,
-    vibratoAmount: 0.35,
+    brightness: 0.25,
+    vibratoAmount: 0.3,
     vibratoDelay: 0.5,
-    outputGain: 0.7,
+    outputGain: 0.50,
     portamento: 0.15,
-    breathiness: 0.25,
-    attackBurst: 0.05,
+    breathiness: 0.2,
+    attackBurst: 0.04,
     dynamicFollow: 0.6,
     description: "Warm, mellow, breathy horn",
   },
   {
     name: "Synth Brass",
-    brightness: 1.0,
+    brightness: 0.7,
     vibratoAmount: 0.0,
     vibratoDelay: 0,
-    outputGain: 0.85,
+    outputGain: 0.50,
     portamento: 0.0,
     breathiness: 0.0,
-    attackBurst: 0.8,
+    attackBurst: 0.5,
     dynamicFollow: 0.2,
     description: "Punchy electronic brass",
   },
   {
     name: "Miles Lead",
-    brightness: 0.45,
-    vibratoAmount: 0.2,
+    brightness: 0.35,
+    vibratoAmount: 0.18,
     vibratoDelay: 0.6,
-    outputGain: 0.75,
+    outputGain: 0.50,
     portamento: 0.2,
-    breathiness: 0.3,
-    attackBurst: 0.15,
+    breathiness: 0.25,
+    attackBurst: 0.1,
     dynamicFollow: 0.8,
     description: "Intimate jazz trumpet, breathy & dynamic",
   },
 ];
 
-// ─── YIN pitch detection constants ───────────────────────────────────────────
+// ─── Constants ──────────────────────────────────────────────────────────────
 
 const CONFIDENCE_THRESH  = 0.3;
-const MIN_FREQ           = 80;   // Hz — low end of singing range
-const MAX_FREQ           = 900;  // Hz — high end
-const PITCH_SMOOTH_ALPHA = 0.12; // EMA weight for new pitch value (lower = smoother)
-const ATTACK_TIME_S      = 0.006; // 6 ms — fast brass attack
-const RELEASE_TIME_S     = 0.06;  // 60 ms
-const VIBRATO_RATE_HZ    = 5.2;  // slightly above 5 for realism
-const FORMANT_FREQS      = [1200, 2400, 3800]; // trumpet formant resonances
-const FORMANT_QS         = [3.5, 4.0, 3.0];    // Q factors for formants
-const FORMANT_GAINS      = [1.0, 0.5, 0.2];    // relative gains
+const MIN_FREQ           = 80;
+const MAX_FREQ           = 900;
+const PITCH_SMOOTH_ALPHA = 0.12;
+const ATTACK_TIME_S      = 0.008;
+const RELEASE_TIME_S     = 0.08;
+const VIBRATO_RATE_HZ    = 5.2;
+const FORMANT_FREQS      = [1200, 2400, 3800];
+const FORMANT_QS         = [3.5, 4.0, 3.0];
+const FORMANT_GAINS      = [1.0, 0.5, 0.2];
 
 // ─── WaveShaper curve (soft-clip / tanh approximation) ───────────────────────
 
 function makeSaturationCurve(amount = 200): Float32Array<ArrayBuffer> {
-  const n      = 256;
-  const curve  = new Float32Array(new ArrayBuffer(n * 4));
-  const deg    = Math.PI / 180;
+  const n     = 256;
+  const curve = new Float32Array(new ArrayBuffer(n * 4));
+  const deg   = Math.PI / 180;
   for (let i = 0; i < n; i++) {
     const x = (i * 2) / n - 1;
     curve[i] = ((3 + amount) * x * 20 * deg) / (Math.PI + amount * Math.abs(x));
   }
   return curve;
+}
+
+function freqToNoteName(freq: number): string {
+  if (freq <= 0) return "--";
+  const midi = Math.round(69 + 12 * Math.log2(freq / 440));
+  const NOTES = ["C","C#","D","Eb","E","F","F#","G","Ab","A","Bb","B"];
+  const name = NOTES[((midi % 12) + 12) % 12];
+  const oct = Math.floor(midi / 12) - 1;
+  return `${name}${oct}`;
 }
 
 // ─── Hook config ──────────────────────────────────────────────────────────────
@@ -127,41 +136,30 @@ export type UseLiveTrumpetConfig = {
   enabled: boolean;
 };
 
-// ─── Synth node bundle (recreated on AudioContext init) ───────────────────────
+// ─── Synth node bundle ─────────────────────────────────────────────────────
 
 type SynthNodes = {
   ctx: AudioContext;
-  // Oscillators
-  osc1: OscillatorNode;   // primary sawtooth
-  osc2: OscillatorNode;   // slightly detuned square
-  osc3: OscillatorNode;   // octave-up sawtooth (brightness)
-  // Noise / breath
+  osc1: OscillatorNode;
+  osc2: OscillatorNode;
+  osc3: OscillatorNode;
   noiseSource: AudioBufferSourceNode;
   noiseGain: GainNode;
-  // Envelope gain
   envGain: GainNode;
-  // Formant filters (parallel resonances)
   formants: BiquadFilterNode[];
   formantGains: GainNode[];
-  // Filters
   bandpass: BiquadFilterNode;
   lowpass: BiquadFilterNode;
-  // Attack brightness filter (opens on note onset)
   attackFilter: BiquadFilterNode;
-  // Saturation
   shaper: WaveShaperNode;
-  // Vibrato LFO
   lfo: OscillatorNode;
   lfoGain: GainNode;
-  // Vibrato envelope (delayed onset)
   vibratoEnvGain: GainNode;
-  // Reverb
   reverbInput: GainNode;
   reverbOutput: GainNode;
-  // Master out
   masterGain: GainNode;
-  // Optional voice pass-through
   voicePassGain: GainNode;
+  safetyLimiter: GainNode;
 };
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -172,14 +170,14 @@ export function useLiveTrumpet({
   enabled,
 }: UseLiveTrumpetConfig) {
   // ── Params ──
-  const [brightness,      setBrightness]      = useState(0.6);
-  const [vibratoAmount,   setVibratoAmount]   = useState(0.25);
-  const [outputGain,      setOutputGain]      = useState(0.8);
-  const [portamento,      setPortamento]      = useState(0.05);
-  const [breathiness,     setBreathiness]     = useState(0.15);
-  const [attackBurst,     setAttackBurst]     = useState(0.4);
+  const [brightness,      setBrightness]      = useState(0.45);
+  const [vibratoAmount,   setVibratoAmount]   = useState(0.2);
+  const [outputGain,      setOutputGain]      = useState(0.55);
+  const [portamento,      setPortamento]      = useState(0.06);
+  const [breathiness,     setBreathiness]     = useState(0.12);
+  const [attackBurst,     setAttackBurst]     = useState(0.25);
   const [dynamicFollow,   setDynamicFollow]   = useState(0.5);
-  const [vibratoDelay,    setVibratoDelay]    = useState(0.3);
+  const [vibratoDelay,    setVibratoDelay]    = useState(0.35);
   const [rawVoiceMonitor, setRawVoiceMonitor] = useState(false);
 
   // ── Detected pitch state ──
@@ -188,6 +186,7 @@ export function useLiveTrumpet({
   const [confidence,   setConfidence]   = useState<number>(0);
   const [inputLevel,   setInputLevel]   = useState<number>(0);
   const [isActive,     setIsActive]     = useState<boolean>(false);
+  const [error,        setError]        = useState<string | null>(null);
 
   // ── Internal refs ──
   const ctxRef         = useRef<AudioContext | null>(null);
@@ -196,15 +195,10 @@ export function useLiveTrumpet({
   const micSourceRef   = useRef<MediaStreamAudioSourceNode | null>(null);
   const rafRef         = useRef<number | null>(null);
 
-  // Smoothed pitch EMA
   const smoothedFreqRef = useRef<number>(0);
-  // Track whether trumpet is currently sounding (for envelope management)
   const soundingRef     = useRef<boolean>(false);
-  // Note onset time (for vibrato delay)
   const noteOnsetRef    = useRef<number>(0);
-  // Input RMS tracking for dynamic follow
   const smoothedRmsRef  = useRef<number>(0);
-  // Param refs for hot-update without rebuilding graph
   const brightnessRef    = useRef(brightness);
   const vibratoRef       = useRef(vibratoAmount);
   const outputGainRef    = useRef(outputGain);
@@ -236,7 +230,7 @@ export function useLiveTrumpet({
     wetG.gain.value = wet;
 
     const sr     = ctx.sampleRate;
-    const len    = sr * 1.2; // shorter than chord reverb for responsiveness
+    const len    = sr * 1.2;
     const buf    = ctx.createBuffer(2, len, sr);
     for (let ch = 0; ch < 2; ch++) {
       const data = buf.getChannelData(ch);
@@ -258,33 +252,29 @@ export function useLiveTrumpet({
   // ── Build synth graph ─────────────────────────────────────────────────────
 
   function buildSynth(ctx: AudioContext, dest: AudioNode): SynthNodes {
-    // --- Oscillators ---
     const osc1 = ctx.createOscillator();
     osc1.type  = "sawtooth";
 
     const osc2 = ctx.createOscillator();
-    osc2.type  = "square";
-    osc2.detune.value = 7; // subtle detune for richness
+    osc2.type  = "triangle"; // softer than square
+    osc2.detune.value = 7;
 
     const osc3 = ctx.createOscillator();
     osc3.type  = "sawtooth";
-    // osc3 frequency will be set to 2× osc1 dynamically (brightness overtone)
 
     const osc1Gain = ctx.createGain();
-    osc1Gain.gain.value = 0.55;
+    osc1Gain.gain.value = 0.40;
     const osc2Gain = ctx.createGain();
-    osc2Gain.gain.value = 0.25;
+    osc2Gain.gain.value = 0.20;
     const osc3Gain = ctx.createGain();
-    osc3Gain.gain.value = 0.12;
+    osc3Gain.gain.value = 0.08;
 
-    // --- Envelope gain ---
     const envGain = ctx.createGain();
     envGain.gain.value = 0;
 
-    // --- Formant resonances (parallel band-peaks that shape brass timbre) ---
     const formants: BiquadFilterNode[] = [];
     const formantGains: GainNode[] = [];
-    const formantMix = ctx.createGain(); // sums formant outputs
+    const formantMix = ctx.createGain();
     formantMix.gain.value = 1;
 
     for (let f = 0; f < FORMANT_FREQS.length; f++) {
@@ -292,41 +282,36 @@ export function useLiveTrumpet({
       bp.type = "peaking";
       bp.frequency.value = FORMANT_FREQS[f];
       bp.Q.value = FORMANT_QS[f];
-      bp.gain.value = FORMANT_GAINS[f] * 8; // boost in dB-like range
+      bp.gain.value = FORMANT_GAINS[f] * 6;
       formants.push(bp);
       const g = ctx.createGain();
       g.gain.value = FORMANT_GAINS[f];
       formantGains.push(g);
     }
 
-    // --- Main bandpass (overall tonal shaping) ---
     const bandpass = ctx.createBiquadFilter();
     bandpass.type  = "bandpass";
-    bandpass.frequency.value = 1800;
-    bandpass.Q.value = 1.2;
+    bandpass.frequency.value = 1600;
+    bandpass.Q.value = 1.0;
 
-    // --- Attack brightness filter (opens wide on note onset, then narrows) ---
     const attackFilter = ctx.createBiquadFilter();
     attackFilter.type = "lowpass";
-    attackFilter.frequency.value = 3000; // will spike on attack
+    attackFilter.frequency.value = 2500;
     attackFilter.Q.value = 0.7;
 
     const lowpass = ctx.createBiquadFilter();
     lowpass.type  = "lowpass";
-    lowpass.frequency.value = 5000;
+    lowpass.frequency.value = 4000;
 
-    // --- WaveShaper (soft saturation) ---
     const shaper = ctx.createWaveShaper();
-    shaper.curve = makeSaturationCurve(60);
+    shaper.curve = makeSaturationCurve(40);
     shaper.oversample = "2x";
 
-    // --- Vibrato LFO with envelope (delayed onset) ---
     const lfo = ctx.createOscillator();
     lfo.type = "sine";
     lfo.frequency.value = VIBRATO_RATE_HZ;
     const lfoGain = ctx.createGain();
     lfoGain.gain.value = 0;
-    // Vibrato envelope gain — controls delayed fade-in of vibrato
     const vibratoEnvGain = ctx.createGain();
     vibratoEnvGain.gain.value = 0;
 
@@ -336,16 +321,14 @@ export function useLiveTrumpet({
     vibratoEnvGain.connect(osc2.frequency);
     vibratoEnvGain.connect(osc3.frequency);
 
-    // --- Breath noise (shaped for realism) ---
+    // Breath noise
     const noiseLen    = ctx.sampleRate * 2;
     const noiseBuf    = ctx.createBuffer(1, noiseLen, ctx.sampleRate);
     const noiseData   = noiseBuf.getChannelData(0);
-    // Pink-ish noise (filtered white)
     for (let i = 0; i < noiseLen; i++) noiseData[i] = Math.random() * 2 - 1;
     const noiseSource = ctx.createBufferSource();
     noiseSource.buffer = noiseBuf;
     noiseSource.loop   = true;
-    // Two-stage breath shaping: bandpass then highpass for air
     const noiseFilter1  = ctx.createBiquadFilter();
     noiseFilter1.type   = "bandpass";
     noiseFilter1.frequency.value = 1200;
@@ -355,24 +338,26 @@ export function useLiveTrumpet({
     noiseFilter2.frequency.value = 600;
     noiseFilter2.Q.value = 0.4;
     const noiseGain    = ctx.createGain();
-    noiseGain.gain.value = breathinessRef.current * 0.15;
+    noiseGain.gain.value = breathinessRef.current * 0.10;
     noiseSource.connect(noiseFilter1);
     noiseFilter1.connect(noiseFilter2);
     noiseFilter2.connect(noiseGain);
 
-    // --- Reverb ---
-    const reverb = buildReverb(ctx, 0.15);
+    // Reverb
+    const reverb = buildReverb(ctx, 0.12);
 
-    // --- Master output ---
+    // Master output with safety limiter gain
     const masterGain = ctx.createGain();
     masterGain.gain.value = outputGainRef.current;
 
-    // --- Voice pass-through (for rawVoiceMonitor) ---
+    const safetyLimiter = ctx.createGain();
+    safetyLimiter.gain.value = 0.7; // safety ceiling
+
+    // Voice pass-through (for rawVoiceMonitor)
     const voicePassGain = ctx.createGain();
     voicePassGain.gain.value = 0;
 
-    // --- Wire signal chain ---
-    // Oscs → osc gains → envGain → formant chain → bandpass → attackFilter → lowpass → shaper → reverb → master → dest
+    // Wire signal chain
     osc1.connect(osc1Gain);
     osc2.connect(osc2Gain);
     osc3.connect(osc3Gain);
@@ -381,13 +366,12 @@ export function useLiveTrumpet({
     osc3Gain.connect(envGain);
     noiseGain.connect(envGain);
 
-    // Formants in parallel from envGain → formantMix
+    // Formants in parallel
     for (let f = 0; f < formants.length; f++) {
       envGain.connect(formants[f]);
       formants[f].connect(formantGains[f]);
       formantGains[f].connect(formantMix);
     }
-    // Also pass direct signal (blend with formants)
     envGain.connect(formantMix);
 
     formantMix.connect(bandpass);
@@ -396,7 +380,8 @@ export function useLiveTrumpet({
     lowpass.connect(shaper);
     shaper.connect(reverb.input);
     reverb.output.connect(masterGain);
-    masterGain.connect(dest);
+    masterGain.connect(safetyLimiter);
+    safetyLimiter.connect(dest);
 
     voicePassGain.connect(dest);
 
@@ -417,144 +402,105 @@ export function useLiveTrumpet({
       shaper,
       lfo, lfoGain, vibratoEnvGain,
       reverbInput: reverb.input, reverbOutput: reverb.output,
-      masterGain, voicePassGain,
+      masterGain,
+      voicePassGain,
+      safetyLimiter,
     };
   }
 
-  // ── Pitch→note name ──────────────────────────────────────────────────────
+  // ── Apply synth params per-frame ────────────────────────────────────────
 
-  function freqToNoteName(freq: number): string {
-    if (freq <= 0) return "—";
-    const midi    = Math.round(12 * Math.log2(freq / 440) + 69);
-    const names   = ["C","C#","D","Eb","E","F","F#","G","Ab","A","Bb","B"];
-    const octave  = Math.floor(midi / 12) - 1;
-    return names[((midi % 12) + 12) % 12] + octave;
-  }
+  const applySynthParams = useCallback((nodes: SynthNodes, freq: number, conf: number, rms: number) => {
+    const { ctx, osc1, osc2, osc3, envGain, noiseGain, lfoGain, vibratoEnvGain, bandpass, attackFilter, lowpass, masterGain } = nodes;
+    const now = ctx.currentTime;
 
-  // ── Update synth parameters (hot-path, called every detected frame) ───────
+    // Dynamic follow — blend between fixed output and input-dependent gain
+    const dynFollow = dynamicFollowRef.current;
+    const rmsAlpha = 0.15;
+    smoothedRmsRef.current = rmsAlpha * rms + (1 - rmsAlpha) * smoothedRmsRef.current;
+    const dynGain = (1 - dynFollow) + dynFollow * Math.min(1, smoothedRmsRef.current * 5);
 
-  function applySynthParams(nodes: SynthNodes, freq: number, conf: number, rms: number) {
-    const ctx  = nodes.ctx;
-    const now  = ctx.currentTime;
+    // Master output — apply output gain scaled by dynamic follow
+    const targetMaster = outputGainRef.current * dynGain;
+    masterGain.gain.setTargetAtTime(targetMaster, now, 0.03);
 
-    // Smooth RMS for dynamics
-    smoothedRmsRef.current = 0.3 * rms + 0.7 * smoothedRmsRef.current;
-    const dynamicLevel = Math.min(1, smoothedRmsRef.current * 8); // normalize to ~0-1
+    // Breath noise level
+    noiseGain.gain.setTargetAtTime(breathinessRef.current * 0.10, now, 0.05);
 
-    // Bandpass center: 1000 Hz at brightness=0, 4000 Hz at brightness=1
-    const bpFreq = 1000 + brightnessRef.current * 3000;
-    nodes.bandpass.frequency.setTargetAtTime(bpFreq, now, 0.05);
+    // Brightness — controls filter cutoff and osc3 mix level
+    const bright = brightnessRef.current;
+    bandpass.frequency.setTargetAtTime(1000 + bright * 1600, now, 0.04);
+    lowpass.frequency.setTargetAtTime(2500 + bright * 2500, now, 0.04);
 
-    // Formant resonances shift slightly with brightness
-    const bShift = 1 + (brightnessRef.current - 0.5) * 0.3;
-    for (let f = 0; f < nodes.formants.length; f++) {
-      nodes.formants[f].frequency.setTargetAtTime(FORMANT_FREQS[f] * bShift, now, 0.08);
-    }
-
-    // Vibrato LFO gain — convert semitones to Hz at current frequency
-    const semitoneHz   = freq * (Math.pow(2, 1 / 12) - 1);
-    const vibratoDepth = vibratoRef.current * semitoneHz;
-    nodes.lfoGain.gain.setTargetAtTime(vibratoDepth, now, 0.08);
-
-    // Vibrato delayed onset — ramp vibratoEnvGain based on time since note onset
-    if (soundingRef.current && vibratoDelayRef.current > 0) {
-      const elapsed = now - noteOnsetRef.current;
-      const vibratoEnv = Math.min(1, Math.max(0, (elapsed - vibratoDelayRef.current) / 0.3));
-      nodes.vibratoEnvGain.gain.setTargetAtTime(vibratoEnv, now, 0.05);
-    } else {
-      nodes.vibratoEnvGain.gain.setTargetAtTime(soundingRef.current ? 1 : 0, now, 0.05);
-    }
-
-    // Breath noise follows breathiness param
-    nodes.noiseGain.gain.setTargetAtTime(breathinessRef.current * 0.15, now, 0.05);
-
-    // Master gain with dynamic follow
-    const baseGain    = outputGainRef.current;
-    const dynAmount   = dynamicFollowRef.current;
-    const dynamicGain = baseGain * (1 - dynAmount + dynAmount * dynamicLevel);
-    nodes.masterGain.gain.setTargetAtTime(dynamicGain, now, 0.03);
-
-    // Voice monitor
-    nodes.voicePassGain.gain.setTargetAtTime(voiceMonRef.current ? 0.2 : 0, now, 0.05);
-
-    // Portamento: pitch glide speed (time constant for frequency changes)
-    const pitchTC = 0.005 + portamentoRef.current * 0.08; // 5ms to 85ms
-
-    // Confidence / silence → envelope
+    // Pitch: smooth portamento
     if (conf >= CONFIDENCE_THRESH && freq >= MIN_FREQ && freq <= MAX_FREQ) {
-      // Update oscillator frequencies with portamento
-      nodes.osc1.frequency.setTargetAtTime(freq, now, pitchTC);
-      nodes.osc2.frequency.setTargetAtTime(freq, now, pitchTC);
-      nodes.osc3.frequency.setTargetAtTime(freq * 2, now, pitchTC);
+      const port = portamentoRef.current;
+      const tc = 0.005 + port * 0.12;
+
+      osc1.frequency.setTargetAtTime(freq, now, tc);
+      osc2.frequency.setTargetAtTime(freq, now, tc);
+      osc3.frequency.setTargetAtTime(freq * 2, now, tc);
 
       if (!soundingRef.current) {
-        // Note onset — attack with brightness burst
-        noteOnsetRef.current = now;
-        nodes.envGain.gain.cancelScheduledValues(now);
-        nodes.envGain.gain.setValueAtTime(nodes.envGain.gain.value, now);
-        nodes.envGain.gain.linearRampToValueAtTime(1, now + ATTACK_TIME_S);
-
-        // Attack burst: temporarily open the attack filter wider
-        const burstAmount = attackBurstRef.current;
-        const burstFreq = 4000 + burstAmount * 6000; // up to 10kHz on attack
-        nodes.attackFilter.frequency.cancelScheduledValues(now);
-        nodes.attackFilter.frequency.setValueAtTime(burstFreq, now);
-        nodes.attackFilter.frequency.setTargetAtTime(
-          3000 + brightnessRef.current * 2000, // settle to brightness-based value
-          now + 0.015, // burst lasts ~15ms
-          0.04
-        );
-
-        // Reset vibrato envelope for delayed onset
-        nodes.vibratoEnvGain.gain.cancelScheduledValues(now);
-        nodes.vibratoEnvGain.gain.setValueAtTime(0, now);
-
+        // Note ON
         soundingRef.current = true;
-        setIsActive(true);
+        noteOnsetRef.current = now;
+        envGain.gain.cancelScheduledValues(now);
+        envGain.gain.setTargetAtTime(0.45, now, ATTACK_TIME_S);
+        // Attack burst — open filter wide briefly
+        const burst = attackBurstRef.current;
+        if (burst > 0) {
+          attackFilter.frequency.cancelScheduledValues(now);
+          attackFilter.frequency.setValueAtTime(3000 + burst * 3000, now);
+          attackFilter.frequency.setTargetAtTime(2500, now + 0.06, 0.04);
+        }
+      }
+
+      // Vibrato: delayed onset after note start
+      const elapsed = now - noteOnsetRef.current;
+      const vibDelay = vibratoDelayRef.current;
+      const vibAmt = vibratoRef.current;
+      if (elapsed > vibDelay && vibAmt > 0) {
+        const fadeIn = Math.min(1, (elapsed - vibDelay) / 0.5);
+        lfoGain.gain.setTargetAtTime(vibAmt * 20 * fadeIn, now, 0.05);
+        vibratoEnvGain.gain.setTargetAtTime(1, now, 0.05);
+      } else {
+        vibratoEnvGain.gain.setTargetAtTime(0, now, 0.02);
       }
     } else {
-      // Release — fade out
+      // Note OFF — smooth fade
       if (soundingRef.current) {
-        nodes.envGain.gain.cancelScheduledValues(now);
-        nodes.envGain.gain.setValueAtTime(nodes.envGain.gain.value, now);
-        nodes.envGain.gain.linearRampToValueAtTime(0, now + RELEASE_TIME_S);
-        nodes.vibratoEnvGain.gain.setTargetAtTime(0, now, 0.02);
         soundingRef.current = false;
-        setIsActive(false);
+        envGain.gain.cancelScheduledValues(now);
+        envGain.gain.setTargetAtTime(0, now, RELEASE_TIME_S);
+        vibratoEnvGain.gain.setTargetAtTime(0, now, 0.02);
       }
     }
-  }
+  }, []);
 
-  // ── Pitch detection RAF loop ──────────────────────────────────────────────
+  // ── Pitch detection loop ─────────────────────────────────────────────────
 
   const runPitchLoop = useCallback(() => {
     const analyser = analyserRef.current;
-    const nodes    = synthRef.current;
+    const nodes = synthRef.current;
     if (!analyser || !nodes) return;
 
     const buf = new Float32Array(analyser.fftSize);
     analyser.getFloatTimeDomainData(buf);
 
     const rms = computeRMS(buf);
-    setInputLevel(rms);
+    setInputLevel(Math.min(1, rms * 6));
 
-    const result = detectPitchYIN(buf, nodes.ctx.sampleRate, {
-      yinThreshold: 0.15,
-      silenceRms: 0.015,
-      noisyFallback: 0.4,
-    });
+    if (rms > 0.005) {
+      const result = detectPitchYIN(buf as Float32Array<ArrayBuffer>, nodes.ctx.sampleRate, {
+        yinThreshold: 0.15,
+        silenceRms: 0.005,
+        noisyFallback: 0.4,
+      });
+      const freq = result?.freq ?? 0;
+      const conf = result?.confidence ?? 0;
 
-    if (!result) {
-      // Silence or unpitched — fade out
-      applySynthParams(nodes, smoothedFreqRef.current, 0, rms);
-      setConfidence(0);
-      setDetectedNote(null);
-      setDetectedFreq(0);
-    } else {
-      const { freq, confidence: conf } = result;
-
-      if (conf > 0) {
-        // EMA smooth
+      if (conf > 0 && freq > 0) {
         smoothedFreqRef.current =
           PITCH_SMOOTH_ALPHA * freq + (1 - PITCH_SMOOTH_ALPHA) * (smoothedFreqRef.current || freq);
       }
@@ -563,14 +509,21 @@ export function useLiveTrumpet({
       if (conf >= CONFIDENCE_THRESH && smoothedFreqRef.current >= MIN_FREQ && smoothedFreqRef.current <= MAX_FREQ) {
         setDetectedFreq(smoothedFreqRef.current);
         setDetectedNote(freqToNoteName(smoothedFreqRef.current));
+        setIsActive(true);
+      } else {
+        setIsActive(false);
       }
 
-      applySynthParams(nodes, smoothedFreqRef.current, conf, result.rms);
+      applySynthParams(nodes, smoothedFreqRef.current, conf, rms);
+    } else {
+      // Silence
+      setIsActive(false);
+      applySynthParams(nodes, 0, 0, rms);
     }
 
     rafRef.current = requestAnimationFrame(runPitchLoop);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [applySynthParams]);
 
   // ── Wire up mic stream ────────────────────────────────────────────────────
 
@@ -583,45 +536,75 @@ export function useLiveTrumpet({
       }
       if (synthRef.current) {
         const nodes = synthRef.current;
-        nodes.osc1.stop();
-        nodes.osc2.stop();
-        nodes.osc3.stop();
-        nodes.lfo.stop();
-        nodes.noiseSource.stop();
+        try { nodes.osc1.stop(); } catch { /* ok */ }
+        try { nodes.osc2.stop(); } catch { /* ok */ }
+        try { nodes.osc3.stop(); } catch { /* ok */ }
+        try { nodes.lfo.stop(); } catch { /* ok */ }
+        try { nodes.noiseSource.stop(); } catch { /* ok */ }
         synthRef.current = null;
       }
-      if (ctxRef.current) {
-        ctxRef.current.close();
-        ctxRef.current = null;
+      // Only close the context if WE created it (not the shared bus)
+      if (ctxRef.current && ctxRef.current !== (destNode as AudioNode | null)?.context) {
+        try { ctxRef.current.close(); } catch { /* ok */ }
       }
+      ctxRef.current = null;
       analyserRef.current  = null;
       micSourceRef.current = null;
       setIsActive(false);
+      setError(null);
       return;
     }
 
-    // Build new context + graph
-    const ctx      = new AudioContext();
-    ctxRef.current = ctx;
+    // ── KEY FIX: Use the same AudioContext as the destNode (shared bus) ──
+    // This prevents cross-context AudioNode connection errors.
+    let ctx: AudioContext;
+    try {
+      if (destNode.context && "currentTime" in destNode.context) {
+        // Reuse shared bus context
+        ctx = destNode.context as AudioContext;
+      } else {
+        // Fallback: create own context (standalone mode)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+        ctx = new Ctx();
+      }
+      ctxRef.current = ctx;
+      if (ctx.state === "suspended") ctx.resume();
+    } catch (e) {
+      setError("Could not initialize audio. Please check browser permissions.");
+      console.warn("[useLiveTrumpet] AudioContext init failed:", e);
+      return;
+    }
 
-    const analyser         = ctx.createAnalyser();
-    analyser.fftSize       = 2048;
-    analyser.smoothingTimeConstant = 0; // we do our own smoothing
-    analyserRef.current    = analyser;
+    let analyser: AnalyserNode;
+    let micSource: MediaStreamAudioSourceNode;
+    let nodes: SynthNodes;
 
-    const micSource          = ctx.createMediaStreamSource(micStream);
-    micSourceRef.current     = micSource;
-    micSource.connect(analyser);
+    try {
+      analyser = ctx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0;
+      analyserRef.current = analyser;
 
-    // Connect mic to voice pass-through as well (wired in buildSynth)
-    const nodes = buildSynth(ctx, destNode);
-    synthRef.current = nodes;
+      micSource = ctx.createMediaStreamSource(micStream);
+      micSourceRef.current = micSource;
+      micSource.connect(analyser);
 
-    // Also connect mic directly to voicePassGain (for rawVoiceMonitor)
-    micSource.connect(nodes.voicePassGain);
+      // Build synth and connect to destNode (same context, safe to connect)
+      nodes = buildSynth(ctx, destNode);
+      synthRef.current = nodes;
 
-    // Start pitch loop
-    rafRef.current = requestAnimationFrame(runPitchLoop);
+      // Connect mic to voice pass-through
+      micSource.connect(nodes.voicePassGain);
+
+      // Start pitch loop
+      rafRef.current = requestAnimationFrame(runPitchLoop);
+      setError(null);
+    } catch (e) {
+      setError("Audio setup failed. Try closing other audio apps.");
+      console.warn("[useLiveTrumpet] Audio graph build failed:", e);
+      return;
+    }
 
     return () => {
       if (rafRef.current !== null) {
@@ -635,7 +618,10 @@ export function useLiveTrumpet({
         nodes.lfo.stop();
         nodes.noiseSource.stop();
       } catch { /* already stopped */ }
-      ctx.close();
+      // Don't close shared bus context
+      if (ctx !== (destNode as AudioNode | null)?.context) {
+        try { ctx.close(); } catch { /* ok */ }
+      }
       ctxRef.current       = null;
       synthRef.current     = null;
       analyserRef.current  = null;
@@ -665,6 +651,7 @@ export function useLiveTrumpet({
     confidence,
     inputLevel,
     isActive,
+    error,
     // Parameters
     brightness,
     setBrightness,

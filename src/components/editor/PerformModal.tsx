@@ -143,7 +143,7 @@ export function PerformModal({
   const leftGestureTimerRef = useRef<{ gesture: GestureId | null; startMs: number }>({ gesture: null, startMs: 0 });
   const leftLatchCooldownRef = useRef<number>(0);
   const lastLeftVolumeRef = useRef<number>(0.7);
-  const lastLeftFilterRef = useRef<number>(4000);
+
 
   // Chord slot refs
   const prevSlotRef = useRef<number | null>(null);
@@ -181,9 +181,7 @@ export function PerformModal({
   });
   useEffect(() => { localStorage.setItem("verses:showZones", String(showZoneGrid)); }, [showZoneGrid]);
 
-  // Filter range (adjustable low/high cutoff in Hz)
-  const [filterLo, setFilterLo] = useState(200);
-  const [filterHi, setFilterHi] = useState(8000);
+
 
   // Live volume level for visual feedback (0-1)
   const [liveVolume, setLiveVolume] = useState(0);
@@ -322,31 +320,9 @@ export function PerformModal({
     const left  = newLeft;
     const right = newRight;
 
-    // LEFT HAND - Latched transport
+    // LEFT HAND - Latched transport only (no vertical volume/filter control)
     if (left.present && left.gesture) {
       const gesture = left.gesture;
-      
-      // Update volume/filter continuously while hand is visible
-      // Exponential curve: hand position 0-1 maps to volume via x^2.5
-      // This gives finer control at low volumes and a natural loudness feel
-      const rawVol = Math.max(0, Math.min(1, 1 - left.wristY)); // high hand = loud
-      const curvedVol = Math.pow(rawVol, 2.2);
-      const previousVol = lastLeftVolumeRef.current;
-      const vol = Math.abs(curvedVol - previousVol) < 0.04
-        ? previousVol
-        : previousVol * 0.8 + curvedVol * 0.2;
-      lastLeftVolumeRef.current = vol;
-      setLiveVolume(rawVol);
-      lastLeftFilterRef.current = filterLo + left.wristX * (filterHi - filterLo);
-      
-      // Apply volume (respecting mute)
-      if (beatLatchRef.current !== 'muted') {
-        drum.setDrumVolume(vol);
-        if (beatSource === 'youtube') {
-          window.dispatchEvent(new CustomEvent('verses:beat-volume', { detail: { volume: vol * 100 } }));
-        }
-      }
-      drum.setFilterCutoff(lastLeftFilterRef.current);
       
       // Latch logic: track how long gesture has been held
       if (gesture === leftGestureTimerRef.current.gesture) {
@@ -361,7 +337,7 @@ export function PerformModal({
             else window.dispatchEvent(new CustomEvent('verses:beat-play'));
             beatLatchRef.current = 'playing';
             leftLatchCooldownRef.current = Date.now();
-            leftGestureTimerRef.current = { gesture: null, startMs: 0 }; // reset timer
+            leftGestureTimerRef.current = { gesture: null, startMs: 0 };
           } else if (gesture === 'fist' && beatLatchRef.current === 'playing') {
             // Stop beat
             if (beatSource === 'drums') drum.stop();
@@ -387,11 +363,11 @@ export function PerformModal({
         leftGestureTimerRef.current = { gesture, startMs: Date.now() };
       }
     } else {
-      // Hand absent: KEEP beat state, just stop updating volume/filter
+      // Hand absent: KEEP beat state
       leftGestureTimerRef.current = { gesture: null, startMs: 0 };
     }
 
-    // RIGHT HAND - Zone-based chord system
+    // RIGHT HAND - Zone-based chord system + vertical expression
     if (right.present && right.gesture) {
       const g = right.gesture;
       const zone = Math.min(3, Math.floor(right.wristX * 4)); // 0,1,2,3
@@ -399,23 +375,36 @@ export function PerformModal({
       
       if (g === 'fist') {
         // SILENCE: release all chords immediately
-        chord.releaseChord(); // fast fade
+        chord.releaseChord();
         setActiveSlot(null);
         setIsSilenced(true);
         prevSlotRef.current = null;
+        setLiveVolume(0);
       } else if (g === 'pinch') {
         const nowMs = Date.now();
         if (nowMs - lastRightActionMsRef.current < 300) return;
         lastRightActionMsRef.current = nowMs;
-        // Sustain toggle OR retrigger
         sustainRef.current = !sustainRef.current;
         if (!sustainRef.current && activeSlot !== null) {
-          // Re-trigger current slot
           const slot = chordSlots.find(s => s.slot === activeSlot);
           if (slot) chord.playChord(slot);
         }
       } else {
         setIsSilenced(false);
+
+        // Right hand vertical expression: controls chord volume/brightness
+        const rawExpr = Math.max(0, Math.min(1, 1 - right.wristY));
+        const prevExpr = lastLeftVolumeRef.current; // reuse ref for chord expression
+        // Deadband + EMA smoothing
+        const expr = Math.abs(rawExpr - prevExpr) < 0.04
+          ? prevExpr
+          : prevExpr * 0.8 + rawExpr * 0.2;
+        lastLeftVolumeRef.current = expr;
+        setLiveVolume(expr);
+        // Map expression to chord volume: 0.12–0.47
+        const chordVol = 0.12 + expr * 0.35;
+        chord.setChordVolume(chordVol);
+
         let targetSlot: number;
         if (g === 'open') targetSlot = zone + 1; // 1,2,3,4
         else if (g === 'two') targetSlot = zone + 5; // 5,6,7,8
@@ -435,11 +424,10 @@ export function PerformModal({
         }
       }
     } else {
-      // Hand absent: if not sustaining, don't release (let chord ring)
-      // This is intentional — sustain by default when hand leaves
+      // Hand absent: freeze last expression, let chord ring
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [beatSource, chord, chordSlots, activeSlot, drum, filterLo, filterHi]);
+  }, [beatSource, chord, chordSlots, activeSlot, drum]);
 
   // Camera controls
   // ── Detection loop (RAF-based) ──
@@ -720,8 +708,8 @@ export function PerformModal({
                 </span>
               </div>
             )}
-            {/* Left-hand volume bar (vertical, left edge of camera) */}
-            {camActive && leftHand.present && (
+            {/* Right-hand chord expression bar (vertical, left edge of camera) */}
+            {camActive && rightHand.present && rightHand.gesture !== 'fist' && (
               <div className="absolute bottom-12 left-3 top-12 flex w-3 flex-col justify-end overflow-hidden rounded-full bg-ink/40 backdrop-blur-sm">
                 <div
                   className="w-full rounded-full transition-all duration-75"
@@ -905,24 +893,7 @@ export function PerformModal({
                   </div>
                 </div>
 
-                {/* Filter range (gesture-controlled sweep bounds) */}
-                <div className="space-y-2">
-                  <div className="mb-1.5 text-[9px] uppercase tracking-widest text-ink-mute/50">Filter Range (left hand X)</div>
-                  <div>
-                    <div className="mb-1 flex items-center justify-between text-[9px] text-ink-mute/50">
-                      <span>Low</span><span>{filterLo} Hz</span>
-                    </div>
-                    <input type="range" min="50" max="2000" step="50" value={filterLo}
-                      onChange={(e) => setFilterLo(Math.min(parseInt(e.target.value), filterHi - 200))} className="w-full" />
-                  </div>
-                  <div>
-                    <div className="mb-1 flex items-center justify-between text-[9px] text-ink-mute/50">
-                      <span>High</span><span>{filterHi} Hz</span>
-                    </div>
-                    <input type="range" min="1000" max="16000" step="200" value={filterHi}
-                      onChange={(e) => setFilterHi(Math.max(parseInt(e.target.value), filterLo + 200))} className="w-full" />
-                  </div>
-                </div>
+
 
                 {/* Step Sequencer (read-only visualization) */}
                 <div>

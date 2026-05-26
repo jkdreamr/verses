@@ -39,26 +39,28 @@ export function usePerformAudioBus() {
     const ctx = new Ctx() as AudioContext;
 
     const masterGain = ctx.createGain();
-    masterGain.gain.value = 0.75;
+    masterGain.gain.value = 0.65;
 
     const drumGain = ctx.createGain();
-    drumGain.gain.value = 0.6;
+    drumGain.gain.value = 0.50;
 
     const chordGain = ctx.createGain();
-    chordGain.gain.value = 0.45;
+    chordGain.gain.value = 0.28;
 
     const trumpetGain = ctx.createGain();
-    trumpetGain.gain.value = 0.5;
+    trumpetGain.gain.value = 0.40;
 
+    // Gentle glue compressor — not harsh
     const compressor = ctx.createDynamicsCompressor();
-    compressor.threshold.value = -18;
-    compressor.knee.value = 12;
-    compressor.ratio.value = 4;
-    compressor.attack.value = 0.003;
-    compressor.release.value = 0.15;
+    compressor.threshold.value = -20;
+    compressor.knee.value = 16;
+    compressor.ratio.value = 3;
+    compressor.attack.value = 0.005;
+    compressor.release.value = 0.2;
 
+    // Safety limiter — prevents clipping
     const limiter = ctx.createDynamicsCompressor();
-    limiter.threshold.value = -3;
+    limiter.threshold.value = -2;
     limiter.knee.value = 0;
     limiter.ratio.value = 20;
     limiter.attack.value = 0.001;
