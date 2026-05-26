@@ -81,15 +81,64 @@ input::placeholder {
 }
 
 .scrollbar-thin::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 .scrollbar-thin::-webkit-scrollbar-thumb {
-  background: rgb(var(--line));
+  background: rgb(var(--line) / 0.6);
   border-radius: 3px;
 }
 .scrollbar-thin::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* Custom range slider */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: rgb(var(--line) / 0.5);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: rgb(var(--accent));
+  border: none;
+  cursor: pointer;
+  transition: transform 100ms;
+}
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: rgb(var(--accent));
+  border: none;
+  cursor: pointer;
+}
+
+/* Focus states */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 1px solid rgb(var(--accent) / 0.5);
+  outline-offset: 2px;
+}
+
+/* Select styling */
+select {
+  background: rgb(var(--surface));
+  border: 1px solid rgb(var(--line) / 0.4);
+  color: rgb(var(--text));
+  border-radius: 2px;
 }
 
 @media print {

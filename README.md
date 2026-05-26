@@ -19,7 +19,7 @@ Writing leads directly to performance. When you are ready to record, you open a 
 ### Writing
 - Distraction-free lyric editor with autosave
 - Version history (restore any snapshot)
-- **Rhyme Lens** — toggle a full-draft analysis mode: end rhymes grouped by sound family, internal echoes, start rhymes, near/slant rhymes, repeated phrases, unrhymed lines, possible hooks. Updates as you type (debounced).
+- **Rhyme Lens** — inline rhyme analysis directly in the editor. Highlights appear behind your text as you type: end rhymes, internal echoes, multisyllabic chains, slant/near rhymes, assonance, consonance, alliteration, repeated phrases, cross-line echoes, and weak lines. Each family gets a distinct color. Click a family in the Sound Map panel to isolate it. Three density modes (Clean, Detailed, Max) control how much is shown.
 - Per-word rhyme finder: highlight any word, get perfect / near / sounds-like results from Datamuse
 - Structure tags (Verse, Pre-Chorus, Chorus, Bridge, Outro)
 - Export as text / copy / print
@@ -83,10 +83,13 @@ These work as a unified recording session. The resulting take captures the selec
 - No stuck notes after mouseup, touch cancel, or modal close
 
 ### Voice to Score (standalone)
-- Record a short hummed melody
-- YIN pitch detection with median smoothing and note segmentation
-- Piano roll canvas with confidence coloring
-- Re-analyze button, original-recording playback, JSON export
+- Record a short hummed or sung melody (up to 15 seconds)
+- YIN pitch detection with median smoothing, vibrato handling, and note segmentation
+- Piano roll canvas with confidence-based coloring and playhead
+- Clear state progression: Ready → Recording → Analyzing → Results
+- Dual playback: detected melody (synthesized) or original recording
+- Re-analyze, JSON export, clipboard copy
+- Tips for better capture (collapsible)
 - Separate from Takes — accessed via "voice score" in the toolbar
 
 ---

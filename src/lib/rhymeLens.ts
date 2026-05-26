@@ -220,12 +220,26 @@ function normalizeWord(raw: string): string {
   const mapped = NORM_MAP[w];
   if (mapped) return mapped;
 
-  // in' suffix → ing
-  if (w.endsWith("in'") || w.endsWith("in")) {
-    const stem = w.endsWith("in'") ? w.slice(0, -3) : w.slice(0, -2);
+  // in' suffix → ing (only for obvious dropped-g: endin', killin', etc.)
+  if (w.endsWith("in'")) {
+    const stem = w.slice(0, -3);
     if (stem.length >= 2) {
       const candidate = stem + "ing";
       if (!STOP_WORDS.has(candidate)) return candidate;
+    }
+  }
+  // Bare "in" ending only if the stem ends in a consonant (avoids "cabin", "satin", etc.)
+  if (w.endsWith("in") && !w.endsWith("ain") && !w.endsWith("tion") && w.length >= 5) {
+    const stem = w.slice(0, -2);
+    const lastChar = stem[stem.length - 1];
+    // Only expand if stem ends in a doubled consonant or common pattern
+    if (lastChar && !/[aeiou]/.test(lastChar) && NORM_MAP[w] === undefined) {
+      // Check if it looks like a dropped-g word (e.g., "relaxin", "lackin")
+      const beforeLast = stem[stem.length - 2];
+      if (beforeLast && /[aeiou]/.test(beforeLast)) {
+        const candidate = stem + "ing";
+        return candidate;
+      }
     }
   }
 

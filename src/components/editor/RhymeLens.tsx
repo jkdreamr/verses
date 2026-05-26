@@ -16,26 +16,26 @@ import {
 } from "@/lib/rhymeLens";
 
 // ---------------------------------------------------------------------------
-// Color palette — 16 distinct highlight colors
+// Color palette — 16 distinct highlight colors (well-separated hues)
 // ---------------------------------------------------------------------------
 
 export const FAMILY_COLORS: string[] = [
-  "rgba(251,191,36,0.32)",   // amber
-  "rgba(96,165,250,0.30)",   // blue
-  "rgba(236,72,153,0.28)",   // pink
-  "rgba(52,211,153,0.28)",   // emerald
-  "rgba(168,85,247,0.28)",   // purple
-  "rgba(34,211,238,0.28)",   // cyan
-  "rgba(251,146,60,0.30)",   // orange
-  "rgba(163,230,53,0.24)",   // lime
-  "rgba(248,113,113,0.26)",  // red
-  "rgba(129,140,248,0.28)",  // indigo
-  "rgba(232,121,249,0.24)",  // fuchsia
-  "rgba(45,212,191,0.24)",   // teal
-  "rgba(253,186,116,0.28)",  // light-orange
-  "rgba(134,239,172,0.24)",  // light-green
-  "rgba(196,181,253,0.26)",  // light-purple
-  "rgba(252,211,77,0.28)",   // yellow
+  "rgba(251,191,36,0.30)",   // amber
+  "rgba(96,165,250,0.28)",   // blue
+  "rgba(236,72,153,0.26)",   // pink
+  "rgba(52,211,153,0.26)",   // emerald
+  "rgba(168,85,247,0.26)",   // purple
+  "rgba(34,211,238,0.26)",   // cyan
+  "rgba(251,146,60,0.28)",   // orange
+  "rgba(163,230,53,0.22)",   // lime
+  "rgba(248,113,113,0.24)",  // red
+  "rgba(129,140,248,0.26)",  // indigo
+  "rgba(232,121,249,0.22)",  // fuchsia
+  "rgba(45,212,191,0.22)",   // teal
+  "rgba(253,186,116,0.26)",  // light-orange
+  "rgba(134,239,172,0.22)",  // light-green
+  "rgba(196,181,253,0.24)",  // light-purple
+  "rgba(252,211,77,0.26)",   // yellow
 ];
 
 export const FAMILY_BORDER_COLORS: string[] = [
@@ -57,6 +57,26 @@ export const FAMILY_BORDER_COLORS: string[] = [
   "rgba(252,211,77,0.65)",
 ];
 
+// Solid text colors for the family list
+const FAMILY_TEXT_COLORS: string[] = [
+  "rgb(251,191,36)",
+  "rgb(96,165,250)",
+  "rgb(236,72,153)",
+  "rgb(52,211,153)",
+  "rgb(168,85,247)",
+  "rgb(34,211,238)",
+  "rgb(251,146,60)",
+  "rgb(163,230,53)",
+  "rgb(248,113,113)",
+  "rgb(129,140,248)",
+  "rgb(232,121,249)",
+  "rgb(45,212,191)",
+  "rgb(253,186,116)",
+  "rgb(134,239,172)",
+  "rgb(196,181,253)",
+  "rgb(252,211,77)",
+];
+
 // ---------------------------------------------------------------------------
 // Exported types for Editor integration
 // ---------------------------------------------------------------------------
@@ -70,11 +90,11 @@ export type CharHighlight = {
 
 // ---------------------------------------------------------------------------
 // Build character-offset highlight map from analysis result
-// This is used by the Editor to render a highlight layer under the textarea
 // ---------------------------------------------------------------------------
 
 export function buildCharHighlights(
-  analysis: RhymeLensResult | null
+  analysis: RhymeLensResult | null,
+  focusFamilyId?: string | null
 ): Map<number, CharHighlight> {
   const map = new Map<number, CharHighlight>();
   if (!analysis) return map;
@@ -82,10 +102,15 @@ export function buildCharHighlights(
   // Sort families so stronger ones overwrite weaker ones last (stronger wins)
   const sorted = [...analysis.families].sort((a, b) => {
     const str = (s: string) => (s === "strong" ? 3 : s === "medium" ? 2 : 1);
-    return str(a.strength) - str(b.strength); // weakest first, strongest overwrites
+    return str(a.strength) - str(b.strength);
   });
 
-  for (const family of sorted) {
+  // If focus mode, only show the focused family
+  const families = focusFamilyId
+    ? sorted.filter((f) => f.id === focusFamilyId)
+    : sorted;
+
+  for (const family of families) {
     for (const span of family.spans) {
       for (let c = span.start; c < span.end; c++) {
         map.set(c, {
@@ -107,69 +132,88 @@ export function buildCharHighlights(
 const FILTER_LABELS: { key: RhymeType; label: string }[] = [
   { key: "end", label: "End" },
   { key: "internal", label: "Internal" },
-  { key: "multi", label: "Multis" },
+  { key: "multi", label: "Multi" },
   { key: "slant", label: "Slant" },
-  { key: "assonance", label: "Assn." },
-  { key: "consonance", label: "Cons." },
-  { key: "alliteration", label: "Allit." },
-  { key: "repetition", label: "Repeat" },
+  { key: "assonance", label: "Assonance" },
+  { key: "consonance", label: "Consonance" },
+  { key: "alliteration", label: "Alliteration" },
+  { key: "repetition", label: "Repetition" },
   { key: "cross", label: "Cross" },
   { key: "chain", label: "Chain" },
 ];
 
 // ---------------------------------------------------------------------------
-// Sound Map Panel (compact)
+// Sound Map Panel
 // ---------------------------------------------------------------------------
 
 function SoundMapPanel({
   metrics,
   families,
   weakLines,
+  focusFamilyId,
+  onFocusFamily,
 }: {
   metrics: RhymeLensMetrics;
   families: RhymeFamily[];
   weakLines: number[];
+  focusFamilyId: string | null;
+  onFocusFamily: (id: string | null) => void;
 }) {
-  const [expanded, setExpanded] = useState(true);
-
   return (
-    <div className="border-t border-ink-line/50">
-      <button
-        onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center justify-between px-4 py-2 text-left transition-colors hover:bg-ink-line/20"
-      >
-        <span className="font-mono text-[9px] uppercase tracking-widest text-ink-mute">
-          Sound Map
-        </span>
-        <span className="text-[9px] text-ink-mute/60">{expanded ? "\u25B2" : "\u25BC"}</span>
-      </button>
-      {expanded && (
-        <div className="px-4 pb-4 pt-1 space-y-3">
-          {/* Metrics */}
-          <div className="grid grid-cols-3 gap-1">
-            {[
-              { l: "Density", v: `${metrics.rhymeDensity}%` },
-              { l: "End", v: metrics.endRhymeGroups },
-              { l: "Internal", v: metrics.internalRhymeGroups },
-              { l: "Multis", v: metrics.multisyllabicChains },
-              { l: "Slant", v: metrics.slantGroups },
-              { l: "Repeat", v: metrics.repetitionCount },
-              { l: "Avg/ln", v: metrics.averageRhymesPerLine },
-              { l: "Longest", v: metrics.strongestFamilyLength },
-              { l: "Weak", v: metrics.weakLineCount },
-            ].map(({ l, v }) => (
-              <div key={l} className="rounded bg-ink/30 px-2 py-1">
-                <div className="font-mono text-[7px] uppercase tracking-widest text-ink-mute/60">{l}</div>
-                <div className="font-mono text-xs text-ink-text">{v}</div>
-              </div>
-            ))}
+    <div className="space-y-4 px-5 pb-6 pt-4">
+      {/* Metrics grid */}
+      <div className="grid grid-cols-3 gap-2">
+        {[
+          { l: "Density", v: `${metrics.rhymeDensity}%` },
+          { l: "End", v: metrics.endRhymeGroups },
+          { l: "Internal", v: metrics.internalRhymeGroups },
+          { l: "Multi", v: metrics.multisyllabicChains },
+          { l: "Slant", v: metrics.slantGroups },
+          { l: "Repeat", v: metrics.repetitionCount },
+          { l: "Per line", v: metrics.averageRhymesPerLine },
+          { l: "Longest", v: metrics.strongestFamilyLength },
+          { l: "Weak", v: metrics.weakLineCount },
+        ].map(({ l, v }) => (
+          <div key={l} className="py-1.5">
+            <div className="text-[10px] text-ink-mute/50">{l}</div>
+            <div className="font-mono text-sm text-ink-text/90">{v}</div>
           </div>
+        ))}
+      </div>
 
-          {/* Family list */}
-          {families.slice(0, 12).map((f) => (
-            <div key={f.id} className="flex items-start gap-2">
+      {/* Divider */}
+      <div className="h-px bg-ink-line/20" />
+
+      {/* Family list */}
+      <div className="space-y-1">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-ink-mute/60">Sound families</span>
+          {focusFamilyId && (
+            <button
+              onClick={() => onFocusFamily(null)}
+              className="text-[10px] text-amber-gold/70 transition-colors hover:text-amber-gold"
+            >
+              Show all
+            </button>
+          )}
+        </div>
+        {families.slice(0, 16).map((f) => {
+          const isFocused = focusFamilyId === f.id;
+          const isDimmed = focusFamilyId && !isFocused;
+          return (
+            <button
+              key={f.id}
+              onClick={() => onFocusFamily(isFocused ? null : f.id)}
+              className={`flex w-full items-start gap-2.5 rounded px-2 py-1.5 text-left transition-all duration-150 ${
+                isFocused
+                  ? "bg-ink-line/20"
+                  : isDimmed
+                  ? "opacity-30"
+                  : "hover:bg-ink-line/10"
+              }`}
+            >
               <span
-                className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-sm"
+                className="mt-1 h-2 w-2 shrink-0 rounded-sm"
                 style={{
                   backgroundColor:
                     f.type === "repetition"
@@ -182,22 +226,31 @@ function SoundMapPanel({
                 }}
               />
               <div className="min-w-0 flex-1">
-                <div className="truncate font-mono text-[10px] text-ink-text/80">
+                <div
+                  className="truncate text-[11px] leading-tight"
+                  style={{
+                    color: FAMILY_TEXT_COLORS[f.colorIndex % FAMILY_TEXT_COLORS.length],
+                    opacity: isDimmed ? 0.4 : 0.85,
+                  }}
+                >
                   {f.spans.map((s) => s.text).join(" / ")}
                 </div>
-                <div className="font-mono text-[8px] text-ink-mute/60">
-                  {f.type} · {f.spans.length} spans · {f.strength}
+                <div className="mt-0.5 text-[9px] text-ink-mute/40">
+                  {f.type} · {f.spans.length} · {f.strength}
                 </div>
               </div>
-            </div>
-          ))}
+            </button>
+          );
+        })}
+      </div>
 
-          {weakLines.length > 0 && (
-            <div className="font-mono text-[9px] text-ink-mute/50">
-              Weak lines: {weakLines.map((l) => l + 1).join(", ")}
-            </div>
-          )}
-        </div>
+      {weakLines.length > 0 && (
+        <>
+          <div className="h-px bg-ink-line/20" />
+          <div className="text-[10px] text-ink-mute/40">
+            Weak lines: {weakLines.map((l) => l + 1).join(", ")}
+          </div>
+        </>
       )}
     </div>
   );
@@ -205,7 +258,6 @@ function SoundMapPanel({
 
 // ---------------------------------------------------------------------------
 // Main RhymeLens component
-// Now exports analysis via onAnalysis callback for Editor inline highlights
 // ---------------------------------------------------------------------------
 
 export function RhymeLens({
@@ -217,7 +269,7 @@ export function RhymeLens({
   lyrics: string;
   open: boolean;
   onToggle: () => void;
-  onAnalysis?: (result: RhymeLensResult | null) => void;
+  onAnalysis?: (result: RhymeLensResult | null, focusId?: string | null) => void;
 }) {
   const debouncedLyrics = useDebounce(lyrics, 400);
 
@@ -230,6 +282,7 @@ export function RhymeLens({
       ])
   );
   const [strongOnly, setStrongOnly] = useState(false);
+  const [focusFamilyId, setFocusFamilyId] = useState<string | null>(null);
 
   const options = useMemo<RhymeLensOptions>(() => {
     const base =
@@ -248,8 +301,13 @@ export function RhymeLens({
 
   // Push analysis to parent (Editor) for inline highlights
   useEffect(() => {
-    onAnalysis?.(open ? analysis : null);
-  }, [analysis, open, onAnalysis]);
+    onAnalysis?.(open ? analysis : null, focusFamilyId);
+  }, [analysis, open, onAnalysis, focusFamilyId]);
+
+  // Reset focus when analysis changes
+  useEffect(() => {
+    setFocusFamilyId(null);
+  }, [analysis]);
 
   const toggleFilter = useCallback((key: RhymeType) => {
     setEnabledFilters((prev) => {
@@ -264,15 +322,15 @@ export function RhymeLens({
 
   return (
     <>
-      {/* Toggle button — bottom-left */}
+      {/* Toggle button */}
       <button
         onClick={onToggle}
         aria-pressed={open}
         aria-label="Toggle Rhyme Lens"
-        className={`fixed bottom-24 left-4 z-10 px-2.5 py-1 font-mono text-[10px] uppercase tracking-widest transition-all duration-150 print:hidden ${
+        className={`fixed bottom-[7rem] left-8 z-10 ml-[140px] px-3 py-1.5 text-[10px] tracking-wide transition-all duration-150 print:hidden ${
           open
-            ? "border border-amber-gold/50 text-amber-gold bg-amber-gold/5"
-            : "border border-transparent text-ink-mute/60 hover:text-ink-text hover:border-ink-line/50"
+            ? "bg-amber-gold/8 text-amber-gold border border-amber-gold/30"
+            : "text-ink-mute/50 border border-transparent hover:text-ink-text/70 hover:border-ink-line/30"
         }`}
       >
         Rhyme Lens
@@ -282,59 +340,59 @@ export function RhymeLens({
       <aside
         ref={panelRef}
         aria-hidden={!open}
-        className={`fixed bottom-0 right-0 top-0 z-30 flex w-[min(380px,44vw)] flex-col border-l border-ink-line/40 bg-ink-surface/95 backdrop-blur-sm transition-transform duration-200 print:hidden ${
+        className={`fixed bottom-0 right-0 top-0 z-30 flex w-[min(360px,42vw)] flex-col border-l border-ink-line/20 bg-ink/98 backdrop-blur-md transition-transform duration-200 print:hidden ${
           open ? "translate-x-0" : "translate-x-full"
         }`}
       >
         {/* Header */}
-        <header className="flex shrink-0 items-center justify-between px-4 py-3 border-b border-ink-line/30">
-          <div>
-            <span className="font-serif text-sm text-ink-text">Sound Map</span>
-          </div>
+        <header className="flex shrink-0 items-center justify-between px-5 py-4">
+          <span className="font-serif text-[15px] text-ink-text/90">Rhyme Lens</span>
           <button
             onClick={onToggle}
-            className="p-1 text-ink-mute/60 transition-colors hover:text-ink-text"
+            className="p-1 text-ink-mute/40 transition-colors hover:text-ink-text"
             aria-label="Close"
           >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M2 2l10 10M12 2L2 12"/></svg>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M1 1l10 10M11 1L1 11"/></svg>
           </button>
         </header>
 
         {/* Controls */}
-        <div className="shrink-0 px-4 py-2.5 border-b border-ink-line/30">
+        <div className="shrink-0 px-5 pb-3">
+          {/* Density */}
           <div className="flex items-center gap-1">
             {(["clean", "detailed", "max"] as DensityMode[]).map((d) => (
               <button
                 key={d}
                 onClick={() => setDensity(d)}
-                className={`px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider transition-colors ${
+                className={`px-2.5 py-1 text-[10px] capitalize tracking-wide transition-colors ${
                   density === d
                     ? "text-amber-gold bg-amber-gold/8"
-                    : "text-ink-mute/60 hover:text-ink-text"
+                    : "text-ink-mute/40 hover:text-ink-text/70"
                 }`}
               >
                 {d}
               </button>
             ))}
-            <span className="mx-1 h-3 w-px bg-ink-line/30" />
+            <div className="flex-1" />
             <button
               onClick={() => setStrongOnly((v) => !v)}
-              className={`px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider transition-colors ${
-                strongOnly ? "text-amber-gold" : "text-ink-mute/60 hover:text-ink-text"
+              className={`px-2 py-1 text-[10px] tracking-wide transition-colors ${
+                strongOnly ? "text-amber-gold" : "text-ink-mute/40 hover:text-ink-text/70"
               }`}
             >
-              strong
+              Strong only
             </button>
           </div>
-          <div className="mt-1.5 flex flex-wrap gap-0.5">
+          {/* Type filters */}
+          <div className="mt-2 flex flex-wrap gap-1">
             {FILTER_LABELS.map(({ key, label }) => (
               <button
                 key={key}
                 onClick={() => toggleFilter(key)}
-                className={`px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-wider transition-colors ${
+                className={`px-2 py-0.5 text-[9px] tracking-wide transition-colors ${
                   enabledFilters.has(key)
-                    ? "text-ink-text/70 bg-ink-line/30"
-                    : "text-ink-mute/30 hover:text-ink-mute/60"
+                    ? "text-ink-text/60 bg-ink-line/25"
+                    : "text-ink-mute/25 hover:text-ink-mute/50"
                 }`}
               >
                 {label}
@@ -343,52 +401,30 @@ export function RhymeLens({
           </div>
         </div>
 
+        {/* Divider */}
+        <div className="h-px bg-ink-line/15" />
+
         {/* Body */}
         <div className="flex-1 overflow-auto scrollbar-thin">
           {!analysis ? (
-            <div className="px-4 py-8 text-center text-sm text-ink-mute/50">
-              Write lyrics to see analysis.
+            <div className="px-5 py-12 text-center">
+              <p className="text-[13px] text-ink-mute/40">
+                Write a few lines to reveal sound families.
+              </p>
             </div>
           ) : (
             <>
               {analysis.capped && (
-                <div className="px-4 py-1.5 font-mono text-[9px] text-amber-gold/70 border-b border-ink-line/30">
-                  Capped — showing strongest matches
+                <div className="px-5 py-2 text-[10px] text-amber-gold/60">
+                  Showing strongest matches.
                 </div>
               )}
-
-              {/* Legend */}
-              <div className="px-4 py-2 border-b border-ink-line/30">
-                <div className="flex flex-wrap gap-1">
-                  {analysis.families.slice(0, 10).map((f) => (
-                    <span
-                      key={f.id}
-                      className="flex items-center gap-1 px-1 py-0.5 font-mono text-[7px] uppercase tracking-wider text-ink-mute/70"
-                    >
-                      <span
-                        className="h-1.5 w-1.5 rounded-sm"
-                        style={{
-                          backgroundColor:
-                            f.type === "repetition"
-                              ? "transparent"
-                              : FAMILY_COLORS[f.colorIndex % FAMILY_COLORS.length],
-                          border:
-                            f.type === "repetition"
-                              ? `1px dashed ${FAMILY_BORDER_COLORS[f.colorIndex % FAMILY_BORDER_COLORS.length]}`
-                              : undefined,
-                        }}
-                      />
-                      {f.type}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              {/* Sound Map */}
               <SoundMapPanel
                 metrics={analysis.metrics}
                 families={analysis.families}
                 weakLines={analysis.weakLines}
+                focusFamilyId={focusFamilyId}
+                onFocusFamily={setFocusFamilyId}
               />
             </>
           )}

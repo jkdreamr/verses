@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+// tipsOpen state for collapsible tips panel
 import { useToast } from "@/components/Toast";
 
 // ---------------------------------------------------------------------------
@@ -240,8 +241,8 @@ function drawPianoRoll(
   canvas.width = W;
   canvas.height = H;
 
-  // Background
-  ctx.fillStyle = "#0d0d0d";
+  // Background — clean dark surface
+  ctx.fillStyle = "#141414";
   ctx.fillRect(0, 0, W, H);
 
   // Row backgrounds
@@ -249,31 +250,31 @@ function drawPianoRoll(
     const row = midiMax - m;
     const y = row * PIANO_ROLL_ROW_H;
     const isBlack = [1, 3, 6, 8, 10].includes(m % 12);
-    ctx.fillStyle = isBlack ? "#101010" : "#161616";
+    ctx.fillStyle = isBlack ? "#111111" : "#181818";
     ctx.fillRect(PIANO_ROLL_LABEL_W, y, contentW, PIANO_ROLL_ROW_H);
-    // Thin row divider
-    ctx.fillStyle = "#1e1e1e";
+    // Very subtle row divider
+    ctx.fillStyle = "rgba(255,255,255,0.03)";
     ctx.fillRect(PIANO_ROLL_LABEL_W, y + PIANO_ROLL_ROW_H - 1, contentW, 1);
   }
 
   // Label background column
-  ctx.fillStyle = "#0d0d0d";
+  ctx.fillStyle = "#141414";
   ctx.fillRect(0, 0, PIANO_ROLL_LABEL_W, H);
-  // Separator line
-  ctx.fillStyle = "#252525";
+  // Separator line — subtle
+  ctx.fillStyle = "rgba(255,255,255,0.06)";
   ctx.fillRect(PIANO_ROLL_LABEL_W - 1, 0, 1, H);
 
-  // Beat grid lines (every 0.5s — subtle)
+  // Beat grid lines (every 0.5s — very subtle)
   for (let t = 0; t <= totalDuration + 0.01; t += 0.5) {
     const x = PIANO_ROLL_LABEL_W + t * PIANO_ROLL_PX_PER_SEC;
     const isBar = Math.abs(t % 2) < 0.01;
-    ctx.fillStyle = isBar ? "#2a2a2a" : "#1c1c1c";
+    ctx.fillStyle = isBar ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.03)";
     ctx.fillRect(x, 0, 1, H);
   }
 
-  // Time ruler labels
-  ctx.fillStyle = "#3a3a3a";
-  ctx.font = "9px ui-monospace, monospace";
+  // Time ruler labels — crisp monospace
+  ctx.fillStyle = "rgba(255,255,255,0.2)";
+  ctx.font = "9px ui-monospace, 'Cascadia Code', 'Fira Code', monospace";
   ctx.textAlign = "center";
   for (let t = 0; t <= totalDuration; t += 1) {
     const x = PIANO_ROLL_LABEL_W + t * PIANO_ROLL_PX_PER_SEC;
@@ -319,16 +320,16 @@ function drawPianoRoll(
     ctx.closePath();
     ctx.fill();
 
-    // Note name label inside block if wide enough
+    // Note name label inside block if wide enough — crisp monospace
     if (w > 28) {
-      ctx.fillStyle = conf >= 0.4 ? "rgba(0,0,0,0.75)" : "rgba(180,180,180,0.6)";
-      ctx.font = "bold 8px ui-monospace, monospace";
+      ctx.fillStyle = conf >= 0.4 ? "rgba(0,0,0,0.8)" : "rgba(200,200,200,0.5)";
+      ctx.font = "bold 8px ui-monospace, 'Cascadia Code', 'Fira Code', monospace";
       ctx.textAlign = "left";
       ctx.fillText(note.name, x + 3, y + PIANO_ROLL_ROW_H - 4);
     }
   }
 
-  // Piano key labels (left column)
+  // Piano key labels (left column) — crisp monospace
   ctx.textAlign = "right";
   for (let m = midiMin; m <= midiMax; m++) {
     const row = midiMax - m;
@@ -338,13 +339,13 @@ function drawPianoRoll(
     const isBlack = [1, 3, 6, 8, 10].includes(m % 12);
 
     if (isC) {
-      ctx.fillStyle = "#c9a84c";
-      ctx.font = "bold 9px ui-monospace, monospace";
+      ctx.fillStyle = "rgba(201,168,76,0.9)";
+      ctx.font = "bold 9px ui-monospace, 'Cascadia Code', 'Fira Code', monospace";
       ctx.fillText(name, PIANO_ROLL_LABEL_W - 5, y + PIANO_ROLL_ROW_H - 4);
     } else if (!isBlack && m % 2 === 0) {
       // Show every other white key to avoid crowding
-      ctx.fillStyle = "#3a3a3a";
-      ctx.font = "9px ui-monospace, monospace";
+      ctx.fillStyle = "rgba(255,255,255,0.2)";
+      ctx.font = "9px ui-monospace, 'Cascadia Code', 'Fira Code', monospace";
       ctx.fillText(name, PIANO_ROLL_LABEL_W - 5, y + PIANO_ROLL_ROW_H - 4);
     }
   }
@@ -379,21 +380,25 @@ function ConfBar({ value }: { value: number }) {
   const pct = Math.round(Math.max(0, Math.min(1, value)) * 100);
   return (
     <div className="inline-flex items-center gap-1.5">
-      <div className="h-1.5 w-20 overflow-hidden bg-ink-line" style={{ borderRadius: 1 }}>
+      <div
+        className="h-1 w-20 overflow-hidden"
+        style={{ borderRadius: 1, background: "rgba(255,255,255,0.06)" }}
+      >
         <div
           className="h-full transition-all"
           style={{
             width: `${pct}%`,
+            borderRadius: 1,
             background:
               pct >= 70
                 ? "rgba(201,168,76,0.85)"
                 : pct >= 40
                   ? "rgba(201,168,76,0.5)"
-                  : "rgba(100,100,100,0.7)",
+                  : "rgba(120,120,120,0.5)",
           }}
         />
       </div>
-      <span className="text-[10px] text-ink-mute/70">{pct}%</span>
+      <span className="font-mono text-[10px] tabular-nums text-ink-mute/60">{pct}%</span>
     </div>
   );
 }
@@ -439,6 +444,7 @@ export function VoiceToScoreModal({
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_rawAudioBlob, setRawAudioBlob] = useState<Blob | null>(null);
   const [rawAudioUrl, setRawAudioUrl] = useState<string | null>(null);
+  const [tipsOpen, setTipsOpen] = useState(false);
 
   // ── Audio pipeline refs ───────────────────────────────────────────────────
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -581,7 +587,9 @@ export function VoiceToScoreModal({
     setErrorMsg("");
 
     if (!navigator.mediaDevices?.getUserMedia || !window.AudioContext) {
-      setErrorMsg("This feature requires a modern browser with Web Audio API support.");
+      setErrorMsg(
+        "No microphone API available. Try a modern browser (Chrome, Firefox, Safari) and ensure the page is served over HTTPS.",
+      );
       setRecState("error");
       return;
     }
@@ -590,7 +598,9 @@ export function VoiceToScoreModal({
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     } catch {
-      setErrorMsg("Microphone access required. Enable it in your browser settings and try again.");
+      setErrorMsg(
+        "Microphone access was denied or no microphone was found. Enable mic permissions in your browser settings, then try again.",
+      );
       setRecState("error");
       return;
     }
@@ -886,32 +896,49 @@ export function VoiceToScoreModal({
 
       {/* ─── Header ──────────────────────────────────────────────────────── */}
       <div className="flex shrink-0 items-center justify-between border-b border-ink-line px-5 py-3">
-        <div className="flex items-center gap-3">
-          <span className="font-mono text-[11px] uppercase tracking-widest text-amber-gold">
+        <div className="flex items-center gap-4">
+          <span className="font-serif text-base tracking-tight text-ink-text">
             Voice to Score
           </span>
+          {/* State badge */}
+          {recState === "idle" && (
+            <span className="font-mono text-[10px] text-ink-mute/50">
+              Ready to capture
+            </span>
+          )}
           {recState === "recording" && (
             <span className="flex items-center gap-1.5 font-mono text-[10px] text-red-400/80">
               <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />
-              REC {fmtTime(elapsed)}
+              Recording… {fmtTime(elapsed)}
             </span>
           )}
           {recState === "analyzing" && (
             <span className="flex items-center gap-1.5 font-mono text-[10px] text-ink-mute">
               <Spinner />
-              Analyzing
+              Analyzing pitch…
             </span>
+          )}
+          {recState === "results" && (
+            <span className="font-mono text-[10px] text-amber-gold/70">
+              {notes.length > 0
+                ? `${notes.length} note${notes.length !== 1 ? "s" : ""} detected`
+                : "No pitch detected"}
+            </span>
+          )}
+          {recState === "error" && (
+            <span className="font-mono text-[10px] text-red-400/80">Error</span>
           )}
         </div>
         <button
           onClick={() => {
+            stopMicPipeline();
             fullReset();
             onClose();
           }}
-          className="border border-ink-line px-2.5 py-1 font-mono text-[11px] text-ink-mute transition-colors hover:border-ink-text/50 hover:text-ink-text"
+          className="border border-ink-line/40 px-2.5 py-1 font-mono text-[11px] text-ink-mute transition-colors hover:border-ink-text/50 hover:text-ink-text"
           aria-label="Close Voice to Score"
         >
-          x exit
+          ✕ exit
         </button>
       </div>
 
@@ -919,34 +946,65 @@ export function VoiceToScoreModal({
       <div className="flex-1 overflow-y-auto px-5 py-5">
 
         {/* Subtitle */}
-        <p className="mb-5 max-w-lg text-sm text-ink-mute">
+        <p className="mb-4 max-w-lg font-serif text-sm text-ink-mute">
           Melody sketch —{" "}
           <span className="text-ink-text">works best with one clear monophonic vocal line.</span>{" "}
           Pitch detection runs entirely in your browser.
         </p>
 
+        {/* Idle: quick tips nudge */}
+        {recState === "idle" && (
+          <div className="mb-5 max-w-sm">
+            <button
+              onClick={() => setTipsOpen((v) => !v)}
+              className="flex items-center gap-1.5 font-mono text-[10px] text-ink-mute/40 transition-colors hover:text-ink-mute/70"
+              aria-expanded={tipsOpen}
+            >
+              <span
+                className="inline-block transition-transform duration-150"
+                style={{ transform: tipsOpen ? "rotate(90deg)" : "rotate(0deg)" }}
+              >
+                ▶
+              </span>
+              Tips for better capture
+            </button>
+            {tipsOpen && (
+              <ul className="mt-2 space-y-1 pl-4 font-mono text-[11px] text-ink-mute/55">
+                <li>Sing one clear melody line</li>
+                <li>Use headphones to avoid feedback</li>
+                <li>Avoid background music playing</li>
+                <li>Hold notes slightly longer for better detection</li>
+              </ul>
+            )}
+          </div>
+        )}
+
         {/* ── Level meter ───────────────────────────────────────────────── */}
-        <div className="mb-4">
-          <div className="mb-1.5 font-mono text-[10px] uppercase tracking-widest text-ink-mute/60">
+        <div className="mb-5">
+          <div className="mb-1.5 font-mono text-[10px] uppercase tracking-widest text-ink-mute/50">
             Input Level
           </div>
-          <div className="h-2 w-full max-w-sm overflow-hidden border border-ink-line bg-ink-surface">
+          <div
+            className="h-1.5 w-full max-w-sm overflow-hidden"
+            style={{ background: "rgba(255,255,255,0.06)", borderRadius: 1 }}
+          >
             <div
               className="h-full transition-all duration-75"
               style={{
                 width: `${Math.round(level * 100)}%`,
+                borderRadius: 1,
                 background:
-                  level > 0.8
-                    ? "#ef4444"
+                  level > 0.85
+                    ? "rgba(239,68,68,0.9)"
                     : level > 0.5
-                      ? "#c9a84c"
-                      : "rgba(201,168,76,0.6)",
+                      ? "rgba(201,168,76,0.9)"
+                      : "rgba(201,168,76,0.55)",
               }}
             />
           </div>
-          {recState === "recording" && level < 0.05 && (
-            <p className="mt-1 font-mono text-[10px] text-ink-mute/50">
-              No signal detected — check mic permissions
+          {recState === "recording" && level < 0.04 && (
+            <p className="mt-1 font-mono text-[10px] text-ink-mute/40">
+              No signal — check mic permissions
             </p>
           )}
         </div>
@@ -957,13 +1015,19 @@ export function VoiceToScoreModal({
           <span
             className={[
               "font-mono text-xs",
-              recState === "error" ? "text-red-400" : "text-ink-mute",
+              recState === "error"
+                ? "text-red-400"
+                : recState === "idle"
+                  ? "text-ink-mute/50"
+                  : recState === "results" && notes.length > 0
+                    ? "text-ink-text/80"
+                    : "text-ink-mute",
             ].join(" ")}
           >
             {statusMessage}
           </span>
           {recState === "recording" && (
-            <span className="ml-auto font-mono text-[10px] text-ink-mute/60">
+            <span className="ml-auto font-mono text-[10px] tabular-nums text-ink-mute/60">
               {fmtTime(remaining)} remaining
             </span>
           )}
@@ -978,11 +1042,16 @@ export function VoiceToScoreModal({
             className={[
               "flex items-center gap-2 border px-3 py-1.5 font-mono text-xs uppercase tracking-wider transition-colors",
               canRecord
-                ? "border-ink-line text-ink-mute hover:border-amber-gold/50 hover:text-amber-gold"
-                : "cursor-not-allowed border-ink-line text-ink-mute/30",
+                ? "border-ink-line/40 text-ink-mute hover:border-amber-gold/50 hover:text-amber-gold"
+                : "cursor-not-allowed border-ink-line/20 text-ink-mute/25",
             ].join(" ")}
           >
-            <span className="inline-block h-2 w-2 rounded-full bg-red-500/70" />
+            <span
+              className={[
+                "inline-block h-2 w-2 rounded-full",
+                canRecord ? "bg-red-500/70" : "bg-red-500/25",
+              ].join(" ")}
+            />
             Record
           </button>
 
@@ -993,8 +1062,8 @@ export function VoiceToScoreModal({
             className={[
               "border px-3 py-1.5 font-mono text-xs uppercase tracking-wider transition-colors",
               canStop
-                ? "border-ink-line text-ink-text hover:border-amber-gold/50 hover:text-amber-gold"
-                : "cursor-not-allowed border-ink-line text-ink-mute/30",
+                ? "border-ink-line/40 text-ink-text hover:border-amber-gold/50 hover:text-amber-gold"
+                : "cursor-not-allowed border-ink-line/20 text-ink-mute/25",
             ].join(" ")}
           >
             Stop
@@ -1015,8 +1084,8 @@ export function VoiceToScoreModal({
               className={[
                 "flex items-center gap-1.5 border px-3 py-1.5 font-mono text-xs uppercase tracking-wider transition-colors",
                 canPlay
-                  ? "border-ink-line text-ink-mute hover:border-amber-gold/50 hover:text-amber-gold"
-                  : "cursor-not-allowed border-ink-line text-ink-mute/30",
+                  ? "border-ink-line/40 text-ink-mute hover:border-amber-gold/50 hover:text-amber-gold"
+                  : "cursor-not-allowed border-ink-line/20 text-ink-mute/25",
               ].join(" ")}
             >
               Play Back
@@ -1025,7 +1094,7 @@ export function VoiceToScoreModal({
 
           {/* Playback mode selector */}
           {hasResults && (
-            <div className="flex items-center border border-ink-line font-mono text-[10px] uppercase tracking-wider">
+            <div className="flex items-center border border-ink-line/40 font-mono text-[10px] uppercase tracking-wider">
               <button
                 onClick={() => setPlayMode("detected")}
                 className={[
@@ -1059,19 +1128,19 @@ export function VoiceToScoreModal({
           {hasResults && (
             <button
               onClick={reAnalyze}
-              className="border border-ink-line px-3 py-1.5 font-mono text-xs uppercase tracking-wider text-ink-mute transition-colors hover:border-amber-gold/50 hover:text-amber-gold"
+              className="border border-ink-line/40 px-3 py-1.5 font-mono text-xs uppercase tracking-wider text-ink-mute transition-colors hover:border-amber-gold/50 hover:text-amber-gold"
             >
               Re-analyze
             </button>
           )}
 
-          {/* Clear */}
+          {/* Try again / Clear */}
           {hasResults && (
             <button
               onClick={fullReset}
-              className="border border-ink-line px-3 py-1.5 font-mono text-xs uppercase tracking-wider text-ink-mute transition-colors hover:border-ink-text/50 hover:text-ink-text"
+              className="border border-ink-line/40 px-3 py-1.5 font-mono text-xs uppercase tracking-wider text-ink-mute transition-colors hover:border-ink-text/50 hover:text-ink-text"
             >
-              Clear
+              Try again
             </button>
           )}
         </div>
@@ -1117,8 +1186,8 @@ export function VoiceToScoreModal({
             </div>
             <div
               ref={canvasWrapRef}
-              className="overflow-x-auto border border-ink-line"
-              style={{ maxHeight: 360, background: "#0d0d0d" }}
+              className="overflow-x-auto border border-ink-line/30"
+              style={{ maxHeight: 360, background: "#141414" }}
             >
               <canvas ref={canvasRef} style={{ display: "block" }} />
             </div>
@@ -1146,20 +1215,20 @@ export function VoiceToScoreModal({
                   key={i}
                   title={`Start: ${note.startTime.toFixed(2)}s · Duration: ${note.duration.toFixed(2)}s · Confidence: ${Math.round(note.confidence * 100)}%`}
                   className={[
-                    "border px-2 py-0.5 font-mono text-xs",
+                    "inline-flex items-baseline gap-1 border px-2 py-0.5",
                     note.confidence >= 0.7
-                      ? "border-amber-gold/40 text-amber-gold"
+                      ? "border-amber-gold/35 text-amber-gold"
                       : note.confidence >= 0.4
-                        ? "border-amber-gold/20 text-amber-gold/60"
-                        : "border-ink-line text-ink-mute/50",
+                        ? "border-amber-gold/15 text-amber-gold/55"
+                        : "border-ink-line/40 text-ink-mute/40",
                   ].join(" ")}
                 >
-                  {note.name}
-                  <span className="ml-1 text-[10px] opacity-50">
+                  <span className="font-mono text-xs tracking-tight">{note.name}</span>
+                  <span className="font-mono text-[9px] tabular-nums opacity-40">
                     {note.duration.toFixed(2)}s
                   </span>
                   {note.confidence < 0.4 && (
-                    <span className="ml-1 text-[9px] opacity-40">?</span>
+                    <span className="font-mono text-[9px] opacity-35">?</span>
                   )}
                 </span>
               ))}
@@ -1241,19 +1310,19 @@ export function VoiceToScoreModal({
           <div className="mb-8 flex flex-wrap gap-2">
             <button
               onClick={exportJson}
-              className="border border-ink-line px-3 py-1.5 font-mono text-xs uppercase tracking-wider text-ink-mute transition-colors hover:border-amber-gold/50 hover:text-amber-gold"
+              className="border border-ink-line/40 px-3 py-1.5 font-mono text-xs uppercase tracking-wider text-ink-mute transition-colors hover:border-amber-gold/50 hover:text-amber-gold"
             >
               Export JSON
             </button>
             <button
               onClick={() => void copyNotes()}
-              className="border border-ink-line px-3 py-1.5 font-mono text-xs uppercase tracking-wider text-ink-mute transition-colors hover:border-amber-gold/50 hover:text-amber-gold"
+              className="border border-ink-line/40 px-3 py-1.5 font-mono text-xs uppercase tracking-wider text-ink-mute transition-colors hover:border-amber-gold/50 hover:text-amber-gold"
             >
               Copy Notes
             </button>
             <button
               onClick={() => void copySequenceFormatted()}
-              className="border border-ink-line px-3 py-1.5 font-mono text-xs uppercase tracking-wider text-ink-mute transition-colors hover:border-amber-gold/50 hover:text-amber-gold"
+              className="border border-ink-line/40 px-3 py-1.5 font-mono text-xs uppercase tracking-wider text-ink-mute transition-colors hover:border-amber-gold/50 hover:text-amber-gold"
             >
               Copy Formatted
             </button>
@@ -1264,26 +1333,38 @@ export function VoiceToScoreModal({
         {recState === "error" && (
           <button
             onClick={fullReset}
-            className="mb-6 border border-ink-line px-3 py-1.5 font-mono text-xs uppercase tracking-wider text-ink-mute transition-colors hover:border-ink-text/50 hover:text-ink-text"
+            className="mb-6 border border-ink-line/40 px-3 py-1.5 font-mono text-xs uppercase tracking-wider text-ink-mute transition-colors hover:border-ink-text/50 hover:text-ink-text"
           >
             Try Again
           </button>
         )}
 
-        {/* ── Tips ──────────────────────────────────────────────────────── */}
-        <div className="border-t border-ink-line pt-5">
-          <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute/50">
-            Tips for Better Transcription
-          </div>
-          <ul className="space-y-1 font-mono text-[11px] text-ink-mute/60">
-            <li>Sing one note at a time, clearly and without sliding</li>
-            <li>Hold each note for at least 0.3 seconds</li>
-            <li>Record in a quiet room — background noise degrades accuracy</li>
-            <li>If a beat is playing, use headphones to prevent bleed</li>
-            <li>Avoid melisma or fast runs — this tool handles steady pitches best</li>
-            <li>Hum works just as well as singing — sometimes better</li>
-          </ul>
-          <p className="mt-3 font-mono text-[10px] text-ink-mute/35">
+        {/* ── Tips for better capture (collapsible) ─────────────────────── */}
+        <div className="border-t border-ink-line/40 pt-5">
+          <button
+            onClick={() => setTipsOpen((v) => !v)}
+            className="mb-2 flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute/50 transition-colors hover:text-ink-mute"
+            aria-expanded={tipsOpen}
+          >
+            <span
+              className="inline-block transition-transform duration-150"
+              style={{ transform: tipsOpen ? "rotate(90deg)" : "rotate(0deg)" }}
+            >
+              ▶
+            </span>
+            Tips for better capture
+          </button>
+          {tipsOpen && (
+            <ul className="mb-4 space-y-1.5 pl-4 font-mono text-[11px] text-ink-mute/60">
+              <li>Sing one clear melody line — no harmonies</li>
+              <li>Use headphones to avoid mic feedback from playback</li>
+              <li>Avoid background music playing — it confuses pitch detection</li>
+              <li>Hold notes slightly longer for better detection accuracy</li>
+              <li>Record in a quiet room — background noise degrades results</li>
+              <li>Humming works just as well as singing, sometimes better</li>
+            </ul>
+          )}
+          <p className="font-mono text-[10px] text-ink-mute/35">
             Melody sketch, not notation. Max {MAX_DURATION}s · All processing is client-side.
           </p>
         </div>

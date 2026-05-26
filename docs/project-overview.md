@@ -7,7 +7,7 @@ Verses is a browser-native songwriting and performance workbench. The core produ
 ### Writing
 - Distraction-free lyric editor with autosave, version history, and structure tags
 - Per-word rhyme finder via Datamuse (perfect, near, sounds-like)
-- **Rhyme Lens**: whole-draft analysis mode — end rhymes grouped by sound family, internal echoes, start rhymes, near/slant rhymes, repeated phrases, unrhymed lines. Toggle in the editor. Debounced, deterministic, no external API.
+- **Rhyme Lens**: inline editor highlighting — highlights appear directly behind text in the editor, showing end rhymes, internal rhymes, multisyllabic chains, compound rhymes, slant/near rhymes, assonance, consonance, alliteration, repetition, cross-line echoes, and weak lines. Each sound family gets a distinct color. Sound Map panel shows metrics and clickable family list (click to isolate). Three density modes (Clean/Detailed/Max). Debounced, deterministic, no external API. See `docs/rhyme-lens-test-plan.md` for test cases.
 - OCR: photograph handwritten lyrics, paste into editor
 - Export as text / copy / print
 

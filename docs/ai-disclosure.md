@@ -121,3 +121,25 @@ The original scaffold (created with `create-next-app`) provided only the basic N
 - Smart Lyric Follow with SpeechRecognition API, word normalization, and pace fallback
 - Performance Layers architecture integrating gesture/trumpet into the recording session
 - Shared performance hooks (`useDrumEngine`, `useChordSynth`, `useHandTracking`, `useLiveTrumpet`)
+
+---
+
+## Round 4 — Final Polish Pass
+
+### What AI Was Used For
+
+- Inline editor highlighting: layered textarea architecture (highlight mirror div behind transparent textarea) with scroll sync
+- Rhyme Lens color fix: sequential color assignment replacing hash-based allocation
+- Rhyme Lens UI redesign: clickable family focus, Sound Map panel, density mode controls
+- Perform Modal UI redesign: APD-inspired reductive modernist aesthetic, larger status display, refined chord pads, compact gesture guide
+- Voice to Score refinements: state badges, collapsible tips, piano roll visual improvements, clearer error messages
+- Landing page redesign: cinematic dark editorial layout
+- Global CSS: custom range slider styling, focus states, select styling, refined color tokens
+- Documentation updates
+
+### What Was Author-Designed in Round 4
+
+- **Design direction**: The choice to use visualjournal.it/apd as visual reference for the reductive, modernist, high-contrast aesthetic was the author's
+- **Inline highlight concept**: The decision to show rhyme highlights directly in the writing area (not just a side panel) was the author's product vision
+- **Family focus interaction**: Click-to-isolate in Sound Map was specified by the author as a needed interaction pattern
+- **Word count visibility fix**: The observation that the counter was nearly invisible and the decision to make it clearly readable was the author's

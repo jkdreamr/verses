@@ -7,7 +7,7 @@
 | Lyric editor + autosave | Working | 10s interval, visibilitychange flush |
 | Version history | Working | Cloud + local, 60s snapshot interval |
 | Per-word rhyme finder | Working | Datamuse API, 3 tabs, syllable groups |
-| **Rhyme Lens** | Working | Full-draft analysis, toggle bottom-left |
+| **Rhyme Lens** | Working | Inline editor highlights + Sound Map panel |
 | Structure tags | Working | 9 presets |
 | Export (txt/copy/print) | Working | |
 | OCR scan | Working | Tesseract.js WASM |
@@ -29,15 +29,17 @@
 
 ### Writing & Rhyme Lens
 
-**Test 1: Rhyme Lens toggle**
+**Test 1: Rhyme Lens toggle + inline highlights**
 1. Open any song, write 6+ lines with some rhyming endings (e.g., "night / light / right")
-2. Bottom-left of the editor: click **RHYME LENS**
-3. Expected: panel slides in from the right. Does not displace the editor.
-4. Expected: Summary section shows counts (end rhyme groups, internal echoes, etc.)
-5. Expected: End Rhymes section shows the rhyming group (night/light/right) with amber underline
-6. Expected: Repeated Phrases section shows any 2–4 word phrase appearing 2+ times
-7. Add more text while panel is open → analysis updates after ~0.8s pause
-8. Click toggle again → panel slides out, editor returns to full width
+2. Bottom-left of the editor: click **Rhyme Lens**
+3. Expected: Sound Map panel slides in from the right. Editor adjusts padding.
+4. Expected: highlights appear directly in the editor behind the text (different colors per family)
+5. Expected: Sound Map shows metrics (density, end, internal, etc.) and clickable family list
+6. Expected: night/light/right grouped as one end rhyme family with one color
+7. Click a family in Sound Map → only that family highlighted in the editor
+8. Click "Show all" → all families visible again
+9. Add more text while panel is open → analysis updates after ~0.4s pause
+10. Click toggle again → panel slides out, highlights disappear, editor returns to full width
 
 **Test 2: Per-word rhyme finder still works**
 1. Select a word in the editor
@@ -230,7 +232,7 @@
 | Gesture zones stable (no flickering) | No visible flicker in demo |
 | Smart Lyric Follow fallback | Graceful if Speech API unavailable |
 | Trumpet follows pitch in < 200ms latency | Perceptible responsiveness |
-| Rhyme Lens detects end rhymes | Groups visible for clear rhyming pairs |
+| Rhyme Lens inline highlights | Distinct colors per family, aligned with text |
 | Piano playable without stuck notes | 100% |
 
 ---

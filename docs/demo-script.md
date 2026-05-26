@@ -23,17 +23,23 @@
 
 "But that's single-word lookup. What if you want to understand the whole draft?"
 
-**Click RHYME LENS (bottom-left of editor).**
+**Click Rhyme Lens (bottom-left of editor).**
 
-"Rhyme Lens analyzes the entire lyric at once."
+"Rhyme Lens analyzes the entire lyric and highlights sound families directly in the editor."
 
-**Point to the panel sections:**
+**Point to the inline highlights and Sound Map panel:**
 
-"End rhyme groups — these lines rhyme at the end. Internal echoes — sound patterns inside lines. Repeated phrases — which could be your hook. Unrhymed lines — lines that might need work."
+"Each color is a different rhyme family. Amber might be end rhymes. Blue might be internal echoes. The Sound Map on the right shows what each family is — I can click one to isolate it."
 
-"It's purely local analysis. Nothing leaves the browser. It updates as you type."
+**Click a family in the panel — show it isolating in the editor.**
 
-**Close the panel.** "Let me keep writing. It stays out of the way."
+"End rhymes, internal rhymes, multisyllabic chains, slant, alliteration, repetition — all detected locally. Nothing leaves the browser. Updates as I type."
+
+**Switch density modes — Clean, Detailed, Max.**
+
+"Clean shows only the strongest families. Max shows everything."
+
+**Close the panel.** "Toggle off — highlights disappear, I'm back to writing."
 
 ---
 

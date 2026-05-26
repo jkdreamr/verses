@@ -709,24 +709,37 @@ function PianoKeyboard({ activeNotes }: { activeNotes: number[] }) {
   };
 
   return (
-    <div className="relative h-20 w-full">
-      <div className="absolute inset-0 flex">
-        {whiteKeys.map((note) => (
-          <div
-            key={note}
-            className={`flex-1 border border-ink-line ${
-              isWhiteActive(note) ? "bg-indigo-400" : "bg-white"
-            }`}
-          />
-        ))}
+    <div className="relative h-16 w-full overflow-hidden rounded-sm">
+      {/* White keys */}
+      <div className="absolute inset-0 flex gap-px">
+        {whiteKeys.map((note) => {
+          const active = isWhiteActive(note);
+          return (
+            <div
+              key={note}
+              className={`flex flex-1 flex-col items-center justify-end pb-1 transition-colors duration-75 ${
+                active
+                  ? "bg-amber-gold/30 shadow-[inset_0_-2px_0_rgba(201,168,76,0.6)]"
+                  : "bg-ink-surface/80"
+              }`}
+            >
+              <span className={`font-mono text-[7px] ${active ? "text-amber-gold" : "text-ink-mute/30"}`}>
+                {note}
+              </span>
+            </div>
+          );
+        })}
       </div>
-      <div className="absolute inset-0 flex px-3">
+      {/* Black keys */}
+      <div className="absolute inset-x-0 top-0 flex px-[7%]">
         {blackKeys.map((note, i) => (
-          <div key={i} className="flex-1 relative">
+          <div key={i} className="relative flex-1">
             {note && (
               <div
-                className={`absolute left-1/2 h-12 w-8 -translate-x-1/2 border border-ink-line ${
-                  isBlackActive(note) ? "bg-indigo-600" : "bg-black"
+                className={`absolute left-1/2 top-0 h-9 w-[70%] -translate-x-1/2 rounded-b-sm transition-colors duration-75 ${
+                  isBlackActive(note)
+                    ? "bg-amber-gold/50 shadow-[0_2px_4px_rgba(201,168,76,0.3)]"
+                    : "bg-ink/90"
                 }`}
               />
             )}
@@ -1248,8 +1261,9 @@ export function PerformModal({
               style={{ transform: "scaleX(-1)" }}
             />
             {!camActive && (
-              <div className="absolute inset-0 flex items-center justify-center bg-ink/80">
-                <span className="font-mono text-xs text-ink-mute">Camera off</span>
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-ink/90">
+                <span className="text-[13px] text-ink-mute/50">Start camera to control rhythm and harmony.</span>
+                <span className="text-[10px] text-ink-mute/30">Keep both hands in frame.</span>
               </div>
             )}
             {mediaPipeLoading && (
@@ -1273,52 +1287,28 @@ export function PerformModal({
               </div>
             )}
           </div>
-          {/* Gesture guide */}
-          <div className="scrollbar-thin overflow-y-auto border-t border-ink-line p-3">
-            <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute">
-              Gesture Guide
+          {/* Gesture guide — compact */}
+          <div className="scrollbar-thin overflow-y-auto border-t border-ink-line/20 px-4 py-3">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[9px]">
+              <div className="col-span-2 mb-1 text-ink-mute/40">Quick reference</div>
+              <div className="text-amber-gold/60">L: Open 0.4s</div><div className="text-ink-mute/50">Start beat</div>
+              <div className="text-amber-gold/60">L: Fist 0.4s</div><div className="text-ink-mute/50">Stop beat</div>
+              <div className="text-amber-gold/60">L: Pinch</div><div className="text-ink-mute/50">Mute toggle</div>
+              <div className="text-amber-gold/60">L: Height/X</div><div className="text-ink-mute/50">Vol / Filter</div>
+              <div className="text-cyan-400/60">R: Open + zone</div><div className="text-ink-mute/50">Slots 1–4</div>
+              <div className="text-cyan-400/60">R: Two + zone</div><div className="text-ink-mute/50">Slots 5–8</div>
+              <div className="text-cyan-400/60">R: Fist</div><div className="text-ink-mute/50">Silence</div>
+              <div className="text-cyan-400/60">R: Pinch</div><div className="text-ink-mute/50">Sustain</div>
             </div>
-            <div className="space-y-1.5">
-              <div className="font-mono text-[10px] text-amber-gold">LEFT HAND — RHYTHM</div>
-              {[
-                { g: "OPEN (hold 0.4s)", desc: "Beat starts, latches" },
-                { g: "FIST (hold 0.4s)", desc: "Beat stops" },
-                { g: "PINCH", desc: "Mute / unmute" },
-                { g: "Height", desc: "Volume" },
-                { g: "X position", desc: "Tone filter" },
-              ].map((item) => (
-                <div key={item.g} className="flex justify-between gap-2">
-                  <span className="font-mono text-[10px] text-ink-mute">{item.g}</span>
-                  <span className="font-mono text-[10px] text-ink-text">{item.desc}</span>
-                </div>
-              ))}
-              <div className="mt-2 font-mono text-[10px] text-indigo-400">RIGHT HAND — HARMONY</div>
-              {[
-                { g: "OPEN + zone 1–4", desc: "Chord slots 1–4" },
-                { g: "TWO + zone 1–4", desc: "Chord slots 5–8" },
-                { g: "FIST", desc: "Silence" },
-                { g: "PINCH", desc: "Sustain toggle" },
-              ].map((item) => (
-                <div key={item.g} className="flex justify-between gap-2">
-                  <span className="font-mono text-[10px] text-ink-mute">{item.g}</span>
-                  <span className="font-mono text-[10px] text-ink-text">{item.desc}</span>
-                </div>
-              ))}
-            </div>
-            <div className="mt-3 pt-2 border-t border-ink-line">
-              <div className="font-mono text-[9px] text-ink-mute">
-                Camera stays on this device. Tracking runs locally.
-              </div>
+            <div className="mt-2 text-[8px] text-ink-mute/25">
+              Local processing only. Camera never leaves device.
             </div>
           </div>
         </div>
 
         {/* ── Center: Performance status ── */}
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="border-b border-ink-line/30 px-5 py-2">
-            <span className="font-mono text-[8px] uppercase tracking-[0.3em] text-ink-mute/50">Performance</span>
-          </div>
-          <div className="scrollbar-thin flex flex-1 flex-col gap-4 overflow-y-auto p-5">
+          <div className="scrollbar-thin flex flex-1 flex-col gap-5 overflow-y-auto p-6">
 
             {/* Beat source selector */}
             <div className="flex gap-2">
@@ -1330,13 +1320,13 @@ export function PerformModal({
                   setBeatSource('drums');
                   beatLatchRef.current = 'stopped';
                 }}
-                className={`flex-1 border px-3 py-2 font-mono text-xs transition-colors ${
+                className={`flex-1 py-2.5 text-[11px] tracking-wide transition-colors ${
                   beatSource === 'drums'
-                    ? 'border-amber-gold bg-amber-gold/20 text-amber-gold'
-                    : 'border-ink-line text-ink-mute hover:border-ink-text hover:text-ink-text'
+                    ? 'bg-amber-gold/10 text-amber-gold border-b-2 border-amber-gold/50'
+                    : 'text-ink-mute/50 hover:text-ink-text/70 border-b-2 border-transparent'
                 }`}
               >
-                DRUM PRESET
+                Drum Machine
               </button>
               <button
                 onClick={() => {
@@ -1345,56 +1335,60 @@ export function PerformModal({
                   beatLatchRef.current = 'stopped';
                 }}
                 disabled={!youtubeSession}
-                className={`flex-1 border px-3 py-2 font-mono text-xs transition-colors ${
+                className={`flex-1 py-2.5 text-[11px] tracking-wide transition-colors ${
                   beatSource === 'youtube'
-                    ? 'border-amber-gold bg-amber-gold/20 text-amber-gold'
+                    ? 'bg-amber-gold/10 text-amber-gold border-b-2 border-amber-gold/50'
                     : youtubeSession
-                    ? 'border-ink-line text-ink-mute hover:border-ink-text hover:text-ink-text'
-                    : 'border-ink-line/40 text-ink-mute/40 cursor-not-allowed'
+                    ? 'text-ink-mute/50 hover:text-ink-text/70 border-b-2 border-transparent'
+                    : 'text-ink-mute/20 cursor-not-allowed border-b-2 border-transparent'
                 }`}
               >
-                YOUTUBE BEAT
+                YouTube Beat
               </button>
             </div>
 
             {beatSource === 'youtube' && !youtubeSession && (
-              <div className="text-center font-mono text-xs text-ink-mute/40">
+              <div className="text-center text-[12px] text-ink-mute/40">
                 Load a YouTube beat in the editor first.
               </div>
             )}
 
             {beatSource === 'youtube' && youtubeSession && (
-              <div className="text-center font-mono text-xs text-ink-mute">
+              <div className="text-center text-[12px] text-ink-mute/60">
                 {youtubeSession.youtube_title}
               </div>
             )}
 
-            {/* Beat status */}
-            <div className={`text-center font-mono text-2xl font-bold ${
-              beatLatchRef.current === 'playing' ? 'text-amber-gold animate-pulse' :
-              beatLatchRef.current === 'muted' ? 'text-amber-gold/50' :
-              'text-ink-mute'
-            }`}>
-              {beatLatchRef.current === 'playing' ? (
-                <>● LOOPING — {currentPreset.name} · {drum.currentBpm} BPM</>
-              ) : beatLatchRef.current === 'muted' ? (
-                <>○ MUTED — {currentPreset.name}</>
-              ) : (
-                <>○ STOPPED</>
-              )}
+            {/* Beat status — large and dominant */}
+            <div className="py-4 text-center">
+              <div className={`font-mono text-[13px] tracking-wider ${
+                beatLatchRef.current === 'playing' ? 'text-amber-gold' :
+                beatLatchRef.current === 'muted' ? 'text-amber-gold/40' :
+                'text-ink-mute/40'
+              }`}>
+                {beatLatchRef.current === 'playing' ? 'LOOPING' :
+                 beatLatchRef.current === 'muted' ? 'MUTED' : 'STOPPED'}
+              </div>
+              <div className="mt-2 font-serif text-3xl tracking-tight text-ink-text/90">
+                {beatLatchRef.current !== 'stopped' ? (
+                  <>{currentPreset.name} <span className="font-mono text-lg text-ink-mute/50">{drum.currentBpm}</span></>
+                ) : (
+                  <span className="text-ink-mute/20">—</span>
+                )}
+              </div>
             </div>
 
-            {/* Practice copy */}
+            {/* Guidance text */}
             {beatLatchRef.current === 'stopped' && !activeSlot && (
-              <div className="text-center font-mono text-sm text-ink-mute italic">
-                Open left palm to start the loop. It keeps playing until you stop it. Use right hand zones for chords. Make a fist to silence.
+              <div className="text-center text-[12px] leading-relaxed text-ink-mute/40">
+                Open left palm to start the loop. Use right hand zones for chords.
               </div>
             )}
 
             {/* Chord display */}
-            <div className="border border-ink-line bg-ink-surface p-4">
-              <div className="mb-1 font-mono text-[10px] uppercase tracking-widest text-ink-mute">Current Chord</div>
-              <div className="font-serif text-6xl font-bold tracking-tight text-ink-text">
+            <div className="rounded-sm bg-ink-surface/40 p-5">
+              <div className="mb-2 text-[10px] text-ink-mute/40">Current chord</div>
+              <div className="font-serif text-5xl font-bold tracking-tight text-ink-text/90">
                 {isSilenced ? (
                   <span className="text-ink-mute">SILENCE</span>
                 ) : activeSlot ? (
@@ -1411,44 +1405,44 @@ export function PerformModal({
               </div>
             </div>
 
-            {/* Slot grid */}
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-[10px] text-ink-mute">OPEN HAND</span>
-                <div className="flex gap-1 flex-1">
+            {/* Chord slot pads */}
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-3">
+                <span className="w-16 text-[9px] text-ink-mute/40">Open hand</span>
+                <div className="flex flex-1 gap-1">
                   {[1, 2, 3, 4].map(slot => {
                     const slotData = chordSlots.find(s => s.slot === slot);
                     return (
-                      <button
+                      <div
                         key={slot}
-                        className={`flex-1 border px-2 py-1 font-mono text-xs transition-colors ${
+                        className={`flex-1 rounded-sm py-2 text-center font-mono text-[11px] transition-all duration-75 ${
                           activeSlot === slot
-                            ? 'border-amber-gold bg-amber-gold/20 text-amber-gold'
-                            : 'border-ink-line text-ink-mute hover:border-ink-text hover:text-ink-text'
+                            ? 'bg-amber-gold/20 text-amber-gold shadow-[inset_0_0_0_1px_rgba(201,168,76,0.4)]'
+                            : 'bg-ink-surface/40 text-ink-mute/60'
                         }`}
                       >
-                        {slot} {slotData ? chordLabel(slotData.root, slotData.quality) : ''}
-                      </button>
+                        {slotData ? chordLabel(slotData.root, slotData.quality) : slot}
+                      </div>
                     );
                   })}
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-[10px] text-ink-mute">TWO FINGERS</span>
-                <div className="flex gap-1 flex-1">
+              <div className="flex items-center gap-3">
+                <span className="w-16 text-[9px] text-ink-mute/40">Two fingers</span>
+                <div className="flex flex-1 gap-1">
                   {[5, 6, 7, 8].map(slot => {
                     const slotData = chordSlots.find(s => s.slot === slot);
                     return (
-                      <button
+                      <div
                         key={slot}
-                        className={`flex-1 border px-2 py-1 font-mono text-xs transition-colors ${
+                        className={`flex-1 rounded-sm py-2 text-center font-mono text-[11px] transition-all duration-75 ${
                           activeSlot === slot
-                            ? 'border-amber-gold bg-amber-gold/20 text-amber-gold'
-                            : 'border-ink-line text-ink-mute hover:border-ink-text hover:text-ink-text'
+                            ? 'bg-amber-gold/20 text-amber-gold shadow-[inset_0_0_0_1px_rgba(201,168,76,0.4)]'
+                            : 'bg-ink-surface/40 text-ink-mute/60'
                         }`}
                       >
-                        {slot} {slotData ? chordLabel(slotData.root, slotData.quality) : ''}
-                      </button>
+                        {slotData ? chordLabel(slotData.root, slotData.quality) : slot}
+                      </div>
                     );
                   })}
                 </div>
@@ -1460,47 +1454,44 @@ export function PerformModal({
               {[0, 1, 2, 3].map(zone => (
                 <div
                   key={zone}
-                  className={`flex-1 h-8 border font-mono text-xs flex items-center justify-center transition-colors ${
+                  className={`flex-1 rounded-sm py-1.5 text-center font-mono text-[9px] transition-all duration-75 ${
                     rightZone === zone
-                      ? 'border-amber-gold bg-amber-gold/20 text-amber-gold'
-                      : 'border-ink-line text-ink-mute'
+                      ? 'bg-cyan-400/15 text-cyan-400 shadow-[inset_0_0_0_1px_rgba(34,211,238,0.3)]'
+                      : 'bg-ink-surface/20 text-ink-mute/30'
                   }`}
                 >
-                  zone {zone + 1}
+                  {zone + 1}
                 </div>
               ))}
             </div>
 
-            {/* Hand status cards */}
+            {/* Hand tracking status */}
             <div className="grid grid-cols-2 gap-3">
-              <div className="border border-ink-line bg-ink-surface p-3">
-                <div className="mb-1 font-mono text-[10px] uppercase tracking-widest text-amber-gold">LEFT</div>
-                <div className="font-mono text-lg">
+              <div className="rounded-sm bg-ink-surface/30 p-3">
+                <div className="text-[9px] text-amber-gold/60">Left — Rhythm</div>
+                <div className="mt-1 font-mono text-base text-ink-text/80">
                   {leftHand.present && leftHand.gesture ? 
                     GESTURE_LABELS[leftHand.gesture as GestureId] : "—"}
                 </div>
-                <div className="mt-1 font-mono text-xs text-ink-mute">
-                  {beatLatchRef.current === 'playing' ? 'LOOPING' :
-                   beatLatchRef.current === 'muted' ? 'MUTED' : 'STOPPED'}
+                <div className="mt-0.5 font-mono text-[9px] text-ink-mute/40">
+                  {leftHand.present ? "Tracking" : "Not detected"}
                 </div>
               </div>
-              <div className="border border-ink-line bg-ink-surface p-3">
-                <div className="mb-1 font-mono text-[10px] uppercase tracking-widest text-indigo-400">RIGHT</div>
-                <div className="font-mono text-lg">
+              <div className="rounded-sm bg-ink-surface/30 p-3">
+                <div className="text-[9px] text-cyan-400/60">Right — Harmony</div>
+                <div className="mt-1 font-mono text-base text-ink-text/80">
                   {rightHand.present && rightHand.gesture ? 
                     GESTURE_LABELS[rightHand.gesture as GestureId] : "—"}
                 </div>
-                <div className="mt-1 font-mono text-xs text-ink-mute">
-                  {activeSlot ? `Slot ${activeSlot}` : 'None'}
+                <div className="mt-0.5 font-mono text-[9px] text-ink-mute/40">
+                  {activeSlot ? `Slot ${activeSlot}` : rightHand.present ? "Tracking" : "Not detected"}
                 </div>
               </div>
             </div>
 
             {beatSource === 'youtube' && (
-              <div className="border border-amber-gold/40 bg-amber-gold/10 p-3">
-                <div className="font-mono text-xs text-amber-gold">
-                  Note: YouTube audio cannot be captured in recordings due to browser security restrictions.
-                </div>
+              <div className="rounded-sm bg-amber-gold/5 px-4 py-2.5 text-[11px] text-amber-gold/60">
+                YouTube audio cannot be captured in recordings due to browser restrictions.
               </div>
             )}
 

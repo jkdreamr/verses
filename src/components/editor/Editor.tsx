@@ -65,12 +65,14 @@ export function Editor({ songId }: { songId: string }) {
 
   // RhymeLens inline highlight data
   const [rhymeLensAnalysis, setRhymeLensAnalysis] = useState<RhymeLensResult | null>(null);
+  const [rhymeLensFocus, setRhymeLensFocus] = useState<string | null>(null);
   const charHighlights = useMemo(
-    () => buildCharHighlights(rhymeLensAnalysis),
-    [rhymeLensAnalysis]
+    () => buildCharHighlights(rhymeLensAnalysis, rhymeLensFocus),
+    [rhymeLensAnalysis, rhymeLensFocus]
   );
-  const onRhymeLensAnalysis = useCallback((result: RhymeLensResult | null) => {
+  const onRhymeLensAnalysis = useCallback((result: RhymeLensResult | null, focusId?: string | null) => {
     setRhymeLensAnalysis(result);
+    setRhymeLensFocus(focusId ?? null);
   }, []);
 
   // Sync scroll between textarea and highlight mirror
@@ -528,8 +530,8 @@ export function Editor({ songId }: { songId: string }) {
         />
 
         {/* Counts */}
-        <div className="fade-idle pointer-events-none fixed bottom-24 right-4 z-10 select-none px-2 py-1 font-mono text-[9px] tracking-wider text-ink-mute/30 print:hidden">
-          {stats.lines}L · {stats.words}W
+        <div className="pointer-events-none fixed bottom-[7rem] left-8 z-10 select-none rounded-sm bg-ink-surface/60 px-2.5 py-1 font-mono text-[10px] tracking-wide text-ink-mute/70 backdrop-blur-sm print:hidden">
+          {stats.lines} lines · {stats.words} words
         </div>
       </div>
 
