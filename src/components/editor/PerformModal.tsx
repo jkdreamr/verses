@@ -169,7 +169,9 @@ export function PerformModal({
   const [chordSlots, setChordSlots] = useState<ChordSlot[]>(SLOT_PRESETS['Pop']);
   const [activeSlot, setActiveSlot] = useState<number | null>(null);
   const [isSilenced, setIsSilenced] = useState(false);
-  const [chordVolume, setChordVolumeState] = useState(0.7);
+  const [masterVol, setMasterVol] = useState(0.80);
+  const [drumVol, setDrumVol] = useState(0.70);
+  const [chordVol, setChordVol] = useState(0.55);
   const [rightZone, setRightZone] = useState(0);
   const [activeTab, setActiveTab] = useState<'sound' | 'chords' | 'guide'>('sound');
   const [leftHand, setLeftHand] = useState<HandState>({ gesture: null, wristX: 0.5, wristY: 0.5, present: false });
@@ -183,8 +185,7 @@ export function PerformModal({
 
 
 
-  // Live volume level for visual feedback (0-1)
-  const [liveVolume, setLiveVolume] = useState(0);
+
 
   // Hooks
   const audioBus = usePerformAudioBus();
@@ -196,8 +197,10 @@ export function PerformModal({
   const resumeAudioBus = audioBus.resume;
   const destroyAudioBus = audioBus.destroy;
   const releaseChord = chord.releaseChord;
-  const setSynthChordVolume = chord.setChordVolume;
   const stopDrums = drum.stop;
+  const busSetMaster = audioBus.setMasterGain;
+  const busSetDrum = audioBus.setDrumGain;
+  const busSetChord = audioBus.setChordGain;
 
   useEffect(() => {
     if (!open) return;
@@ -206,9 +209,10 @@ export function PerformModal({
     void resumeAudioBus();
   }, [ensureAudioBus, open, resumeAudioBus]);
 
-  useEffect(() => {
-    setSynthChordVolume(chordVolume);
-  }, [chordVolume, setSynthChordVolume]);
+  // Sync slider state → bus gain nodes
+  useEffect(() => { busSetMaster(masterVol); }, [masterVol, busSetMaster]);
+  useEffect(() => { busSetDrum(drumVol); }, [drumVol, busSetDrum]);
+  useEffect(() => { busSetChord(chordVol); }, [chordVol, busSetChord]);
 
   // ── Gesture detection ──
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -379,7 +383,6 @@ export function PerformModal({
         setActiveSlot(null);
         setIsSilenced(true);
         prevSlotRef.current = null;
-        setLiveVolume(0);
       } else if (g === 'pinch') {
         const nowMs = Date.now();
         if (nowMs - lastRightActionMsRef.current < 300) return;
@@ -391,19 +394,6 @@ export function PerformModal({
         }
       } else {
         setIsSilenced(false);
-
-        // Right hand vertical expression: controls chord volume/brightness
-        const rawExpr = Math.max(0, Math.min(1, 1 - right.wristY));
-        const prevExpr = lastLeftVolumeRef.current; // reuse ref for chord expression
-        // Deadband + EMA smoothing
-        const expr = Math.abs(rawExpr - prevExpr) < 0.04
-          ? prevExpr
-          : prevExpr * 0.8 + rawExpr * 0.2;
-        lastLeftVolumeRef.current = expr;
-        setLiveVolume(expr);
-        // Map expression to chord volume: 0.12–0.47
-        const chordVol = 0.12 + expr * 0.35;
-        chord.setChordVolume(chordVol);
 
         let targetSlot: number;
         if (g === 'open') targetSlot = zone + 1; // 1,2,3,4
@@ -708,20 +698,7 @@ export function PerformModal({
                 </span>
               </div>
             )}
-            {/* Right-hand chord expression bar (vertical, left edge of camera) */}
-            {camActive && rightHand.present && rightHand.gesture !== 'fist' && (
-              <div className="absolute bottom-12 left-3 top-12 flex w-3 flex-col justify-end overflow-hidden rounded-full bg-ink/40 backdrop-blur-sm">
-                <div
-                  className="w-full rounded-full transition-all duration-75"
-                  style={{
-                    height: `${Math.round(liveVolume * 100)}%`,
-                    background: liveVolume > 0.8 ? "rgba(248,113,113,0.7)"
-                      : liveVolume > 0.5 ? "rgba(201,168,76,0.7)"
-                      : "rgba(201,168,76,0.45)",
-                  }}
-                />
-              </div>
-            )}
+
             {/* Zone overlay indicator at bottom of camera */}
             {camActive && showZoneGrid && (
               <div className="absolute bottom-3 left-3 right-3 flex gap-1">
@@ -856,21 +833,28 @@ export function PerformModal({
                   </div>
                 </div>
 
-                {/* Volumes */}
+                {/* Volumes — bus-level gains */}
                 <div className="space-y-2">
                   <div>
                     <div className="mb-1 flex items-center justify-between text-[9px] text-ink-mute/50">
-                      <span>Master</span><span>{Math.round(drum.masterVolume * 100)}%</span>
+                      <span>Master</span><span>{Math.round(masterVol * 100)}%</span>
                     </div>
-                    <input type="range" min="0" max="1" step="0.01" value={drum.masterVolume}
-                      onChange={(e) => drum.setMasterVolume(parseFloat(e.target.value))} className="w-full" />
+                    <input type="range" min="0" max="1" step="0.01" value={masterVol}
+                      onChange={(e) => setMasterVol(parseFloat(e.target.value))} className="w-full" />
                   </div>
                   <div>
                     <div className="mb-1 flex items-center justify-between text-[9px] text-ink-mute/50">
-                      <span>Chords</span><span>{Math.round(chordVolume * 100)}%</span>
+                      <span>Drums</span><span>{Math.round(drumVol * 100)}%</span>
                     </div>
-                    <input type="range" min="0" max="1" step="0.01" value={chordVolume}
-                      onChange={(e) => setChordVolumeState(parseFloat(e.target.value))} className="w-full" />
+                    <input type="range" min="0" max="1" step="0.01" value={drumVol}
+                      onChange={(e) => setDrumVol(parseFloat(e.target.value))} className="w-full" />
+                  </div>
+                  <div>
+                    <div className="mb-1 flex items-center justify-between text-[9px] text-ink-mute/50">
+                      <span>Chords</span><span>{Math.round(chordVol * 100)}%</span>
+                    </div>
+                    <input type="range" min="0" max="1" step="0.01" value={chordVol}
+                      onChange={(e) => setChordVol(parseFloat(e.target.value))} className="w-full" />
                   </div>
                 </div>
 

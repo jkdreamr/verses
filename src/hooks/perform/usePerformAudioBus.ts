@@ -39,16 +39,16 @@ export function usePerformAudioBus() {
     const ctx = new Ctx() as AudioContext;
 
     const masterGain = ctx.createGain();
-    masterGain.gain.value = 0.65;
+    masterGain.gain.value = 0.80;
 
     const drumGain = ctx.createGain();
-    drumGain.gain.value = 0.50;
+    drumGain.gain.value = 0.70;
 
     const chordGain = ctx.createGain();
-    chordGain.gain.value = 0.28;
+    chordGain.gain.value = 0.55;
 
     const trumpetGain = ctx.createGain();
-    trumpetGain.gain.value = 0.40;
+    trumpetGain.gain.value = 0.50;
 
     // Gentle glue compressor — not harsh
     const compressor = ctx.createDynamicsCompressor();
@@ -164,6 +164,30 @@ export function usePerformAudioBus() {
     };
   }, []);
 
+  /** Smoothly set bus master gain (0-1). */
+  const setMasterGain = useCallback((vol: number) => {
+    const bus = busRef.current;
+    if (!bus) return;
+    const v = Math.max(0, Math.min(1, vol));
+    bus.masterGain.gain.setTargetAtTime(v, bus.ctx.currentTime, 0.02);
+  }, []);
+
+  /** Smoothly set bus drum gain (0-1). */
+  const setDrumGain = useCallback((vol: number) => {
+    const bus = busRef.current;
+    if (!bus) return;
+    const v = Math.max(0, Math.min(1, vol));
+    bus.drumGain.gain.setTargetAtTime(v, bus.ctx.currentTime, 0.02);
+  }, []);
+
+  /** Smoothly set bus chord gain (0-1). */
+  const setChordGain = useCallback((vol: number) => {
+    const bus = busRef.current;
+    if (!bus) return;
+    const v = Math.max(0, Math.min(1, vol));
+    bus.chordGain.gain.setTargetAtTime(v, bus.ctx.currentTime, 0.02);
+  }, []);
+
   return {
     bus: busRef.current,
     ready,
@@ -171,5 +195,8 @@ export function usePerformAudioBus() {
     resume,
     suspend,
     destroy,
+    setMasterGain,
+    setDrumGain,
+    setChordGain,
   };
 }
