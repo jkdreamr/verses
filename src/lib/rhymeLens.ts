@@ -112,6 +112,12 @@ export type RhymeFamily = {
   explanation: string;
   spans: RhymeSpan[];
   strength: "light" | "medium" | "strong";
+  /** Debug info — only populated when RHYME_LENS_DEBUG is true */
+  debugInfo?: {
+    matchedSpanTexts: string[];
+    reason: string;
+    anchorSound: string;
+  };
 };
 
 export type RhymeLensMetrics = {
@@ -184,7 +190,122 @@ const STOP_WORDS = new Set([
   "me", "my", "we", "our", "you", "your", "he", "she", "it", "they", "his",
   "her", "its", "their", "this", "that", "these", "those", "not", "no", "so",
   "as", "if", "then", "than", "just", "all", "each", "some", "any",
+  "now", "here", "there", "when", "where", "how", "what", "who",
+  "very", "too", "also", "only", "still", "even", "ever", "never",
+  "out", "off", "over", "under", "again", "once", "much", "more",
+  "most", "such", "own", "other", "another", "both", "few", "many",
+  "get", "got", "go", "went", "come", "came", "let", "keep", "put",
 ]);
+
+// ---------------------------------------------------------------------------
+// Meaningful span filtering — prevents false positives from filler phrases
+// ---------------------------------------------------------------------------
+
+/** Debug mode flag — set to true to attach reason metadata to families */
+export const RHYME_LENS_DEBUG = false;
+
+/** Common filler phrases that should never form rhyme families on their own */
+const FILLER_PHRASES = new Set([
+  "this is", "and now", "i am", "i'm the", "to the", "of the",
+  "in the", "and i", "but i", "it is", "that is", "for the",
+  "on the", "at the", "with the", "from the", "by the",
+  "and the", "or the", "is the", "was the", "are the",
+  "i'm a", "it's a", "is a", "was a", "and a",
+  "i was", "i will", "i can", "we are", "you are",
+  "do you", "did you", "will you", "can you",
+  "now i", "now i'm", "so i", "then i",
+  "and now i'm", "and now i", "but now i",
+]);
+
+export function isStopWord(word: string): boolean {
+  return STOP_WORDS.has(word.toLowerCase());
+}
+
+/** Contractions and short forms that should be treated as stop words */
+const CONTRACTION_STOPS = new Set([
+  "i'm", "i'll", "i've", "i'd", "it's", "he's", "she's", "we're",
+  "they're", "you're", "we've", "they've", "you've", "won't",
+  "don't", "doesn't", "didn't", "isn't", "aren't", "wasn't",
+  "weren't", "can't", "couldn't", "wouldn't", "shouldn't",
+  "that's", "there's", "here's", "what's", "who's",
+]);
+
+export function isContentWord(word: string): boolean {
+  const w = word.toLowerCase().replace(/[^a-z']/g, "");
+  if (!w || w.length <= 1) return false;
+  if (STOP_WORDS.has(w)) return false;
+  if (CONTRACTION_STOPS.has(w)) return false;
+  return true;
+}
+
+export function contentWordCount(span: RhymeSpan): number {
+  const words = span.normalized.split(" ");
+  return words.filter((w) => isContentWord(w)).length;
+}
+
+export function contentRatio(span: RhymeSpan): number {
+  const words = span.normalized.split(" ");
+  if (words.length === 0) return 0;
+  return contentWordCount(span) / words.length;
+}
+
+/**
+ * Determines if a span is meaningful enough to participate in a rhyme family.
+ * Filters out weak/filler spans that cause false positives.
+ */
+export function isMeaningfulRhymeSpan(span: RhymeSpan, purpose: RhymeType): boolean {
+  const words = span.normalized.split(" ");
+
+  // Single-word spans: must be a content word unless exact repetition
+  if (span.spanLength === 1) {
+    if (purpose === "repetition") return true; // repetition can include any repeated word
+    return isContentWord(span.normalized);
+  }
+
+  // Multi-word spans: check filler phrases
+  const norm = span.normalized.toLowerCase();
+  if (FILLER_PHRASES.has(norm)) {
+    // Filler phrases only allowed as part of exact repeated phrase (3+ words)
+    return purpose === "repetition" && span.spanLength >= 3;
+  }
+
+  // Multi-word spans must have at least one content word
+  const cCount = words.filter((w) => isContentWord(w)).length;
+  if (cCount === 0) return false;
+
+  // For multisyllabic/compound/mosaic: final word should be a content word
+  if (purpose === "multi" || purpose === "compound" || purpose === "mosaic") {
+    const lastWord = words[words.length - 1];
+    if (!isContentWord(lastWord)) return false;
+  }
+
+  // Content ratio check for 2+ word spans
+  const ratio = cCount / words.length;
+  if (ratio < 0.5) {
+    // Low content ratio: only allow if:
+    // - exact repeated phrase of 3+ words
+    // - multisyllabic with content final word (already checked above)
+    if (purpose === "repetition" && span.spanLength >= 3) return true;
+    if (purpose === "multi" || purpose === "compound" || purpose === "mosaic") return true;
+    return false;
+  }
+
+  // For slant/assonance/consonance: avoid stop-word-heavy multi-word spans
+  if (purpose === "slant" || purpose === "assonance" || purpose === "consonance") {
+    if (span.spanLength >= 2 && ratio < 0.6) return false;
+  }
+
+  return true;
+}
+
+/**
+ * Check if a span's final word is a content word (for anchor-based rhyme detection)
+ */
+function hasContentFinalWord(span: RhymeSpan): boolean {
+  const words = span.normalized.split(" ");
+  const lastWord = words[words.length - 1];
+  return isContentWord(lastWord);
+}
 
 // ---------------------------------------------------------------------------
 // Normalization + dropped-g / contraction mapping
@@ -440,9 +561,12 @@ function scoreEndRhyme(a: PhoneticShape, b: PhoneticShape): number {
   if (a.finalConsonantCluster && b.finalConsonantCluster && a.finalConsonantCluster === b.finalConsonantCluster) {
     score += 0.15;
   }
-  // Multi-syllabic bonus
-  const minSyl = Math.min(a.syllableCount, b.syllableCount);
-  if (minSyl >= 2) score += 0.2 * Math.min(minSyl - 1, 2);
+  // Multi-syllabic bonus — ONLY when there's a meaningful phonetic match
+  // (requires at least a vowel match, not just a consonant cluster)
+  if (score >= 0.4) {
+    const minSyl = Math.min(a.syllableCount, b.syllableCount);
+    if (minSyl >= 2) score += 0.15 * Math.min(minSyl - 1, 2);
+  }
 
   return Math.min(score, 1);
 }
@@ -757,29 +881,135 @@ export function analyzeRhymeLens(
   const maxDistanceLines = options.density === "clean" ? 6 : options.density === "detailed" ? 12 : 20;
 
   // ── Step 1: Repetition detection ─────────────────────────────────────────
+  // Prefer longest repeated phrases; suppress smaller overlapping subphrases.
+  // First detect full-line repetition, then span-based repetition.
   const families: RhymeFamily[] = [];
   const usedColorIndices = new Set<number>();
 
+  // Track which lines+word ranges are covered by a repetition family
+  const coveredRepRanges = new Set<string>();
+
   if (options.enabledTypes.has("repetition")) {
+    // --- Phase 1a: Full-line repetition ---
+    // Detect lines that repeat exactly (normalized). These take priority.
+    const lineNormMap = new Map<string, { lineIndex: number; tokens: RhymeToken[] }[]>();
+    const byLine = new Map<number, RhymeToken[]>();
+    for (const t of cappedTokens) {
+      if (!byLine.has(t.lineIndex)) byLine.set(t.lineIndex, []);
+      byLine.get(t.lineIndex)!.push(t);
+    }
+    for (const [lineIdx, lineTokens] of byLine) {
+      if (lineTokens.length < 2) continue; // skip single-word lines for full-line rep
+      const norm = lineTokens.map((t) => t.normalized).join(" ");
+      // Only count lines with at least one content word
+      if (!lineTokens.some((t) => isContentWord(t.normalized))) continue;
+      if (!lineNormMap.has(norm)) lineNormMap.set(norm, []);
+      lineNormMap.get(norm)!.push({ lineIndex: lineIdx, tokens: lineTokens });
+    }
+
+    for (const [norm, occurrences] of lineNormMap) {
+      if (occurrences.length < 2) continue;
+      // Build a span for each full-line occurrence
+      const lineSpans: RhymeSpan[] = occurrences.map((occ) => {
+        const first = occ.tokens[0];
+        const last = occ.tokens[occ.tokens.length - 1];
+        return {
+          id: `rep_line_${occ.lineIndex}`,
+          lineIndex: occ.lineIndex,
+          startWordIndex: first.wordIndex,
+          endWordIndex: last.wordIndex,
+          globalStartWordIndex: first.globalWordIndex,
+          globalEndWordIndex: last.globalWordIndex,
+          start: first.start,
+          end: last.end,
+          text: occ.tokens.map((t) => t.text).join(" "),
+          normalized: norm,
+          phonetic: computeSpanPhoneticShape(occ.tokens.map((t) => t.normalized)),
+          isLineStart: true,
+          isLineEnd: true,
+          spanLength: occ.tokens.length,
+        };
+      });
+
+      // Mark covered ranges
+      for (const s of lineSpans) {
+        coveredRepRanges.add(`${s.lineIndex}:${s.startWordIndex}-${s.endWordIndex}`);
+      }
+
+      const colorIdx = stableColorIndex("rep_" + norm, usedColorIndices);
+      usedColorIndices.add(colorIdx);
+      families.push({
+        id: nextFamilyId(),
+        type: "repetition",
+        confidence: 1.0,
+        colorIndex: colorIdx,
+        label: `repeated line: "${norm.length > 30 ? norm.slice(0, 30) + "..." : norm}"`,
+        explanation: `Full line "${norm}" repeats ${occurrences.length} times`,
+        spans: lineSpans,
+        strength: occurrences.length >= 3 ? "strong" : "medium",
+      });
+    }
+
+    // --- Phase 1b: Span-based repetition (1–3 word phrases) ---
     const phraseMap = new Map<string, RhymeSpan[]>();
     for (const span of allSpans) {
       if (span.spanLength > 3) continue;
       const norm = span.normalized;
-      if (!norm || norm.split(" ").every((w) => STOP_WORDS.has(w))) continue;
+      if (!norm) continue;
+      // Filter: must pass meaningful check for repetition
+      if (!isMeaningfulRhymeSpan(span, "repetition")) continue;
       if (!phraseMap.has(norm)) phraseMap.set(norm, []);
       phraseMap.get(norm)!.push(span);
     }
-    for (const [norm, spans] of phraseMap) {
-      if (spans.length < 2) continue;
-      // Only keep one representative span per line to avoid over-highlighting
-      const byLine = new Map<number, RhymeSpan>();
+
+    // Sort by phrase length descending — longer phrases take priority
+    const sortedPhrases = Array.from(phraseMap.entries())
+      .filter(([, spans]) => spans.length >= 2)
+      .sort((a, b) => {
+        const lenA = a[0].split(" ").length;
+        const lenB = b[0].split(" ").length;
+        return lenB - lenA; // prefer longer phrases
+      });
+
+    for (const [norm, spans] of sortedPhrases) {
+      // Only keep one representative span per line — prefer longer span
+      const byLineRep = new Map<number, RhymeSpan>();
       for (const s of spans) {
-        if (!byLine.has(s.lineIndex) || s.spanLength > byLine.get(s.lineIndex)!.spanLength) {
-          byLine.set(s.lineIndex, s);
+        // Check if this span's range is already covered by a longer phrase
+        let alreadyCovered = false;
+        for (const existing of coveredRepRanges) {
+          if (existing.startsWith(`${s.lineIndex}:`)) {
+            const [, range] = existing.split(":");
+            const [es, ee] = range.split("-").map(Number);
+            if (s.startWordIndex >= es && s.endWordIndex <= ee) {
+              alreadyCovered = true;
+              break;
+            }
+          }
+        }
+        if (alreadyCovered) continue;
+
+        if (!byLineRep.has(s.lineIndex) || s.spanLength > byLineRep.get(s.lineIndex)!.spanLength) {
+          byLineRep.set(s.lineIndex, s);
         }
       }
-      const deduped = Array.from(byLine.values());
+      const deduped = Array.from(byLineRep.values());
       if (deduped.length < 2) continue;
+
+      // For single-word repetition: only highlight if it's a content word or appears 3+ times
+      if (norm.split(" ").length === 1) {
+        if (!isContentWord(norm) && deduped.length < 3) continue;
+      }
+
+      // Skip filler phrases that are already covered by full-line repetition
+      const normWords = norm.split(" ");
+      if (normWords.length <= 3 && normWords.every((w) => !isContentWord(w))) continue;
+
+      // Mark these ranges as covered
+      for (const s of deduped) {
+        coveredRepRanges.add(`${s.lineIndex}:${s.startWordIndex}-${s.endWordIndex}`);
+      }
+
       const colorIdx = stableColorIndex("rep_" + norm, usedColorIndices);
       usedColorIndices.add(colorIdx);
       families.push({
@@ -800,7 +1030,20 @@ export function analyzeRhymeLens(
 
   // ── Step 2: Multisyllabic families ───────────────────────────────────────
   if (options.enabledTypes.has("multi") || options.enabledTypes.has("compound")) {
-    const multiCandidates = allSpans.filter((s) => s.spanLength >= 2 && s.phonetic.syllableCount >= 2);
+    // FILTER: Only allow multi-word spans with meaningful content words.
+    // Require at least 2 content words to prevent single-content-word spans
+    // from being treated as multi-syllabic phrases.
+    const multiCandidates = allSpans.filter((s) => {
+      if (s.spanLength < 2) return false;
+      if (s.phonetic.syllableCount < 3) return false; // need real multi-syllabic content
+      if (!isMeaningfulRhymeSpan(s, "multi")) return false;
+      if (!hasContentFinalWord(s)) return false;
+      // At least 2 content words in the span
+      const words = s.normalized.split(" ");
+      const cCount = words.filter((w) => isContentWord(w)).length;
+      if (cCount < 2) return false;
+      return true;
+    });
 
     // Group by phonetic similarity
     const processed = new Set<string>();
@@ -1115,9 +1358,10 @@ export function analyzeRhymeLens(
 
   // ── Step 8: Alliteration ──────────────────────────────────────────────────
   if (options.enabledTypes.has("alliteration")) {
+    // Only content words for alliteration; require meaningful spans
     const candidates = allSpans.filter(
-      (s) => s.spanLength === 1 && !STOP_WORDS.has(s.normalized) &&
-             s.normalized.length > 1 && s.phonetic.initialConsonantCluster.length >= 1
+      (s) => s.spanLength === 1 && isContentWord(s.normalized) &&
+             s.normalized.length > 2 && s.phonetic.initialConsonantCluster.length >= 1
     );
     const processed = new Set<string>();
 
@@ -1140,7 +1384,8 @@ export function analyzeRhymeLens(
         }
       }
 
-      if (group.length >= 2) {
+      // Require at least 3 content words for alliteration to be meaningful
+      if (group.length >= 3) {
         for (const s of group) processed.add(s.id);
         const label = alliterationLabel(group);
         const colorIdx = stableColorIndex("allit_" + label, usedColorIndices);
@@ -1153,32 +1398,66 @@ export function analyzeRhymeLens(
           label,
           explanation: "Alliteration — repeated initial consonant sound",
           spans: group,
-          strength: group.length >= 3 ? "strong" : "medium",
+          strength: group.length >= 4 ? "strong" : "medium",
         });
       }
     }
   }
 
-  // ── Step 9: Apply maxFamilies cap ─────────────────────────────────────────
-  const sortedFamilies = families
+  // ── Step 9: Overlap resolution ────────────────────────────────────────────
+  // When spans overlap, prefer stronger families over weaker ones.
+  // Priority: end rhyme > multi > repetition phrase > internal > slant > assonance
+  const typeStrength = (t: RhymeType): number => {
+    switch (t) {
+      case "end": case "chain": return 10;
+      case "multi": case "compound": case "mosaic": return 9;
+      case "internal": return 7;
+      case "cross": return 6;
+      case "repetition": return 5;
+      case "slant": return 4;
+      case "consonance": case "assonance": return 3;
+      case "alliteration": return 2;
+      default: return 1;
+    }
+  };
+
+  // Remove spans from weaker families when they overlap with stronger ones
+  // (Only remove if both families highlight the same word range)
+  const resolvedFamilies: RhymeFamily[] = [];
+  const claimedRanges = new Map<string, { familyIdx: number; strength: number }>();
+
+  // Sort families by strength for overlap resolution
+  const familiesByStrength = [...families].sort((a, b) => {
+    const sa = typeStrength(a.type) + (a.confidence * 2);
+    const sb = typeStrength(b.type) + (b.confidence * 2);
+    return sb - sa;
+  });
+
+  for (const fam of familiesByStrength) {
+    const keptSpans: RhymeSpan[] = [];
+    for (const span of fam.spans) {
+      const rangeKey = `${span.lineIndex}:${span.startWordIndex}-${span.endWordIndex}`;
+      const existing = claimedRanges.get(rangeKey);
+      const myStrength = typeStrength(fam.type) + (fam.confidence * 2);
+
+      if (!existing || myStrength > existing.strength) {
+        keptSpans.push(span);
+        claimedRanges.set(rangeKey, { familyIdx: resolvedFamilies.length, strength: myStrength });
+      } else if (fam.type === "repetition" && existing) {
+        // Repetition can coexist with rhyme — allow both if they're different types
+        keptSpans.push(span);
+      }
+    }
+    if (keptSpans.length >= 2) {
+      resolvedFamilies.push({ ...fam, spans: keptSpans });
+    }
+  }
+
+  // ── Step 10: Apply maxFamilies cap ────────────────────────────────────────
+  const sortedFamilies = resolvedFamilies
     .sort((a, b) => {
       // Priority: multi > end/chain > internal > cross > slant > assn/cons > allit > rep
-      const typeRank = (t: RhymeType) => {
-        switch (t) {
-          case "multi": case "compound": case "mosaic": return 10;
-          case "chain": return 9;
-          case "end": return 8;
-          case "internal": return 7;
-          case "cross": return 6;
-          case "repetition": return 5;
-          case "slant": return 4;
-          case "consonance": return 3;
-          case "assonance": return 3;
-          case "alliteration": return 2;
-          default: return 1;
-        }
-      };
-      const rankDiff = typeRank(b.type) - typeRank(a.type);
+      const rankDiff = typeStrength(b.type) - typeStrength(a.type);
       if (rankDiff !== 0) return rankDiff;
       return b.spans.length - a.spans.length;
     })
@@ -1186,7 +1465,7 @@ export function analyzeRhymeLens(
     .filter((f) => !options.strongOnly || f.strength !== "light")
     .slice(0, options.maxFamilies ?? 60);
 
-  // ── Step 10: Weak lines ───────────────────────────────────────────────────
+  // ── Step 11: Weak lines ───────────────────────────────────────────────────
   const linesWithRhyme = new Set<number>();
   for (const fam of sortedFamilies) {
     for (const span of fam.spans) linesWithRhyme.add(span.lineIndex);
@@ -1196,7 +1475,7 @@ export function analyzeRhymeLens(
     .filter(({ line, i }) => line.trim().length > 0 && !linesWithRhyme.has(i))
     .map(({ i }) => i);
 
-  // ── Step 11: Metrics ──────────────────────────────────────────────────────
+  // ── Step 12: Metrics ──────────────────────────────────────────────────────
   const endFamilies = sortedFamilies.filter((f) => f.type === "end" || f.type === "chain");
   const intFamilies = sortedFamilies.filter((f) => f.type === "internal" || f.type === "cross");
   const multiFamilies = sortedFamilies.filter((f) => f.type === "multi" || f.type === "compound");

@@ -6,29 +6,43 @@ Rhyme Lens is Verses' inline rhyme analysis engine. It detects end rhymes, inter
 
 This document provides synthetic test cases for QA.
 
+### Key Design Principles (v2 — false-positive fix)
+
+1. **Meaningful span filtering**: Single-word spans must be content words. Multi-word spans must contain at least one content word and not be filler phrases.
+2. **Longest-phrase repetition**: When a longer phrase repeats, shorter sub-phrases are suppressed.
+3. **Content-word anchoring**: Multisyllabic/compound rhyme spans require a content word as the final word.
+4. **Overlap resolution**: Stronger families take priority over weaker ones when spans overlap.
+5. **Color = family**: Each color represents exactly one sound family. No shared colors across unrelated families.
+6. **Debug mode**: Set `RHYME_LENS_DEBUG = true` in `src/lib/rhymeLens.ts` to see hover tooltips with family ID, confidence, and grouping reason.
+
 ---
 
-## Test Case 1: Basic End Rhyme
+## Test Case 1: False Positive Prevention (Primary)
 
 ```
 this is testing
 and now i'm resting
-jesting
+i'm testing
 and now i'm resting
+
+i'm the best
 ```
 
 ### Expected
 
-- **testing / resting / jesting** → one end rhyme family (all share `-esting` ending)
-- **"and now i'm resting"** repeated → separate repetition family
-- The repeated line should have a distinct visual style (dashed outline vs. solid fill)
-- Stop words ("and", "now", "i'm") should NOT be highlighted as the main rhyme
+- **testing / resting / testing / resting** → one strong end rhyme family (`-esting` ending)
+- **"and now i'm resting"** repeated phrase → separate repetition family (not broken into "and now" + "i'm resting")
+- **"i'm"** → may be marked as light repetition only if it appears 3+ times, otherwise ignored
+- **"this is"** → NOT highlighted. It is a filler phrase (all stop words).
+- **"and now"** → NOT highlighted as its own family. Only participates in the full repeated phrase.
+- **"the best"** → NOT in the same family as "this is" or "and now"
+- No giant filler-phrase family should appear
 
 ### False positives to avoid
 
-- Do not create a single family containing all words
-- Do not color the entire repeated line the same as the rhyme family
-- Do not over-highlight "and" as part of any rhyme group
+- "this is" / "and now" / "the best" sharing a color
+- Any family composed entirely of stop words
+- Sub-phrase repetition fragments ("and now", "now i'm", "i'm resting") appearing alongside the full phrase
 
 ---
 
@@ -161,6 +175,55 @@ to be free and see the sea
 
 ---
 
+## Test Case 7: Stop Word Span Suppression
+
+```
+this is testing
+and now i'm resting
+i'm testing
+and now i'm resting
+
+i'm the best
+```
+
+### Expected (same as Test Case 1 — regression test)
+
+- Stop-word-only spans ("this is", "and now") are not families
+- "the best" does not share a color with "this is"
+- Repetition prefers longest match ("and now i'm resting" > "and now")
+
+---
+
+## Test Case 8: Color Diversity
+
+```
+thin air, big stare, slick glare
+light leaks through white sneaks
+```
+
+### Expected
+
+- **thin air / big stare / slick glare** → one family (one color)
+- **light leaks / white sneaks** → separate family (different color)
+- The two groups MUST have different colors
+
+---
+
+## Debug Mode
+
+To enable debug mode for development:
+
+1. In `src/lib/rhymeLens.ts`, set `RHYME_LENS_DEBUG = true`
+2. Hover over any family in the Sound Map panel to see:
+   - Family ID
+   - Type & confidence
+   - Label & explanation
+   - All matched span texts with line numbers
+   - Grouping reason and anchor sound (when `debugInfo` is populated)
+3. Set it back to `false` before committing
+
+---
+
 ## Known Limitations
 
 1. Phonetic analysis is approximation-based (no CMU dictionary lookup)
@@ -169,3 +232,4 @@ to be free and see the sea
 4. Very long drafts (400+ words) are capped for performance
 5. Some slang / non-standard spellings may not be recognized
 6. Assonance in Clean mode is intentionally suppressed to reduce noise
+7. Debug info (`debugInfo` field) is only populated when `RHYME_LENS_DEBUG = true`

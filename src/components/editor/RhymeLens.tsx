@@ -7,6 +7,7 @@ import {
   DEFAULT_OPTIONS,
   CLEAN_OPTIONS,
   MAX_OPTIONS,
+  RHYME_LENS_DEBUG,
   type RhymeType,
   type RhymeFamily,
   type RhymeLensResult,
@@ -86,6 +87,8 @@ export type CharHighlight = {
   familyId: string;
   type: RhymeType;
   strength: "light" | "medium" | "strong";
+  label?: string;
+  explanation?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -118,6 +121,8 @@ export function buildCharHighlights(
           familyId: family.id,
           type: family.type,
           strength: family.strength,
+          label: family.label,
+          explanation: family.explanation,
         });
       }
     }
@@ -204,6 +209,11 @@ function SoundMapPanel({
             <button
               key={f.id}
               onClick={() => onFocusFamily(isFocused ? null : f.id)}
+              title={
+                RHYME_LENS_DEBUG
+                  ? `ID: ${f.id}\nType: ${f.type}\nConfidence: ${f.confidence.toFixed(2)}\nLabel: ${f.label}\nExplanation: ${f.explanation}\nSpans: ${f.spans.map((s) => `"${s.text}" (L${s.lineIndex + 1})`).join(", ")}${f.debugInfo ? `\nReason: ${f.debugInfo.reason}\nAnchor: ${f.debugInfo.anchorSound}` : ""}`
+                  : f.explanation
+              }
               className={`flex w-full items-start gap-2.5 rounded px-2 py-1.5 text-left transition-all duration-150 ${
                 isFocused
                   ? "bg-ink-line/20"
@@ -237,6 +247,7 @@ function SoundMapPanel({
                 </div>
                 <div className="mt-0.5 text-[9px] text-ink-mute/40">
                   {f.type} · {f.spans.length} · {f.strength}
+                  {RHYME_LENS_DEBUG && ` · conf:${f.confidence.toFixed(2)}`}
                 </div>
               </div>
             </button>
