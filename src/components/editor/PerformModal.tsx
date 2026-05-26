@@ -368,12 +368,14 @@ function useDrumEngine(destNode: AudioNode | null) {
   const nextBeatTimeRef = useRef(0);
   const playingRef = useRef(false);
   const presetRef = useRef<DrumPreset>(DRUM_PRESETS[0]);
+  const bpmRef = useRef<number>(DRUM_PRESETS[0].bpm);
 
   const [playing, setPlaying] = useState(false);
   const [presetName, setPresetNameState] = useState(DRUM_PRESETS[0].name);
   const [masterVolume, setMasterVolumeState] = useState(0.8);
   const [drumVolume, setDrumVolumeState] = useState(0.7);
   const [filterCutoff, setFilterCutoffState] = useState(4000);
+  const [currentBpm, setCurrentBpmState] = useState(DRUM_PRESETS[0].bpm);
 
   const ensureCtx = useCallback(() => {
     if (ctxRef.current) return ctxRef.current;
@@ -528,7 +530,7 @@ function useDrumEngine(destNode: AudioNode | null) {
 
     const lookahead = 0.1; // seconds
     const p = presetRef.current;
-    const stepDuration = 60 / p.bpm / 4; // 16th note duration
+    const stepDuration = 60 / bpmRef.current / 4; // 16th note duration
 
     while (nextBeatTimeRef.current < ctx.currentTime + lookahead) {
       const step = stepRef.current % 16;
@@ -566,7 +568,15 @@ function useDrumEngine(destNode: AudioNode | null) {
     const preset = DRUM_PRESETS.find((p) => p.name === name);
     if (!preset) return;
     presetRef.current = preset;
+    bpmRef.current = preset.bpm;
     setPresetNameState(name);
+    setCurrentBpmState(preset.bpm);
+  }, []);
+
+  const setBpm = useCallback((bpm: number) => {
+    const clamped = Math.max(50, Math.min(200, bpm));
+    bpmRef.current = clamped;
+    setCurrentBpmState(clamped);
   }, []);
 
   const setMasterVolume = useCallback((vol: number) => {
@@ -593,9 +603,11 @@ function useDrumEngine(destNode: AudioNode | null) {
     masterVolume,
     drumVolume,
     filterCutoff,
+    currentBpm,
     play,
     stop,
     setPreset,
+    setBpm,
     setMasterVolume,
     setDrumVolume,
     setFilterCutoff,
@@ -1215,7 +1227,7 @@ export function PerformModal({
       <div className="flex min-h-0 flex-1 overflow-hidden">
 
         {/* ── Left: Camera + guide ── */}
-        <div className="flex w-72 flex-shrink-0 flex-col border-r border-ink-line">
+        <div className="flex w-[400px] flex-shrink-0 flex-col border-r border-ink-line">
           <div className="border-b border-ink-line px-3 py-2">
             <span className="font-mono text-[10px] uppercase tracking-widest text-ink-mute">Camera Feed</span>
           </div>
@@ -1361,7 +1373,7 @@ export function PerformModal({
               'text-ink-mute'
             }`}>
               {beatLatchRef.current === 'playing' ? (
-                <>● LOOPING — {currentPreset.name} · {currentPreset.bpm} BPM</>
+                <>● LOOPING — {currentPreset.name} · {drum.currentBpm} BPM</>
               ) : beatLatchRef.current === 'muted' ? (
                 <>○ MUTED — {currentPreset.name}</>
               ) : (
@@ -1596,8 +1608,45 @@ export function PerformModal({
                   </div>
                 </div>
 
-                <div className="font-mono text-xs text-ink-mute">
-                  BPM: {currentPreset.bpm}
+                {/* BPM controls */}
+                <div>
+                  <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute">BPM</div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => drum.setBpm(drum.currentBpm - 5)}
+                      className="border border-ink-line px-2 py-0.5 font-mono text-sm text-ink-mute hover:border-ink-text hover:text-ink-text"
+                    >
+                      -5
+                    </button>
+                    <button
+                      onClick={() => drum.setBpm(drum.currentBpm - 1)}
+                      className="border border-ink-line px-2 py-0.5 font-mono text-sm text-ink-mute hover:border-ink-text hover:text-ink-text"
+                    >
+                      -
+                    </button>
+                    <span className="min-w-[3rem] text-center font-mono text-lg text-ink-text">
+                      {drum.currentBpm}
+                    </span>
+                    <button
+                      onClick={() => drum.setBpm(drum.currentBpm + 1)}
+                      className="border border-ink-line px-2 py-0.5 font-mono text-sm text-ink-mute hover:border-ink-text hover:text-ink-text"
+                    >
+                      +
+                    </button>
+                    <button
+                      onClick={() => drum.setBpm(drum.currentBpm + 5)}
+                      className="border border-ink-line px-2 py-0.5 font-mono text-sm text-ink-mute hover:border-ink-text hover:text-ink-text"
+                    >
+                      +5
+                    </button>
+                    <button
+                      onClick={() => drum.setBpm(currentPreset.bpm)}
+                      className="ml-1 border border-ink-line px-2 py-0.5 font-mono text-[10px] uppercase text-ink-mute hover:border-ink-text hover:text-ink-text"
+                      title="Reset to preset default"
+                    >
+                      rst
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -1821,7 +1870,7 @@ export function PerformModal({
           </button>
 
           <div className="border border-ink-line px-3 py-1 font-mono text-xs text-ink-mute">
-            BPM: {currentPreset.bpm}
+            BPM: {drum.currentBpm}
           </div>
         </div>
       </div>
