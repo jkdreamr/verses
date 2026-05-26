@@ -26,8 +26,10 @@ This architecture replaces the old model where Perform Mode was a disconnected s
 - **Left hand (latched transport)**: hold open palm 400ms → beat latches on; fist → stops; pinch → mutes/unmutes. Beat continues playing after hand leaves frame.
 - **Right hand (8-slot chord system)**: open palm + 4 horizontal zones → slots 1–4; two fingers + 4 zones → slots 5–8; fist = silence; pinch = sustain
 - Beat source: procedural drums (5 presets) or YouTube beat (via window event bridge)
+- **Drum BPM**: adjustable live between 50–200 BPM via +/− controls during performance setup or playback
 - Improved gesture reading: 8-frame history buffer, EMA-smoothed wrist position, zone hysteresis, per-action cooldowns
 - Camera overlay: optional zone grid, hand skeleton, gesture labels, active zone highlight
+- **Camera view**: significantly enlarged when hand gestures are active — 500px column width, 1200px modal — with "Keep both hands inside the frame" instruction
 
 ### Live Voice-to-Trumpet
 - Browser-native real-time voice transformation
@@ -60,6 +62,8 @@ This architecture replaces the old model where Perform Mode was a disconnected s
 - Paste any YouTube URL to play in the bottom bar
 - A/B loop, named markers, keyboard shortcut (⌘P)
 - Window event bridge for control from performance layers
+- **Auto-play on Record start**: when a YouTube beat is loaded and selected, it auto-plays at the start of a recording across all four performance layer modes (Normal, Hand Gestures, Live Trumpet, Gestures + Trumpet)
+- **Replace**: a Replace button in the bottom bar clears the current beat, resets all markers and loop points, and lets the user load a new URL cleanly
 
 ---
 
@@ -97,14 +101,16 @@ Zone transitions use a committed-zone ref that only updates when movement > 0.08
 Each hand maintains an 8-frame history buffer. A gesture is only "committed" when it appears in 5 of the last 8 frames. This eliminates single-frame misdetections and prevents chord spamming.
 
 #### Audio Routing Architecture
+Chords and drums share a single `AudioContext` and play simultaneously without routing conflicts.
+
 ```
 Mic stream
   ├→ AnalyserNode (level meter)
   ├→ AnalyserNode (pitch detection → trumpet synth → recDest)
   └→ MediaStreamSource → (if rawVoice enabled) → recDest
 
-Drum engine → masterGain → compressor → recDest
-Chord synth → reverb → recDest
+Drum engine → masterGain → compressor → recDest   ┐ shared AudioContext
+Chord synth → reverb → recDest                    ┘
 
 recDest.stream + [camera videoTrack] → MediaRecorder → blob → IndexedDB
 ```

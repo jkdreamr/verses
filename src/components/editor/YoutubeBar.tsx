@@ -61,6 +61,7 @@ export function YoutubeBar({
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(60);
+  const [replacing, setReplacing] = useState(false);
   const [draftLabel, setDraftLabel] = useState<{
     time: number;
     label: string;
@@ -277,15 +278,29 @@ export function YoutubeBar({
       return;
     }
     const title = (await fetchYoutubeTitle(url)) ?? null;
-    onChange({
-      id: session?.id ?? `yt-${Math.random().toString(36).slice(2)}`,
-      song_id: session?.song_id ?? "",
-      youtube_url: url,
-      youtube_title: title,
-      markers: session?.markers ?? [],
-      loop_start: session?.loop_start ?? null,
-      loop_end: session?.loop_end ?? null,
-    });
+    if (replacing) {
+      onChange({
+        id: `yt-${Math.random().toString(36).slice(2)}`,
+        song_id: session?.song_id ?? "",
+        youtube_url: url,
+        youtube_title: title,
+        markers: [],
+        loop_start: null,
+        loop_end: null,
+      });
+      setReplacing(false);
+      toast("Beat replaced", "ok");
+    } else {
+      onChange({
+        id: session?.id ?? `yt-${Math.random().toString(36).slice(2)}`,
+        song_id: session?.song_id ?? "",
+        youtube_url: url,
+        youtube_title: title,
+        markers: session?.markers ?? [],
+        loop_start: session?.loop_start ?? null,
+        loop_end: session?.loop_end ?? null,
+      });
+    }
     setExpanded(true);
   };
 
@@ -585,8 +600,19 @@ export function YoutubeBar({
               title="Volume"
             />
             <button
-              onClick={() => onChange(null)}
-              title="Remove"
+              onClick={() => setReplacing(true)}
+              title="Replace beat"
+              className="rounded border border-ink-line px-2 py-1 text-[11px] text-ink-mute transition-colors duration-150 hover:border-amber-gold/60 hover:text-amber-gold"
+            >
+              replace
+            </button>
+            <button
+              onClick={() => {
+                try { playerRef.current?.pauseVideo(); } catch {}
+                onChange(null);
+                toast("Beat cleared", "ok");
+              }}
+              title="Clear beat"
               className="rounded p-1 text-[11px] text-ink-mute transition-colors duration-150 hover:text-ink-text"
             >
               ✕
@@ -594,6 +620,35 @@ export function YoutubeBar({
           </>
         )}
       </div>
+      {replacing && session ? (
+        <div className="mx-auto flex max-w-3xl items-center gap-2 px-4 pb-2">
+          <input
+            autoFocus
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="paste a new YouTube link…"
+            className="flex-1 rounded border border-ink-line bg-ink/60 px-3 py-1.5 text-sm focus:border-amber-gold/60"
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.preventDefault();
+                setReplacing(false);
+              }
+            }}
+          />
+          <button
+            onClick={() => onLoad()}
+            className="rounded border border-amber-gold/40 bg-amber-gold/5 px-3 py-1.5 text-xs text-amber-gold transition-colors duration-150 hover:bg-amber-gold/15"
+          >
+            Load
+          </button>
+          <button
+            onClick={() => setReplacing(false)}
+            className="rounded border border-ink-line px-3 py-1.5 text-xs text-ink-mute transition-colors duration-150 hover:text-ink-text"
+          >
+            Cancel
+          </button>
+        </div>
+      ) : null}
       {session?.youtube_title && expanded ? (
         <div className="mx-auto max-w-3xl truncate px-4 pb-2 text-[11px] text-ink-mute">
           {session.youtube_title}

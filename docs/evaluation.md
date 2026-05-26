@@ -90,6 +90,44 @@
 4. Record → hold left palm → YouTube beat starts playing
 5. Expected: UI note about YouTube not being captured in recording
 
+**Test 7a: YouTube beat auto-plays on Record start (all layer modes)**
+1. Load a YouTube beat in the editor bar
+2. For each of the 4 layer modes (Normal, Hand Gestures, Live Trumpet, Gestures + Trumpet), set Beat Source to YouTube where applicable
+3. Click Record in each mode
+4. Expected: YouTube beat begins playing automatically at Record start in every mode — no manual trigger required
+
+**Test 7b: YouTube Replace clears markers and loop**
+1. Load a YouTube beat; set A/B loop points and add a named marker
+2. In the bottom bar, click **Replace**
+3. Expected: the current video stops, all markers are cleared, loop points are reset
+4. Paste a new YouTube URL
+5. Expected: new beat loads cleanly with no leftover markers or loop points from the previous beat
+
+**Test 7c: Drum BPM live adjustment**
+1. New Take → Hand Gestures → Beat Source: Drums
+2. Note the current BPM value
+3. Click **+** BPM button several times while drums are looping
+4. Expected: beat audibly speeds up in real time; BPM display reflects the new value
+5. Click **−** BPM button to reduce; expected: beat slows down audibly
+6. Adjust BPM to the minimum (50) and maximum (200) boundaries
+7. Expected: BPM clamps correctly; no crash or audio glitch at boundaries
+8. Click Reset (or reload the preset)
+9. Expected: BPM returns to the preset's default value
+
+**Test 7d: Chords play while drums are looping**
+1. New Take → Hand Gestures → Record
+2. Start drums with left palm hold
+3. While drums are looping, move right hand into a chord zone (open palm, zone 1–4)
+4. Expected: chord plays simultaneously with the drum beat — no dropout, no audio conflict
+5. Switch chord zones while drums continue; expected: smooth chord changes with drums uninterrupted
+
+**Test 7e: Camera large enough for two-hand visibility**
+1. New Take → Hand Gestures → Record (grant camera permission)
+2. Expected: camera panel uses a 500px column width and the modal is ~1200px wide
+3. Expected: "Keep both hands inside the frame" instruction is visible
+4. Hold both hands in frame simultaneously
+5. Expected: both hands are clearly visible in the camera view without needing to crop or zoom out
+
 **Test 8: Live Trumpet layer**
 1. New Take → Performance Layers → "Live Trumpet"
 2. Expected: preset selector, brightness/vibrato/output sliders appear

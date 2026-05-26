@@ -31,6 +31,8 @@ Writing leads directly to performance. When you are ready to record, you open a 
 - Loop a section with A/B loop points
 - Named markers at key timestamps
 - Sync vocal takes to specific beat positions
+- **Auto-play on Record start**: YouTube beat begins automatically when recording starts, across all four performance layer modes
+- **Replace**: clears the current beat along with all markers and loop points so a new URL loads cleanly with no leftovers
 
 ### Takes (Recording Hub)
 **New Take** is where all recording and performance happens. Open the Takes panel, click **New Take**, and choose what to enable:
@@ -45,10 +47,12 @@ These work as a unified recording session. The resulting take captures the selec
 ### Hand Gesture Performance Layer
 - MediaPipe hand tracking (runs in browser, no server)
 - Beat source: **DRUMS** (procedural synthesis) or **YOUTUBE** (loaded beat from the editor bar)
+- **Drum BPM**: +/− buttons adjust tempo live between 50–200 BPM; resets to preset default on demand
 - **Left hand transport (latched)**: hold open palm ~0.4s → beat latches on and keeps looping; make a fist to stop; pinch to mute/unmute
 - **Right hand chords (8 slots)**: open palm + 4 horizontal zones → slots 1–4; two fingers + 4 zones → slots 5–8; fist = silence
+- Chords and drums play simultaneously through a shared AudioContext — no routing conflicts
 - Improved gesture reading: history buffer, smoothed wrist position, zone hysteresis, per-action cooldowns
-- Camera overlay: optional zone grid, hand skeleton, gesture labels, L/R labels
+- Camera overlay: optional zone grid, hand skeleton, gesture labels, L/R labels — **large camera view** (~1200px modal, 500px column) so both hands are clearly visible in frame
 - Toggles: Show zones, Show skeleton, Swap hands
 
 ### Live Voice-to-Trumpet Layer

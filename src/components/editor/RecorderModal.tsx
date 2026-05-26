@@ -389,12 +389,14 @@ function useDrumEngine(destNode: AudioNode | null) {
   const nextBeatTimeRef = useRef(0);
   const playingRef = useRef(false);
   const presetRef = useRef<DrumPreset>(DRUM_PRESETS[0]);
+  const bpmRef = useRef<number>(DRUM_PRESETS[0].bpm);
 
   const [playing, setPlaying] = useState(false);
   const [presetName, setPresetNameState] = useState(DRUM_PRESETS[0].name);
   const [masterVolume, setMasterVolumeState] = useState(0.8);
   const [drumVolume, setDrumVolumeState] = useState(0.7);
   const [filterCutoff, setFilterCutoffState] = useState(4000);
+  const [currentBpm, setCurrentBpmState] = useState<number>(DRUM_PRESETS[0].bpm);
 
   const ensureCtx = useCallback(() => {
     if (ctxRef.current) return ctxRef.current;
@@ -522,7 +524,7 @@ function useDrumEngine(destNode: AudioNode | null) {
     if (!ctx || !dGain || !playingRef.current) return;
     const lookahead = 0.1;
     const p = presetRef.current;
-    const stepDuration = 60 / p.bpm / 4;
+    const stepDuration = 60 / bpmRef.current / 4;
     while (nextBeatTimeRef.current < ctx.currentTime + lookahead) {
       const step = stepRef.current % 16;
       const swingOffset = (step % 2 === 1) ? stepDuration * (p.swing - 0.5) : 0;
@@ -558,6 +560,8 @@ function useDrumEngine(destNode: AudioNode | null) {
     if (!preset) return;
     presetRef.current = preset;
     setPresetNameState(name);
+    bpmRef.current = preset.bpm;
+    setCurrentBpmState(preset.bpm);
   }, []);
 
   const setMasterVolume = useCallback((vol: number) => {
@@ -575,12 +579,18 @@ function useDrumEngine(destNode: AudioNode | null) {
     if (filterRef.current) filterRef.current.frequency.value = freq;
   }, []);
 
+  const setBpm = useCallback((bpm: number) => {
+    const clamped = Math.max(50, Math.min(200, bpm));
+    bpmRef.current = clamped;
+    setCurrentBpmState(clamped);
+  }, []);
+
   const getMasterGain = useCallback(() => masterGainRef.current, []);
   const getCtx = useCallback(() => ctxRef.current, []);
 
   return {
-    playing, presetName, masterVolume, drumVolume, filterCutoff,
-    play, stop, setPreset, setMasterVolume, setDrumVolume, setFilterCutoff,
+    playing, presetName, masterVolume, drumVolume, filterCutoff, currentBpm,
+    play, stop, setPreset, setMasterVolume, setDrumVolume, setFilterCutoff, setBpm,
     currentPreset: presetRef.current,
     getMasterGain, getCtx,
   };
@@ -588,13 +598,14 @@ function useDrumEngine(destNode: AudioNode | null) {
 
 // ─── Inline chord synth hook ──────────────────────────────────────────────────
 
-function useChordSynth(destNode: AudioNode | null) {
+function useChordSynth(sharedCtx: AudioContext | null, destNode: AudioNode | null) {
   const ctxRef = useRef<AudioContext | null>(null);
   const activeNotesRef = useRef<number[]>([]);
   const [activeNotes, setActiveNotes] = useState<number[]>([]);
   const [currentChordName, setCurrentChordName] = useState<string | null>(null);
 
   const ensureCtx = useCallback(() => {
+    if (sharedCtx) return sharedCtx;
     if (ctxRef.current) return ctxRef.current;
     const Ctx =
       window.AudioContext ||
@@ -602,7 +613,7 @@ function useChordSynth(destNode: AudioNode | null) {
     const ctx = new Ctx();
     ctxRef.current = ctx;
     return ctx;
-  }, []);
+  }, [sharedCtx]);
 
   const playChord = useCallback(
     (chord: { root: string; quality: ChordQuality; octave: number; inversion: "root" | "first" | "second" }) => {
@@ -1028,7 +1039,7 @@ export function RecorderModal({
 
   // ── Drum + chord engines ──
   const drum = useDrumEngine(recDestNode);
-  const chord = useChordSynth(recDestNode);
+  const chord = useChordSynth(drum.getCtx(), recDestNode);
 
   // ── Trumpet synth ──
   const trumpetEnabled =
@@ -1710,12 +1721,10 @@ export function RecorderModal({
       }, 200);
       setState("recording");
 
-      // Auto-play beat
-      if (autoPlayBeat && hasYoutube && performLayer !== "hand") {
-        const startAt = typeof resolvedStartAt === "number" ? resolvedStartAt : 0;
-        window.dispatchEvent(new CustomEvent("verses:beat-play", { detail: { startAt } }));
-      }
-      if (performLayer === "hand" && beatSource === "youtube" && hasYoutube) {
+      // Auto-play beat — works for ALL performLayer values
+      if (autoPlayBeat && hasYoutube) {
+        // Don't double-play: if hand layer with youtube beat source, this covers it
+        // If hand layer with drums beat source, still play youtube if autoPlayBeat is on
         const startAt = typeof resolvedStartAt === "number" ? resolvedStartAt : 0;
         window.dispatchEvent(new CustomEvent("verses:beat-play", { detail: { startAt } }));
       }
@@ -1732,7 +1741,7 @@ export function RecorderModal({
     }
   }, [
     autoPlayBeat, hasYoutube, resolvedStartAt, startAtSel, startMeter,
-    teardownStreams, withVideo, performLayer, beatSource, camActive,
+    teardownStreams, withVideo, performLayer, camActive,
     startGestureCamera, drum, lyricFollowMode, hasLyrics, initSmartFollow,
     stopSmartFollow,
   ]);
@@ -1810,7 +1819,7 @@ export function RecorderModal({
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
-    <Modal open={open} onClose={onClose} title="Record a take" width="960px">
+    <Modal open={open} onClose={onClose} title="Record a take" width={(performLayer === "hand" || performLayer === "both") ? "1200px" : "960px"}>
       <div className="flex flex-col gap-4">
         {!isReview ? (
           <>
@@ -1987,6 +1996,39 @@ export function RecorderModal({
                         </div>
                       </div>
 
+                      {/* BPM controls */}
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className="font-mono text-[10px] uppercase tracking-wider text-ink-mute">BPM</span>
+                        <button
+                          type="button"
+                          onClick={() => drum.setBpm(drum.currentBpm - 1)}
+                          className="rounded border border-ink-line px-2 py-0.5 font-mono text-[11px] text-ink-mute hover:text-ink-text"
+                        >
+                          −
+                        </button>
+                        <span className="w-8 text-center font-mono text-sm text-ink-text tabular-nums">
+                          {drum.currentBpm}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => drum.setBpm(drum.currentBpm + 1)}
+                          className="rounded border border-ink-line px-2 py-0.5 font-mono text-[11px] text-ink-mute hover:text-ink-text"
+                        >
+                          +
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => drum.setBpm(DRUM_PRESETS.find(p => p.name === drumPresetName)?.bpm ?? 88)}
+                          className="font-mono text-[10px] text-ink-mute hover:text-ink-text"
+                          title="Reset to preset default"
+                        >
+                          reset
+                        </button>
+                        <span className="font-mono text-[10px] text-ink-mute/60">
+                          {drum.playing ? "● looping" : "◌ stopped"}
+                        </span>
+                      </div>
+
                       {/* Chord progression */}
                       <div className="mb-2">
                         <div className="mb-1 font-mono text-[10px] text-ink-mute uppercase tracking-wider">Chord progression</div>
@@ -2028,6 +2070,24 @@ export function RecorderModal({
                           ))}
                         </div>
                       </div>
+
+                      {/* Camera preview in setup */}
+                      {!isRecording ? (
+                        <div className="mt-2">
+                          {!camActive ? (
+                            <button
+                              type="button"
+                              onClick={startGestureCamera}
+                              className="rounded border border-ink-line px-3 py-1 font-mono text-[11px] text-ink-mute hover:text-ink-text"
+                            >
+                              Start camera preview
+                            </button>
+                          ) : (
+                            <div className="font-mono text-[10px] text-green-400">● Camera active</div>
+                          )}
+                          {camError ? <div className="mt-1 font-mono text-[10px] text-red-400">{camError}</div> : null}
+                        </div>
+                      ) : null}
 
                       {/* Options */}
                       <div className="flex flex-wrap gap-3">
@@ -2141,12 +2201,13 @@ export function RecorderModal({
               /* Gesture recording layout */
               <div className="flex flex-col gap-3 lg:flex-row">
                 {/* LEFT: gesture camera feed */}
-                <div className="flex flex-col gap-2 lg:w-72 lg:flex-shrink-0">
+                <div className="flex flex-col gap-2 lg:w-[500px] lg:flex-shrink-0">
                   <div className="font-mono text-[10px] uppercase tracking-widest text-ink-mute">
                     Camera / Gestures
                     {mediaPipeLoading ? <span className="ml-2 text-amber-gold/60">loading...</span> : null}
                     {camError ? <span className="ml-2 text-red-400">{camError}</span> : null}
                   </div>
+                  <div className="mb-1 font-mono text-[10px] text-ink-mute/60">Keep both hands inside the frame</div>
                   <div className="relative aspect-video w-full overflow-hidden rounded border border-ink-line bg-black">
                     {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
                     <video
