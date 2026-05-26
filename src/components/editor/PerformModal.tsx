@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { takesStore, newTakeId } from "@/lib/takes";
 import type { Take } from "@/lib/types";
 import { DRUM_PRESETS, useDrumEngine } from "@/hooks/perform/useDrumEngine";
+import { usePerformAudioBus } from "@/hooks/perform/usePerformAudioBus";
 import {
   NOTE_NAMES,
   INSTRUMENT_PRESETS,
@@ -146,6 +147,8 @@ export function PerformModal({
 
   // Chord slot refs
   const prevSlotRef = useRef<number | null>(null);
+  const lastChordTriggerMsRef = useRef<number>(0);
+  const lastRightActionMsRef = useRef<number>(0);
   const sustainRef = useRef(false);
 
   // Recording refs
@@ -162,7 +165,6 @@ export function PerformModal({
   const [_fps, setFps] = useState(0);
   const [recording, setRecording] = useState(false);
   const [recElapsed, setRecElapsed] = useState(0);
-  const [recDestNode, setRecDestNode] = useState<AudioNode | null>(null);
   const [beatSource, setBeatSource] = useState<'drums' | 'youtube'>('drums');
   const [chordSlots, setChordSlots] = useState<ChordSlot[]>(SLOT_PRESETS['Pop']);
   const [activeSlot, setActiveSlot] = useState<number | null>(null);
@@ -187,22 +189,28 @@ export function PerformModal({
   const [liveVolume, setLiveVolume] = useState(0);
 
   // Hooks
-  const drum = useDrumEngine(recDestNode);
-  const chord = useChordSynth(recDestNode, drum.getCtx);
+  const audioBus = usePerformAudioBus();
+  const bus = audioBus.bus;
+  const getBusCtx = useCallback(() => audioBus.bus?.ctx ?? null, [audioBus.bus]);
+  const drum = useDrumEngine(bus?.drumGain ?? null);
+  const chord = useChordSynth(bus?.chordGain ?? null, getBusCtx);
+  const ensureAudioBus = audioBus.ensureBus;
+  const resumeAudioBus = audioBus.resume;
+  const destroyAudioBus = audioBus.destroy;
+  const releaseChord = chord.releaseChord;
+  const setSynthChordVolume = chord.setChordVolume;
+  const stopDrums = drum.stop;
 
-  // ── Setup recording destination ──
   useEffect(() => {
-    const ctx = drum.getCtx();
-    if (!ctx || recDestRef.current) return;
-    try {
-      const dest = ctx.createMediaStreamDestination();
-      recDestRef.current = dest;
-      setRecDestNode(dest);
-      const mg = drum.getMasterGain();
-      if (mg) mg.connect(dest);
-    } catch {}
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drum]);
+    if (!open) return;
+    const nextBus = ensureAudioBus();
+    recDestRef.current = nextBus.recordDest;
+    void resumeAudioBus();
+  }, [ensureAudioBus, open, resumeAudioBus]);
+
+  useEffect(() => {
+    setSynthChordVolume(chordVolume);
+  }, [chordVolume, setSynthChordVolume]);
 
   // ── Gesture detection ──
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -322,7 +330,11 @@ export function PerformModal({
       // Exponential curve: hand position 0-1 maps to volume via x^2.5
       // This gives finer control at low volumes and a natural loudness feel
       const rawVol = Math.max(0, Math.min(1, 1 - left.wristY)); // high hand = loud
-      const vol = Math.pow(rawVol, 2.5);
+      const curvedVol = Math.pow(rawVol, 2.2);
+      const previousVol = lastLeftVolumeRef.current;
+      const vol = Math.abs(curvedVol - previousVol) < 0.04
+        ? previousVol
+        : previousVol * 0.8 + curvedVol * 0.2;
       lastLeftVolumeRef.current = vol;
       setLiveVolume(rawVol);
       lastLeftFilterRef.current = filterLo + left.wristX * (filterHi - filterLo);
@@ -392,6 +404,9 @@ export function PerformModal({
         setIsSilenced(true);
         prevSlotRef.current = null;
       } else if (g === 'pinch') {
+        const nowMs = Date.now();
+        if (nowMs - lastRightActionMsRef.current < 300) return;
+        lastRightActionMsRef.current = nowMs;
         // Sustain toggle OR retrigger
         sustainRef.current = !sustainRef.current;
         if (!sustainRef.current && activeSlot !== null) {
@@ -407,13 +422,15 @@ export function PerformModal({
         else if (g === 'point') targetSlot = zone + 1; // also 1-4 for point
         else targetSlot = prevSlotRef.current ?? 1;
         
-        if (targetSlot !== prevSlotRef.current) {
+        const nowMs = Date.now();
+        if (targetSlot !== prevSlotRef.current && nowMs - lastChordTriggerMsRef.current > 180) {
           // New slot — trigger chord
           const slot = chordSlots.find(s => s.slot === targetSlot);
           if (slot) {
             chord.playChord(slot);
             setActiveSlot(targetSlot);
             prevSlotRef.current = targetSlot;
+            lastChordTriggerMsRef.current = nowMs;
           }
         }
       }
@@ -518,6 +535,9 @@ export function PerformModal({
 
   // ── Recording controls ──
   const startRecording = useCallback(() => {
+    const activeBus = ensureAudioBus();
+    recDestRef.current = activeBus.recordDest;
+    void resumeAudioBus();
     const dest = recDestRef.current;
     if (!dest) return;
     const audioStream = dest.stream;
@@ -551,14 +571,18 @@ export function PerformModal({
     recorder.start();
     mediaRecorderRef.current = recorder;
     setRecording(true);
-  }, [songId, onTakeSaved]);
+  }, [ensureAudioBus, onTakeSaved, resumeAudioBus, songId]);
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && recording) {
       mediaRecorderRef.current.stop();
       setRecording(false);
     }
-  }, [recording]);
+    stopDrums();
+    releaseChord();
+    window.dispatchEvent(new CustomEvent('verses:beat-pause'));
+    beatLatchRef.current = 'stopped';
+  }, [recording, releaseChord, stopDrums]);
 
   // Update recording timer
   useEffect(() => {
@@ -569,15 +593,43 @@ export function PerformModal({
     return () => clearInterval(interval);
   }, [recording]);
 
+  const fullPerformCleanup = useCallback(async () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      try { mediaRecorderRef.current.stop(); } catch {}
+    }
+    mediaRecorderRef.current = null;
+    recChunksRef.current = [];
+    setRecording(false);
+    setRecElapsed(0);
+    stopCamera();
+    stopDrums();
+    releaseChord();
+    window.dispatchEvent(new CustomEvent("verses:beat-pause"));
+    beatLatchRef.current = "stopped";
+    leftGestureTimerRef.current = { gesture: null, startMs: 0 };
+    prevSlotRef.current = null;
+    sustainRef.current = false;
+    setActiveSlot(null);
+    setIsSilenced(false);
+    await destroyAudioBus();
+    recDestRef.current = null;
+  }, [destroyAudioBus, releaseChord, stopCamera, stopDrums]);
+
+  const handleClose = useCallback(() => {
+    void fullPerformCleanup();
+    onClose();
+  }, [fullPerformCleanup, onClose]);
+
+  useEffect(() => {
+    if (!open) void fullPerformCleanup();
+  }, [fullPerformCleanup, open]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      stopCamera();
-      drum.stop();
-      chord.releaseChord();
+      void fullPerformCleanup();
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fullPerformCleanup]);
 
   const fmtTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
@@ -616,7 +668,7 @@ export function PerformModal({
             Zones
           </button>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="rounded px-2.5 py-1 text-[11px] text-ink-mute/50 transition-colors hover:bg-ink-surface/40 hover:text-ink-text"
           >
             Close
@@ -1096,7 +1148,7 @@ export function PerformModal({
           </button>
 
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="rounded bg-ink-surface/40 px-3 py-1.5 text-[11px] text-ink-mute transition-colors hover:text-ink-text"
           >
             Done

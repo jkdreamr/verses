@@ -12,6 +12,7 @@ import { useToast } from "@/components/Toast";
 import { takesStore, newTakeId, formatBytes, formatDuration } from "@/lib/takes";
 import type { Take, YoutubeMarker } from "@/lib/types";
 import { DRUM_PRESETS, useDrumEngine } from "@/hooks/perform/useDrumEngine";
+import { usePerformAudioBus } from "@/hooks/perform/usePerformAudioBus";
 import {
   NOTE_NAMES,
   SLOT_PRESETS,
@@ -474,6 +475,7 @@ export function RecorderModal({
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const capturedMicStreamRef = useRef<MediaStream | null>(null);
   const recDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  const recordMixDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
 
   // ── Gesture camera refs ──
   const gestureVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -506,8 +508,17 @@ export function RecorderModal({
   const [recDestNode, setRecDestNode] = useState<AudioNode | null>(null);
 
   // ── Drum + chord engines ──
-  const drum = useDrumEngine(recDestNode);
-  const chord = useChordSynth(recDestNode, drum.getCtx);
+  const audioBus = usePerformAudioBus();
+  const bus = audioBus.bus;
+  const getBusCtx = useCallback(() => audioBus.bus?.ctx ?? null, [audioBus.bus]);
+  const drum = useDrumEngine(bus?.drumGain ?? recDestNode);
+  const chord = useChordSynth(bus?.chordGain ?? recDestNode, getBusCtx);
+  const ensureAudioBus = audioBus.ensureBus;
+  const resumeAudioBus = audioBus.resume;
+  const destroyAudioBus = audioBus.destroy;
+  const releaseChord = chord.releaseChord;
+  const stopDrums = drum.stop;
+  const playDrums = drum.play;
 
   // ── Trumpet synth ──
   const trumpetEnabled =
@@ -554,17 +565,12 @@ export function RecorderModal({
 
   // ─── Recording dest setup ─────────────────────────────────────────────────
   useEffect(() => {
-    const ctx = drum.getCtx();
-    if (!ctx || recDestRef.current) return;
-    try {
-      const dest = ctx.createMediaStreamDestination();
-      recDestRef.current = dest;
-      setRecDestNode(dest);
-      const mg = drum.getMasterGain();
-      if (mg) mg.connect(dest);
-    } catch {}
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drum]);
+    if (!open) return;
+    const nextBus = ensureAudioBus();
+    recDestRef.current = nextBus.recordDest;
+    setRecDestNode(nextBus.recordDest);
+    void resumeAudioBus();
+  }, [ensureAudioBus, open, resumeAudioBus]);
 
   // ─── Sync drum preset ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -632,7 +638,7 @@ export function RecorderModal({
       const side = handedness[i]?.[0]?.categoryName ?? "Right";
       const gesture = detectGesture(lms);
       const wrist = lms[0];
-      const hs: HandState = { gesture, wristX: wrist.x, wristY: wrist.y, present: true };
+      const hs: HandState = { gesture, wristX: 1 - wrist.x, wristY: wrist.y, present: true };
       if (side === "Left") newRight = hs; // MediaPipe mirrors
       else newLeft = hs;
     }
@@ -1024,6 +1030,10 @@ export function RecorderModal({
     if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
     if (tickRef.current !== null) { window.clearInterval(tickRef.current); tickRef.current = null; }
     try { analyserRef.current?.disconnect(); } catch {}
+    if (recordMixDestRef.current && bus) {
+      try { bus.masterGain.disconnect(recordMixDestRef.current); } catch {}
+      recordMixDestRef.current = null;
+    }
     analyserRef.current = null;
     if (meterCtxRef.current && meterCtxRef.current.state !== "closed") {
       void meterCtxRef.current.close().catch(() => {});
@@ -1033,7 +1043,7 @@ export function RecorderModal({
     sourceStreamsRef.current = [];
     if (previewVideoRef.current) previewVideoRef.current.srcObject = null;
     capturedMicStreamRef.current = null;
-  }, []);
+  }, [bus]);
 
   const fullCleanup = useCallback(() => {
     if (recorderRef.current && recorderRef.current.state !== "inactive") {
@@ -1043,8 +1053,11 @@ export function RecorderModal({
     chunksRef.current = [];
     teardownStreams();
     // Drum + chord + gesture cleanup
-    drum.stop();
-    chord.releaseChord();
+    stopDrums();
+    releaseChord();
+    void destroyAudioBus();
+    recDestRef.current = null;
+    setRecDestNode(null);
     stopGestureCamera();
     stopSmartFollow();
     // Beat latch reset
@@ -1062,7 +1075,15 @@ export function RecorderModal({
     setReviewDuration(0);
     setLabel("");
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reviewUrl, teardownStreams, drum, chord, stopGestureCamera, stopSmartFollow]);
+  }, [
+    destroyAudioBus,
+    releaseChord,
+    reviewUrl,
+    stopDrums,
+    stopGestureCamera,
+    stopSmartFollow,
+    teardownStreams,
+  ]);
 
   useEffect(() => {
     if (!open) fullCleanup();
@@ -1078,6 +1099,12 @@ export function RecorderModal({
   useEffect(() => {
     if (performLayer !== "none") setLayerPanelOpen(true);
   }, [performLayer]);
+
+  useEffect(() => {
+    if (!isMobile) return;
+    if (performLayer !== "none") setPerformLayer("none");
+    if (layerPanelOpen) setLayerPanelOpen(false);
+  }, [isMobile, layerPanelOpen, performLayer]);
 
   // ─── Begin recording ──────────────────────────────────────────────────────
   const beginRecording = useCallback(async () => {
@@ -1125,24 +1152,20 @@ export function RecorderModal({
 
       if (performLayer !== "none" && recDestRef.current) {
         // Mixed audio from recDest (drum + chord + optional mic tap)
-        const Ctx =
-          window.AudioContext ||
-          (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-        const ctx = drum.getCtx() || new Ctx();
+        const activeBus = ensureAudioBus();
+        await resumeAudioBus();
+        const ctx = activeBus.ctx;
         const mixDest = ctx.createMediaStreamDestination();
+        recordMixDestRef.current = mixDest;
         // Connect mic directly
         const micSrc = ctx.createMediaStreamSource(micStream);
         const micGain = ctx.createGain();
         micGain.gain.value = 0.9;
         micSrc.connect(micGain);
         micGain.connect(mixDest);
-        // The drum/chord engine already routes to recDestRef.current (destNode)
-        // Re-wire to mixDest as well if needed
-        const mg = drum.getMasterGain();
-        if (mg) {
-          try { mg.connect(mixDest); } catch {}
-        }
+        try { activeBus.masterGain.connect(mixDest); } catch {}
         finalTracks = [mixDest.stream.getAudioTracks()[0]];
+        sourceStreamsRef.current.push(mixDest.stream);
       } else {
         finalTracks = [micStream.getAudioTracks()[0]];
       }
@@ -1169,6 +1192,9 @@ export function RecorderModal({
         const finalDuration = (Date.now() - startedAtRef.current) / 1000;
         const blob = new Blob(chunksRef.current, { type: mime });
         chunksRef.current = [];
+        stopDrums();
+        releaseChord();
+        window.dispatchEvent(new CustomEvent("verses:beat-pause"));
         teardownStreams();
         const url = URL.createObjectURL(blob);
         setReviewBlob(blob);
@@ -1212,8 +1238,8 @@ export function RecorderModal({
   }, [
     autoPlayBeat, hasYoutube, resolvedStartAt, startAtSel, startMeter,
     teardownStreams, withVideo, performLayer, camActive,
-    startGestureCamera, drum, lyricFollowMode, hasLyrics, initSmartFollow,
-    stopSmartFollow,
+    ensureAudioBus, hasLyrics, initSmartFollow, lyricFollowMode,
+    releaseChord, resumeAudioBus, startGestureCamera, stopDrums, stopSmartFollow,
   ]);
 
   // ─── Pause / Resume recording ─────────────────────────────────────────────
@@ -1231,10 +1257,10 @@ export function RecorderModal({
       window.dispatchEvent(new CustomEvent("verses:beat-pause"));
     }
     if (performLayer === "hand" || performLayer === "both") {
-      drum.stop();
+      stopDrums();
     }
     setState("paused");
-  }, [state, autoPlayBeat, hasYoutube, performLayer, drum]);
+  }, [autoPlayBeat, hasYoutube, performLayer, state, stopDrums]);
 
   const resumeRecording = useCallback(() => {
     if (state !== "paused") return;
@@ -1252,10 +1278,10 @@ export function RecorderModal({
       window.dispatchEvent(new CustomEvent("verses:beat-play"));
     }
     if (performLayer === "hand" || performLayer === "both") {
-      drum.play();
+      playDrums();
     }
     setState("recording");
-  }, [state, autoPlayBeat, hasYoutube, performLayer, drum]);
+  }, [autoPlayBeat, hasYoutube, performLayer, playDrums, state]);
 
   // ─── Stop recording ───────────────────────────────────────────────────────
   const stopRecording = useCallback(() => {
@@ -1263,8 +1289,8 @@ export function RecorderModal({
       window.dispatchEvent(new CustomEvent("verses:beat-pause"));
     }
     if (performLayer === "hand" || performLayer === "both") {
-      drum.stop();
-      chord.releaseChord();
+      stopDrums();
+      releaseChord();
       beatLatchRef.current = "stopped";
       setBeatLatchState("stopped");
     }
@@ -1274,7 +1300,7 @@ export function RecorderModal({
       try { r.stop(); } catch {}
     }
     if (tickRef.current !== null) { window.clearInterval(tickRef.current); tickRef.current = null; }
-  }, [autoPlayBeat, hasYoutube, performLayer, drum, chord, stopSmartFollow]);
+  }, [autoPlayBeat, hasYoutube, performLayer, releaseChord, stopDrums, stopSmartFollow]);
 
   // ─── Discard review ───────────────────────────────────────────────────────
   const discardReview = useCallback(() => {
@@ -1410,7 +1436,7 @@ export function RecorderModal({
             ) : null}
 
             {/* ── PERFORMANCE LAYERS section ── */}
-            <div className="rounded border border-ink-line">
+            <div className={isMobile ? "hidden" : "rounded border border-ink-line"}>
               {/* Header */}
               <button
                 type="button"

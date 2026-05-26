@@ -735,34 +735,45 @@ function renderHighlightedText(
       nodes.push(text.slice(i, j));
       i = j;
     } else {
-      // Gather consecutive chars with same familyId
-      const familyId = h.familyId;
+      // Gather consecutive chars with the same highlight layer stack
+      const layerKey = highlightLayerKey(h);
       let j = i + 1;
       while (j < text.length) {
         const hj = highlights.get(j);
-        if (!hj || hj.familyId !== familyId) break;
+        if (!hj || highlightLayerKey(hj) !== layerKey) break;
         j++;
       }
-      const color = FAMILY_COLORS[h.colorIndex % FAMILY_COLORS.length];
-      const borderColor = FAMILY_BORDER_COLORS[h.colorIndex % FAMILY_BORDER_COLORS.length];
-      const isRepetition = h.type === "repetition";
+      const primary = primaryHighlightLayer(h);
+      const repetition = h.find((layer) => layer.type === "repetition");
+      const secondary = h.find((layer) => layer.familyId !== primary?.familyId && layer.type !== "repetition");
+      const color = primary && primary.type !== "repetition"
+        ? FAMILY_COLORS[primary.colorIndex % FAMILY_COLORS.length]
+        : "transparent";
+      const borderColor = repetition
+        ? FAMILY_BORDER_COLORS[repetition.colorIndex % FAMILY_BORDER_COLORS.length]
+        : secondary
+          ? FAMILY_BORDER_COLORS[secondary.colorIndex % FAMILY_BORDER_COLORS.length]
+          : primary
+            ? FAMILY_BORDER_COLORS[primary.colorIndex % FAMILY_BORDER_COLORS.length]
+            : "transparent";
       nodes.push(
         createElement(
           "mark",
           {
-            key: `${i}-${familyId}`,
-            style: isRepetition
-              ? {
-                  backgroundColor: "transparent",
-                  borderBottom: `1.5px dashed ${borderColor}`,
-                  color: "transparent",
-                  borderRadius: "0",
-                }
-              : {
-                  backgroundColor: color,
-                  color: "transparent",
-                  borderRadius: "2px",
-                },
+            key: `${i}-${layerKey}`,
+            style: {
+              backgroundColor: color,
+              color: "transparent",
+              borderRadius: primary?.type === "repetition" ? "0" : "2px",
+              borderBottom: repetition
+                ? `1.5px dashed ${borderColor}`
+                : secondary
+                  ? `1.5px solid ${borderColor}`
+                  : undefined,
+              boxShadow: repetition && primary?.type !== "repetition"
+                ? `inset 0 0 0 1px ${borderColor}`
+                : undefined,
+            },
           },
           text.slice(i, j)
         )
@@ -774,4 +785,30 @@ function renderHighlightedText(
   // Always end with a newline so the mirror sizing matches the textarea
   nodes.push("\n");
   return createElement(Fragment, null, ...nodes);
+}
+
+function primaryHighlightLayer(layers: CharHighlight) {
+  const rank = (type: string) => {
+    switch (type) {
+      case "end": case "chain": return 10;
+      case "multi": case "compound": case "mosaic": return 9;
+      case "perfect": case "rich": return 8;
+      case "internal": return 7;
+      case "cross": return 6;
+      case "slant": case "family": return 5;
+      case "assonance": case "consonance": return 4;
+      case "alliteration": return 3;
+      case "eye": return 2;
+      case "repetition": return 1;
+      default: return 0;
+    }
+  };
+  return [...layers].sort((a, b) => rank(b.type) - rank(a.type))[0];
+}
+
+function highlightLayerKey(layers: CharHighlight): string {
+  return layers
+    .map((layer) => `${layer.familyId}:${layer.type}:${layer.colorIndex}`)
+    .sort()
+    .join("|");
 }

@@ -84,6 +84,78 @@ export const INSTRUMENT_PRESETS: InstrumentPreset[] = [
     attackTime: 0.06,
     releaseTime: 0.3,
   },
+  {
+    name: "Electric Piano",
+    oscillatorTypes: ["sine", "square"],
+    detuneSpread: 2,
+    filterFreq: 2400,
+    reverbWet: 0.18,
+    attackTime: 0.015,
+    releaseTime: 0.35,
+  },
+  {
+    name: "Organ",
+    oscillatorTypes: ["sine", "sine", "square"],
+    detuneSpread: 0,
+    filterFreq: 4200,
+    reverbWet: 0.12,
+    attackTime: 0.006,
+    releaseTime: 0.18,
+  },
+  {
+    name: "Pluck",
+    oscillatorTypes: ["triangle", "sawtooth"],
+    detuneSpread: 3,
+    filterFreq: 3600,
+    reverbWet: 0.12,
+    attackTime: 0.004,
+    releaseTime: 0.12,
+  },
+  {
+    name: "Strings",
+    oscillatorTypes: ["sawtooth", "triangle"],
+    detuneSpread: 12,
+    filterFreq: 1900,
+    reverbWet: 0.42,
+    attackTime: 0.12,
+    releaseTime: 0.9,
+  },
+  {
+    name: "Choir Pad",
+    oscillatorTypes: ["sine", "triangle"],
+    detuneSpread: 14,
+    filterFreq: 1600,
+    reverbWet: 0.55,
+    attackTime: 0.2,
+    releaseTime: 1.1,
+  },
+  {
+    name: "Bell",
+    oscillatorTypes: ["sine", "triangle"],
+    detuneSpread: 20,
+    filterFreq: 6500,
+    reverbWet: 0.45,
+    attackTime: 0.006,
+    releaseTime: 0.8,
+  },
+  {
+    name: "Analog Lead",
+    oscillatorTypes: ["sawtooth", "square"],
+    detuneSpread: 6,
+    filterFreq: 3200,
+    reverbWet: 0.08,
+    attackTime: 0.02,
+    releaseTime: 0.22,
+  },
+  {
+    name: "Deep Sub",
+    oscillatorTypes: ["sine", "triangle"],
+    detuneSpread: 0,
+    filterFreq: 500,
+    reverbWet: 0,
+    attackTime: 0.02,
+    releaseTime: 0.24,
+  },
 ];
 
 export const SLOT_PRESETS: Record<string, ChordSlot[]> = {
@@ -282,6 +354,7 @@ export function useChordSynth(
 
   const [activeNotes, setActiveNotes]       = useState<number[]>([]);
   const [instrumentName, setInstrumentName] = useState<string>(INSTRUMENT_PRESETS[0].name);
+  const [chordVolume, setChordVolumeState] = useState(0.45);
 
   const ensureCtx = useCallback((): AudioContext => {
     // Prefer shared context when available
@@ -304,14 +377,15 @@ export function useChordSynth(
   const ensureChordGain = useCallback((ctx: AudioContext): GainNode => {
     if (chordGainRef.current) return chordGainRef.current;
     const gain = ctx.createGain();
-    gain.gain.value = 0.7;
-    gain.connect(ctx.destination);
+    gain.gain.value = chordVolume;
     if (destNode) {
       try { gain.connect(destNode); } catch { /* already connected */ }
+    } else {
+      gain.connect(ctx.destination);
     }
     chordGainRef.current = gain;
     return gain;
-  }, [destNode]);
+  }, [destNode, chordVolume]);
 
   const releaseChord = useCallback(() => {
     // Fade out and stop all active voices
@@ -323,8 +397,8 @@ export function useChordSynth(
         try {
           v.env.gain.cancelScheduledValues(now);
           v.env.gain.setValueAtTime(v.env.gain.value, now);
-          v.env.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
-          v.osc.stop(now + 0.1);
+          v.env.gain.setTargetAtTime(0.0001, now, 0.04);
+          v.osc.stop(now + 0.16);
         } catch { /* already stopped */ }
       }
       activeVoicesRef.current = [];
@@ -370,12 +444,14 @@ export function useChordSynth(
         }
 
         const env = ctx.createGain();
-        env.gain.setValueAtTime(0, ctx.currentTime);
-        env.gain.linearRampToValueAtTime(0.28, ctx.currentTime + preset.attackTime);
+        const now = ctx.currentTime;
+        env.gain.cancelScheduledValues(now);
+        env.gain.setValueAtTime(0.0001, now);
+        env.gain.linearRampToValueAtTime(0.18, now + Math.max(0.01, preset.attackTime));
         env.connect(reverb.input);
 
         osc.connect(env);
-        osc.start(ctx.currentTime);
+        osc.start(now);
         // Don't auto-stop; we control release explicitly via releaseChord()
         newVoices.push({ osc, env });
       });
@@ -400,14 +476,25 @@ export function useChordSynth(
     }
   }, []);
 
+  const setChordVolume = useCallback((vol: number) => {
+    const clamped = Math.max(0, Math.min(1, vol));
+    setChordVolumeState(clamped);
+    const ctx = getSharedCtx ? getSharedCtx() : ctxRef.current;
+    if (chordGainRef.current && ctx) {
+      chordGainRef.current.gain.setTargetAtTime(clamped, ctx.currentTime, 0.025);
+    }
+  }, [getSharedCtx]);
+
   return {
     // State
     activeNotes,
     currentChord: currentChordRef.current,
     instrumentName,
+    chordVolume,
     // Actions
     playChord,
     releaseChord,
     setInstrumentPreset,
+    setChordVolume,
   };
 }

@@ -17,7 +17,7 @@ import {
 } from "@/lib/rhymeLens";
 
 // ---------------------------------------------------------------------------
-// Color palette — 16 distinct highlight colors (well-separated hues)
+// Color palette — 24 distinct highlight colors (well-separated hues)
 // ---------------------------------------------------------------------------
 
 export const FAMILY_COLORS: string[] = [
@@ -37,6 +37,14 @@ export const FAMILY_COLORS: string[] = [
   "rgba(134,239,172,0.22)",  // light-green
   "rgba(196,181,253,0.24)",  // light-purple
   "rgba(252,211,77,0.26)",   // yellow
+  "rgba(125,211,252,0.24)",  // sky
+  "rgba(244,114,182,0.24)",  // rose
+  "rgba(110,231,183,0.24)",  // mint
+  "rgba(217,119,6,0.24)",    // ochre
+  "rgba(147,197,253,0.24)",  // cornflower
+  "rgba(250,204,21,0.22)",   // gold
+  "rgba(192,132,252,0.23)",  // violet
+  "rgba(74,222,128,0.22)",   // green
 ];
 
 export const FAMILY_BORDER_COLORS: string[] = [
@@ -56,6 +64,14 @@ export const FAMILY_BORDER_COLORS: string[] = [
   "rgba(134,239,172,0.55)",
   "rgba(196,181,253,0.60)",
   "rgba(252,211,77,0.65)",
+  "rgba(125,211,252,0.60)",
+  "rgba(244,114,182,0.58)",
+  "rgba(110,231,183,0.58)",
+  "rgba(217,119,6,0.58)",
+  "rgba(147,197,253,0.58)",
+  "rgba(250,204,21,0.55)",
+  "rgba(192,132,252,0.58)",
+  "rgba(74,222,128,0.55)",
 ];
 
 // Solid text colors for the family list
@@ -76,13 +92,21 @@ const FAMILY_TEXT_COLORS: string[] = [
   "rgb(134,239,172)",
   "rgb(196,181,253)",
   "rgb(252,211,77)",
+  "rgb(125,211,252)",
+  "rgb(244,114,182)",
+  "rgb(110,231,183)",
+  "rgb(217,119,6)",
+  "rgb(147,197,253)",
+  "rgb(250,204,21)",
+  "rgb(192,132,252)",
+  "rgb(74,222,128)",
 ];
 
 // ---------------------------------------------------------------------------
 // Exported types for Editor integration
 // ---------------------------------------------------------------------------
 
-export type CharHighlight = {
+export type HighlightLayer = {
   colorIndex: number;
   familyId: string;
   type: RhymeType;
@@ -90,6 +114,8 @@ export type CharHighlight = {
   label?: string;
   explanation?: string;
 };
+
+export type CharHighlight = HighlightLayer[];
 
 // ---------------------------------------------------------------------------
 // Build character-offset highlight map from analysis result
@@ -116,7 +142,9 @@ export function buildCharHighlights(
   for (const family of families) {
     for (const span of family.spans) {
       for (let c = span.start; c < span.end; c++) {
-        map.set(c, {
+        const layers = map.get(c) ?? [];
+        if (layers.some((layer) => layer.familyId === family.id)) continue;
+        layers.push({
           colorIndex: family.colorIndex,
           familyId: family.id,
           type: family.type,
@@ -124,6 +152,7 @@ export function buildCharHighlights(
           label: family.label,
           explanation: family.explanation,
         });
+        map.set(c, layers);
       }
     }
   }
@@ -138,10 +167,13 @@ const FILTER_LABELS: { key: RhymeType; label: string }[] = [
   { key: "end", label: "End" },
   { key: "internal", label: "Internal" },
   { key: "multi", label: "Multi" },
+  { key: "rich", label: "Rich" },
   { key: "slant", label: "Slant" },
+  { key: "family", label: "Family" },
   { key: "assonance", label: "Assonance" },
   { key: "consonance", label: "Consonance" },
   { key: "alliteration", label: "Alliteration" },
+  { key: "eye", label: "Eye" },
   { key: "repetition", label: "Repetition" },
   { key: "cross", label: "Cross" },
   { key: "chain", label: "Chain" },
@@ -202,7 +234,7 @@ function SoundMapPanel({
             </button>
           )}
         </div>
-        {families.slice(0, 16).map((f) => {
+        {families.slice(0, 48).map((f) => {
           const isFocused = focusFamilyId === f.id;
           const isDimmed = focusFamilyId && !isFocused;
           return (
@@ -246,7 +278,7 @@ function SoundMapPanel({
                   {f.spans.map((s) => s.text).join(" / ")}
                 </div>
                 <div className="mt-0.5 text-[9px] text-ink-mute/40">
-                  {f.type} · {f.spans.length} · {f.strength}
+                  {f.type} · {f.spans.length} · {f.strength} · {Math.round(f.confidence * 100)}%
                   {RHYME_LENS_DEBUG && ` · conf:${f.confidence.toFixed(2)}`}
                 </div>
               </div>
@@ -289,7 +321,7 @@ export function RhymeLens({
     () =>
       new Set<RhymeType>([
         "end", "internal", "multi", "compound", "mosaic", "slant",
-        "assonance", "consonance", "alliteration", "repetition", "cross", "chain",
+        "rich", "family", "assonance", "consonance", "alliteration", "eye", "repetition", "cross", "chain",
       ])
   );
   const [strongOnly, setStrongOnly] = useState(false);

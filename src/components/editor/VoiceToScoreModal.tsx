@@ -143,8 +143,9 @@ function samplesToNotes(samples: RawSample[], quality: QualityMode = "balanced",
     const segMedian = segMidis[Math.floor(segMidis.length / 2)];
     const pitchChanged = Math.abs(smoothed[i].midi - segMedian) > tolerance;
     const isOnset = onsets.has(i);
+    const silenceGap = smoothed[i].time - smoothed[i - 1].time > params.mergeGap;
 
-    if (pitchChanged || isOnset) {
+    if (pitchChanged || isOnset || silenceGap) {
       segments.push(current);
       current = [smoothed[i]];
     } else {
@@ -908,6 +909,32 @@ export function VoiceToScoreModal({
     URL.revokeObjectURL(url);
     toast("Exported JSON", "ok");
   }, [notes, totalDuration, songId, toast]);
+
+  const exportCsv = useCallback(() => {
+    const rows = [
+      ["note", "midi", "start_time", "duration", "confidence"],
+      ...notes.map((n) => [
+        n.name,
+        String(n.midi),
+        n.startTime.toFixed(3),
+        n.duration.toFixed(3),
+        n.confidence.toFixed(2),
+      ]),
+    ];
+    const csv = rows
+      .map((row) => row.map((cell) => `"${cell.replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `melody-${songId}-${Date.now()}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast("Exported CSV", "ok");
+  }, [notes, songId, toast]);
 
   const copyNotes = useCallback(async () => {
     const spaced = notes.map((n) => n.name).join(" ");
@@ -1705,6 +1732,12 @@ export function VoiceToScoreModal({
               className="border border-ink-line/40 px-3 py-1.5 font-mono text-xs uppercase tracking-wider text-ink-mute transition-colors hover:border-amber-gold/50 hover:text-amber-gold"
             >
               Export JSON
+            </button>
+            <button
+              onClick={exportCsv}
+              className="border border-ink-line/40 px-3 py-1.5 font-mono text-xs uppercase tracking-wider text-ink-mute transition-colors hover:border-amber-gold/50 hover:text-amber-gold"
+            >
+              Export CSV
             </button>
             <button
               onClick={() => void copyNotes()}

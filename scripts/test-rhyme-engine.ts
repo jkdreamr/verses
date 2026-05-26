@@ -1,9 +1,13 @@
-/**
- * Quick smoke test for the rhyme lens engine.
- * Run: npx tsx scripts/test-rhyme-engine.ts
- */
-import { analyzeRhymeLens } from "../src/lib/rhymeLens";
-import type { RhymeFamily } from "../src/lib/rhymeLens";
+import {
+  analyzeRhymeLens,
+  CLEAN_OPTIONS,
+  DEFAULT_OPTIONS,
+  MAX_OPTIONS,
+  type RhymeFamily,
+  type RhymeLensOptions,
+  type RhymeType,
+} from "../src/lib/rhymeLens";
+import { getTokenPhonetics } from "../src/lib/phonetics";
 
 let pass = 0;
 let fail = 0;
@@ -14,154 +18,99 @@ function assert(label: string, condition: boolean, detail?: string) {
     console.log(`  PASS  ${label}`);
   } else {
     fail++;
-    console.log(`  FAIL  ${label}${detail ? ` — ${detail}` : ""}`);
+    console.log(`  FAIL  ${label}${detail ? ` - ${detail}` : ""}`);
   }
 }
 
 function familyTexts(fam: RhymeFamily): string[] {
-  return fam.spans.map(s => s.text.toLowerCase());
+  return fam.spans.map((s) => s.text.toLowerCase());
 }
 
-// ── Test 1: False-positive prevention ────────────────────────────────────────
-console.log("\n=== Test 1: False-positive prevention ===");
+function hasFamily(
+  lyrics: string,
+  words: string[],
+  options: RhymeLensOptions = DEFAULT_OPTIONS,
+  types?: RhymeType[],
+): boolean {
+  const wanted = words.map((w) => w.toLowerCase());
+  return analyzeRhymeLens(lyrics, options).families.some((fam) => {
+    if (types && !types.includes(fam.type)) return false;
+    const texts = familyTexts(fam);
+    return wanted.every((word) => texts.some((text) => text === word || text.includes(word)));
+  });
+}
+
+function noFamily(
+  lyrics: string,
+  words: string[],
+  options: RhymeLensOptions = DEFAULT_OPTIONS,
+  types?: RhymeType[],
+): boolean {
+  const wanted = words.map((w) => w.toLowerCase());
+  return !analyzeRhymeLens(lyrics, options).families.some((fam) => {
+    if (types && !types.includes(fam.type)) return false;
+    const texts = familyTexts(fam);
+    return wanted.every((word) => texts.some((text) => text === word || text.includes(word)));
+  });
+}
+
+function section(name: string) {
+  console.log(`\n=== ${name} ===`);
+}
+
+section("Phonetic overrides");
+assert("hi and bye share AY key", getTokenPhonetics("hi").perfectKey === getTokenPhonetics("bye").perfectKey);
+assert("I is treated as AY in lyric context", getTokenPhonetics("I").perfectKey === getTokenPhonetics("sky").perfectKey);
+assert("love and move are not true sound rhymes", getTokenPhonetics("love").perfectKey !== getTokenPhonetics("move").perfectKey);
+
+section("Required Rhyme Lens cases");
+assert("Hi/Bye perfect end rhyme", hasFamily("Hi\nBye", ["hi", "bye"], CLEAN_OPTIONS, ["end", "chain"]));
+assert("AY family groups Hi/Bye/Cry/Sky/My/I", hasFamily("Hi\nBye\nCry\nSky\nMy\nI", ["hi", "bye", "cry", "sky", "my", "i"], CLEAN_OPTIONS, ["chain", "end"]));
+assert("OO family groups You/Through/Blue", hasFamily("You\nThrough\nBlue", ["you", "through", "blue"], CLEAN_OPTIONS, ["chain", "end"]));
+assert("EE family groups Me/See/Free", hasFamily("Me\nSee\nFree", ["me", "see", "free"], CLEAN_OPTIONS, ["chain", "end"]));
+assert("OH family groups No/Go/Show/Flow", hasFamily("No\nGo\nShow\nFlow", ["no", "go", "show", "flow"], CLEAN_OPTIONS, ["chain", "end"]));
+assert("Testing/Resting/Jesting double rhyme", hasFamily("Testing\nResting\nJesting", ["testing", "resting", "jesting"], CLEAN_OPTIONS, ["chain", "end"]));
+assert("Internal write/light/night relationship", hasFamily("I write light lines in the night", ["write", "light", "night"], DEFAULT_OPTIONS, ["internal", "cross", "chain"]));
+assert("Multisyllabic compound chain", hasFamily("chain reaction\nbrain relaxin\nlackin traction", ["chain reaction", "brain relaxin", "lackin traction"], DEFAULT_OPTIONS, ["multi", "compound", "mosaic"]));
+assert("Slant mind/spine/line in detailed mode", hasFamily("mind\nspine\nline", ["mind", "spine", "line"], DEFAULT_OPTIONS, ["slant", "family", "chain", "end"]));
+assert("Assonance time/light/sky/mine", hasFamily("time\nlight\nsky\nmine", ["time", "light", "sky", "mine"], DEFAULT_OPTIONS, ["assonance", "slant", "family"]));
+assert("Consonance black/brick/block", hasFamily("black\nbrick\nblock", ["black", "brick", "block"], DEFAULT_OPTIONS, ["consonance"]));
+assert("Alliteration silver/syllables/sit", hasFamily("silver syllables sit", ["silver", "syllables", "sit"], DEFAULT_OPTIONS, ["alliteration"]));
+assert("Rich homophone right/write", hasFamily("right\nwrite", ["right", "write"], DEFAULT_OPTIONS, ["rich", "end", "chain"]));
+assert("Eye rhyme love/move appears in detailed/max", hasFamily("love\nmove", ["love", "move"], DEFAULT_OPTIONS, ["eye"]));
+assert("Eye rhyme love/move not in clean mode", noFamily("love\nmove", ["love", "move"], CLEAN_OPTIONS, ["eye", "end", "chain", "slant"]));
+assert("You/blue/through dominate over internal to", hasFamily("I talk to you\npaint it blue\nwalk on through", ["you", "blue", "through"], CLEAN_OPTIONS, ["chain", "end"]));
+assert("Internal 'to' does not dominate", noFamily("I talk to you\npaint it blue\nwalk on through", ["to", "you", "blue"], DEFAULT_OPTIONS, ["chain", "end", "slant", "assonance"]));
+
+section("Stop words and repetition");
 {
   const lyrics = `this is testing
 and now i'm resting
 i'm testing
 and now i'm resting
-
 i'm the best`;
-
-  const r = analyzeRhymeLens(lyrics);
-
-  // testing/resting should form a family
-  const testingFamily = r.families.find(f =>
-    familyTexts(f).some(t => t === "testing" || t.includes("testing"))
-  );
-  assert("testing/resting family exists", !!testingFamily);
-  if (testingFamily) {
-    const words = familyTexts(testingFamily);
-    assert("resting in same family", words.some(w => w === "resting" || w.includes("resting")));
-  }
-
-  // "this is" alone should NOT have its own non-repetition family
-  const thisIsFamily = r.families.find(f =>
-    f.type !== "repetition" && familyTexts(f).some(t => t === "this is")
-  );
-  assert("'this is' not in non-repetition family", !thisIsFamily);
-}
-
-// ── Test 2: Compound / chain rhyme ───────────────────────────────────────────
-console.log("\n=== Test 2: Compound / chain rhyme ===");
-{
-  const lyrics = `paper sparks a chain reaction
-late night brain relaxin
-crooked little habit turns to action
-half the room is lackin traction`;
-
-  const r = analyzeRhymeLens(lyrics);
-
-  // reaction/action/traction should share a family
-  const actionFamily = r.families.find(f =>
-    familyTexts(f).some(t => t === "action" || t.includes("action"))
-  );
-  assert("action family exists", !!actionFamily);
-  if (actionFamily) {
-    const words = familyTexts(actionFamily);
-    assert("reaction or 'chain reaction' in family",
-      words.some(w => w.includes("reaction")));
-    assert("traction in family",
-      words.some(w => w.includes("traction")));
+  const result = analyzeRhymeLens(lyrics, DEFAULT_OPTIONS);
+  assert("testing/resting family exists", hasFamily(lyrics, ["testing", "resting"], DEFAULT_OPTIONS, ["chain", "end", "internal"]));
+  assert("repeated long phrase is separate", result.families.some((f) => f.type === "repetition" && familyTexts(f).some((t) => t.includes("and now i'm resting"))));
+  for (const filler of ["this is", "and now", "i'm the", "the best"]) {
+    assert(`${filler} is not a filler family`, !result.families.some((f) => f.type !== "repetition" && familyTexts(f).some((t) => t === filler)));
   }
 }
 
-// ── Test 3: Internal + cross-line rhyme ──────────────────────────────────────
-console.log("\n=== Test 3: Internal + cross-line rhyme ===");
+section("Layering and weak lines");
 {
-  const lyrics = `i stare at the air up there
-the glare from the square is rare
-i swear she don't care to share`;
-
-  const r = analyzeRhymeLens(lyrics);
-  // Should detect an -air/-are family with many members
-  const airFamily = r.families.find(f =>
-    familyTexts(f).filter(t =>
-      /^(stare|air|there|glare|square|rare|swear|care|share)$/i.test(t)
-    ).length >= 3
-  );
-  assert("-air family with 3+ members", !!airFamily,
-    airFamily ? `found: ${familyTexts(airFamily).join(", ")}` : "no family found");
+  const lyrics = "Hi this is Josh\nHi\nBye";
+  const result = analyzeRhymeLens(lyrics, DEFAULT_OPTIONS);
+  assert("Hi repetition marked separately", result.families.some((f) => f.type === "repetition" && familyTexts(f).includes("hi")));
+  assert("Hi/Bye rhyme still detected", hasFamily(lyrics, ["hi", "bye"], DEFAULT_OPTIONS, ["end", "chain", "slant"]));
+}
+{
+  const lyrics = "No rhyme here\nunconnected phrase\nmoonlight glow\nnight flow";
+  const result = analyzeRhymeLens(lyrics, MAX_OPTIONS);
+  assert("glow/flow grouped", hasFamily(lyrics, ["glow", "flow"], MAX_OPTIONS, ["end", "chain", "internal"]));
+  assert("weak lines listed gently", result.weakLines.length >= 1);
 }
 
-// ── Test 4: Multisyllabic ────────────────────────────────────────────────────
-console.log("\n=== Test 4: Multisyllabic ===");
-{
-  const lyrics = `i'm the center of attention
-winter brings another dimension
-enter the convention`;
-
-  const r = analyzeRhymeLens(lyrics);
-
-  // attention/dimension/convention should share end rhyme
-  const tionFamily = r.families.find(f =>
-    familyTexts(f).some(t => t.includes("attention"))
-  );
-  assert("-tion family exists", !!tionFamily);
-  if (tionFamily) {
-    const words = familyTexts(tionFamily);
-    assert("dimension in family", words.some(w => w.includes("dimension")));
-    assert("convention in family", words.some(w => w.includes("convention")));
-  }
-}
-
-// ── Test 5: Repetition vs Rhyme ──────────────────────────────────────────────
-console.log("\n=== Test 5: Repetition vs Rhyme ===");
-{
-  const lyrics = `love love love
-shove comes to love
-above the stars`;
-
-  const r = analyzeRhymeLens(lyrics);
-  // "love" repeated — should appear in some family
-  const loveFamilies = r.families.filter(f =>
-    familyTexts(f).some(t => t === "love")
-  );
-  assert("love appears in at least one family", loveFamilies.length >= 1);
-
-  // love/shove/above should have rhyme relation
-  const loveRhymeFamily = r.families.find(f => {
-    const w = familyTexts(f);
-    return w.includes("love") && (w.includes("shove") || w.includes("above"));
-  });
-  // This may or may not work depending on engine sensitivity — soft assertion
-  if (loveRhymeFamily) {
-    pass++;
-    console.log("  PASS  love/shove or love/above rhyme family");
-  } else {
-    console.log("  SKIP  love/shove/above rhyme relation not detected (engine may separate repetition from rhyme)");
-  }
-}
-
-// ── Test 6: Color diversity ──────────────────────────────────────────────────
-console.log("\n=== Test 6: Color diversity ===");
-{
-  const lyrics = `cat sat mat
-dog log fog
-pen hen ten
-sky fly dry`;
-
-  const r = analyzeRhymeLens(lyrics);
-  // Should have at least 3 distinct families
-  assert("at least 3 distinct families", r.families.length >= 3,
-    `found ${r.families.length} families`);
-
-  // Each family should have a distinct colorIndex
-  const colors = new Set(r.families.map(f => f.colorIndex));
-  assert("color indices are diverse", colors.size >= Math.min(r.families.length, 3),
-    `${colors.size} colors for ${r.families.length} families`);
-}
-
-// ── Summary ──────────────────────────────────────────────────────────────────
 console.log(`\n${"=".repeat(50)}`);
 console.log(`Results: ${pass} passed, ${fail} failed out of ${pass + fail} assertions`);
 process.exit(fail > 0 ? 1 : 0);

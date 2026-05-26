@@ -19,7 +19,7 @@ Writing leads directly to performance. When you are ready to record, you open a 
 ### Writing
 - Distraction-free lyric editor with autosave
 - Version history (restore any snapshot)
-- **Rhyme Lens** — inline rhyme analysis directly in the editor. Highlights appear behind your text as you type: end rhymes, internal echoes, multisyllabic chains, slant/near rhymes, assonance, consonance, alliteration, repeated phrases, cross-line echoes, and weak lines. Each family gets a distinct color. Click a family in the Sound Map panel to isolate it. Three density modes (Clean, Detailed, Max) control how much is shown.
+- **Rhyme Lens** — inline rhyme analysis directly in the editor. Highlights appear behind your text as you type: end rhymes, internal echoes, multisyllabic chains, homophones, slant/family rhymes, assonance, consonance, alliteration, spelling echoes, repeated phrases, cross-line echoes, and weakly connected lines. The phonetic analysis is offline and approximate; accent, delivery, and genre choices can change what a writer hears as a rhyme. Each family gets a distinct color. Click a family in the Sound Map panel to isolate it. Three density modes (Clean, Detailed, Max) control how much is shown.
 - Per-word rhyme finder: highlight any word, get perfect / near / sounds-like results from Datamuse
 - Structure tags (Verse, Pre-Chorus, Chorus, Bridge, Outro)
 - Export as text / copy / print

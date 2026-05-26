@@ -9,6 +9,7 @@ export type PerformAudioBus = {
   chordGain: GainNode;
   trumpetGain: GainNode;
   compressor: DynamicsCompressorNode;
+  limiter: DynamicsCompressorNode;
   recordDest: MediaStreamAudioDestinationNode;
   analyser: AnalyserNode;
 };
@@ -20,8 +21,8 @@ export type PerformAudioBus = {
  *
  * Routing:
  *   drumGain ──┐
- *   chordGain ─┤──► masterGain ──► compressor ──► ctx.destination
- *   trumpetGain┘                          └──► recordDest
+ *   chordGain ─┤──► masterGain ──► compressor ──► limiter ──► ctx.destination
+ *   trumpetGain┘                                      └──► recordDest
  *
  * The recordDest provides a MediaStream suitable for MediaRecorder capture.
  */
@@ -38,16 +39,16 @@ export function usePerformAudioBus() {
     const ctx = new Ctx() as AudioContext;
 
     const masterGain = ctx.createGain();
-    masterGain.gain.value = 1.0;
+    masterGain.gain.value = 0.75;
 
     const drumGain = ctx.createGain();
-    drumGain.gain.value = 1.0;
+    drumGain.gain.value = 0.6;
 
     const chordGain = ctx.createGain();
-    chordGain.gain.value = 1.0;
+    chordGain.gain.value = 0.45;
 
     const trumpetGain = ctx.createGain();
-    trumpetGain.gain.value = 1.0;
+    trumpetGain.gain.value = 0.5;
 
     const compressor = ctx.createDynamicsCompressor();
     compressor.threshold.value = -18;
@@ -55,6 +56,13 @@ export function usePerformAudioBus() {
     compressor.ratio.value = 4;
     compressor.attack.value = 0.003;
     compressor.release.value = 0.15;
+
+    const limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = -3;
+    limiter.knee.value = 0;
+    limiter.ratio.value = 20;
+    limiter.attack.value = 0.001;
+    limiter.release.value = 0.06;
 
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 2048;
@@ -67,10 +75,11 @@ export function usePerformAudioBus() {
     chordGain.connect(masterGain);
     trumpetGain.connect(masterGain);
 
-    // Master → compressor → destination + recordDest
+    // Master → compressor → limiter → destination + recordDest
     masterGain.connect(compressor);
-    compressor.connect(ctx.destination);
-    compressor.connect(recordDest);
+    compressor.connect(limiter);
+    limiter.connect(ctx.destination);
+    limiter.connect(recordDest);
 
     // Analyser taps the master
     masterGain.connect(analyser);
@@ -82,6 +91,7 @@ export function usePerformAudioBus() {
       chordGain,
       trumpetGain,
       compressor,
+      limiter,
       recordDest,
       analyser,
     };
@@ -121,6 +131,7 @@ export function usePerformAudioBus() {
       bus.trumpetGain.disconnect();
       bus.masterGain.disconnect();
       bus.compressor.disconnect();
+      bus.limiter.disconnect();
       bus.analyser.disconnect();
     } catch { /* already disconnected */ }
 
@@ -140,6 +151,7 @@ export function usePerformAudioBus() {
           bus.trumpetGain.disconnect();
           bus.masterGain.disconnect();
           bus.compressor.disconnect();
+          bus.limiter.disconnect();
           bus.analyser.disconnect();
         } catch { /* ok */ }
         if (bus.ctx.state !== "closed") {

@@ -103,8 +103,8 @@ export function useDrumEngine(destNode: AudioNode | null) {
 
   const [playing, setPlaying]              = useState(false);
   const [presetName, setPresetNameState]   = useState(DRUM_PRESETS[0].name);
-  const [masterVolume, setMasterVolumeState] = useState(0.8);
-  const [drumVolume, setDrumVolumeState]   = useState(0.7);
+  const [masterVolume, setMasterVolumeState] = useState(0.75);
+  const [drumVolume, setDrumVolumeState]   = useState(0.6);
   const [filterCutoff, setFilterCutoffState] = useState(4000);
   const [currentBpm, setCurrentBpmState]   = useState(DRUM_PRESETS[0].bpm);
 
@@ -115,17 +115,20 @@ export function useDrumEngine(destNode: AudioNode | null) {
       if (ctxRef.current.state === "suspended") ctxRef.current.resume();
       return ctxRef.current;
     }
+    const sharedCtx = destNode?.context && "currentTime" in destNode.context
+      ? (destNode.context as AudioContext)
+      : null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const Ctx = window.AudioContext || (window as any).webkitAudioContext;
-    const ctx = new Ctx() as AudioContext;
+    const ctx = (sharedCtx ?? new Ctx()) as AudioContext;
     ctxRef.current = ctx;
 
     const masterGain = ctx.createGain();
-    masterGain.gain.value = 0.8; // default — will be updated by setMasterVolume
+    masterGain.gain.value = masterVolume;
     masterGainRef.current = masterGain;
 
     const drumGain = ctx.createGain();
-    drumGain.gain.value = 0.7; // default
+    drumGain.gain.value = drumVolume;
     drumGainRef.current = drumGain;
 
     const filter = ctx.createBiquadFilter();
@@ -135,19 +138,19 @@ export function useDrumEngine(destNode: AudioNode | null) {
 
     // DynamicsCompressorNode — glues the mix together
     const comp = ctx.createDynamicsCompressor();
-    comp.threshold.value = -6;
-    comp.knee.value      = 10;
-    comp.ratio.value     = 6;
+    comp.threshold.value = -10;
+    comp.knee.value      = 8;
+    comp.ratio.value     = 4;
     comp.attack.value    = 0.003;
     comp.release.value   = 0.1;
 
     drumGain.connect(filter);
     filter.connect(masterGain);
     masterGain.connect(comp);
-    comp.connect(ctx.destination);
-
     if (destNode) {
       comp.connect(destNode);
+    } else {
+      comp.connect(ctx.destination);
     }
 
     return ctx;
@@ -165,7 +168,7 @@ export function useDrumEngine(destNode: AudioNode | null) {
     osc.frequency.setValueAtTime(140, time);
     osc.frequency.exponentialRampToValueAtTime(safeExp(40), time + 0.15);
     env.gain.setValueAtTime(0.001, time);
-    env.gain.linearRampToValueAtTime(level, time + 0.001);
+    env.gain.linearRampToValueAtTime(level * 0.82, time + 0.004);
     env.gain.exponentialRampToValueAtTime(0.001, time + 0.4);
     osc.start(time);
     osc.stop(time + 0.45);
@@ -189,7 +192,7 @@ export function useDrumEngine(destNode: AudioNode | null) {
     noise.connect(noiseFilter);
     noiseFilter.connect(noiseEnv);
     noiseEnv.connect(gain);
-    noiseEnv.gain.setValueAtTime(level * 0.7, time);
+    noiseEnv.gain.setValueAtTime(level * 0.48, time);
     noiseEnv.gain.exponentialRampToValueAtTime(0.001, time + 0.18);
     noise.start(time);
     noise.stop(time + 0.2);
@@ -200,7 +203,7 @@ export function useDrumEngine(destNode: AudioNode | null) {
     osc.connect(oscEnv);
     oscEnv.connect(gain);
     osc.frequency.value = 200;
-    oscEnv.gain.setValueAtTime(level * 0.5, time);
+    oscEnv.gain.setValueAtTime(level * 0.32, time);
     oscEnv.gain.exponentialRampToValueAtTime(0.001, time + 0.1);
     osc.start(time);
     osc.stop(time + 0.12);
@@ -222,7 +225,7 @@ export function useDrumEngine(destNode: AudioNode | null) {
     noise.connect(hpf);
     hpf.connect(env);
     env.connect(gain);
-    env.gain.setValueAtTime(level * 0.45, time);
+    env.gain.setValueAtTime(level * 0.24, time);
     env.gain.exponentialRampToValueAtTime(0.001, time + 0.06);
     noise.start(time);
     noise.stop(time + 0.08);
@@ -246,7 +249,7 @@ export function useDrumEngine(destNode: AudioNode | null) {
     osc.frequency.value = 600;
     const oscEnv = ctx.createGain();
     osc.connect(oscEnv);
-    oscEnv.gain.setValueAtTime(level * 0.4, time);
+    oscEnv.gain.setValueAtTime(level * 0.24, time);
     oscEnv.gain.exponentialRampToValueAtTime(0.001, time + 0.07);
     osc.start(time);
     osc.stop(time + 0.08);
@@ -257,7 +260,7 @@ export function useDrumEngine(destNode: AudioNode | null) {
     noise.connect(bpf);
     bpf.connect(env);
     env.connect(gain);
-    env.gain.setValueAtTime(level * 0.3, time);
+    env.gain.setValueAtTime(level * 0.18, time);
     env.gain.exponentialRampToValueAtTime(0.001, time + 0.06);
     noise.start(time);
     noise.stop(time + 0.08);
@@ -314,6 +317,7 @@ export function useDrumEngine(destNode: AudioNode | null) {
       cancelAnimationFrame(schedulerRef.current);
       schedulerRef.current = null;
     }
+    stepRef.current = 0;
   }, []);
 
   // ── Parameter setters ──────────────────────────────────────────────────────
@@ -334,13 +338,21 @@ export function useDrumEngine(destNode: AudioNode | null) {
   }, []);
 
   const setMasterVolume = useCallback((vol: number) => {
-    setMasterVolumeState(vol);
-    if (masterGainRef.current) masterGainRef.current.gain.value = vol;
+    const clamped = Math.max(0, Math.min(1, vol));
+    setMasterVolumeState(clamped);
+    const ctx = ctxRef.current;
+    if (masterGainRef.current && ctx) {
+      masterGainRef.current.gain.setTargetAtTime(clamped, ctx.currentTime, 0.02);
+    }
   }, []);
 
   const setDrumVolume = useCallback((vol: number) => {
-    setDrumVolumeState(vol);
-    if (drumGainRef.current) drumGainRef.current.gain.value = vol;
+    const clamped = Math.max(0, Math.min(1, vol));
+    setDrumVolumeState(clamped);
+    const ctx = ctxRef.current;
+    if (drumGainRef.current && ctx) {
+      drumGainRef.current.gain.setTargetAtTime(clamped, ctx.currentTime, 0.02);
+    }
   }, []);
 
   const setFilterCutoff = useCallback((freq: number) => {

@@ -30,20 +30,26 @@
  *   then place each phrase where the cadence lands
  */
 
+import { getPhrasePhonetics, getTokenPhonetics, type TokenPhonetics } from "./phonetics";
+
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
 export type RhymeType =
+  | "perfect"
   | "end"
   | "internal"
   | "multi"
   | "compound"
   | "mosaic"
+  | "rich"
   | "slant"
+  | "family"
   | "assonance"
   | "consonance"
   | "alliteration"
+  | "eye"
   | "repetition"
   | "cross"
   | "chain"
@@ -70,6 +76,7 @@ export type PhoneticShape = {
   finalVowelGroup: string;
   finalRhymeNucleus: string;
   endingShape: string;
+  token: TokenPhonetics;
 };
 
 export type RhymeToken = {
@@ -153,8 +160,8 @@ export const DEFAULT_OPTIONS: RhymeLensOptions = {
   density: "detailed",
   enabledTypes: new Set<RhymeType>([
     "end", "internal", "multi", "compound", "mosaic",
-    "slant", "assonance", "consonance", "alliteration",
-    "repetition", "cross", "chain",
+    "rich", "slant", "family", "assonance", "consonance", "alliteration",
+    "eye", "repetition", "cross", "chain",
   ]),
   strongOnly: false,
   maxFamilies: 60,
@@ -162,7 +169,7 @@ export const DEFAULT_OPTIONS: RhymeLensOptions = {
 
 export const CLEAN_OPTIONS: RhymeLensOptions = {
   density: "clean",
-  enabledTypes: new Set<RhymeType>(["end", "internal", "multi", "repetition", "chain"]),
+  enabledTypes: new Set<RhymeType>(["perfect", "end", "internal", "multi", "repetition", "chain"]),
   strongOnly: true,
   maxFamilies: 30,
 };
@@ -171,8 +178,8 @@ export const MAX_OPTIONS: RhymeLensOptions = {
   density: "max",
   enabledTypes: new Set<RhymeType>([
     "end", "internal", "multi", "compound", "mosaic",
-    "slant", "assonance", "consonance", "alliteration",
-    "repetition", "cross", "chain", "dense",
+    "rich", "slant", "family", "assonance", "consonance", "alliteration",
+    "eye", "repetition", "cross", "chain", "dense",
   ]),
   strongOnly: false,
   maxFamilies: 120,
@@ -217,6 +224,19 @@ const FILLER_PHRASES = new Set([
   "and now i'm", "and now i", "but now i",
 ]);
 
+const STRONG_SHORT_RHYME_ANCHORS = new Set([
+  "hi", "bye", "my", "why", "cry", "fly", "sky", "eye", "i",
+  "you", "too", "through", "blue", "who", "do",
+  "me", "see", "be", "free", "we", "he", "she",
+  "no", "go", "show", "flow", "though", "so",
+]);
+
+function isStrongRhymeAnchor(word: string, isLineEnd = false): boolean {
+  const w = word.toLowerCase();
+  if (w === "to") return isLineEnd;
+  return STRONG_SHORT_RHYME_ANCHORS.has(w);
+}
+
 export function isStopWord(word: string): boolean {
   return STOP_WORDS.has(word.toLowerCase());
 }
@@ -233,6 +253,7 @@ const CONTRACTION_STOPS = new Set([
 export function isContentWord(word: string): boolean {
   const w = word.toLowerCase().replace(/[^a-z']/g, "");
   if (!w || w.length <= 1) return false;
+  if (isStrongRhymeAnchor(w)) return true;
   if (STOP_WORDS.has(w)) return false;
   if (CONTRACTION_STOPS.has(w)) return false;
   return true;
@@ -259,6 +280,7 @@ export function isMeaningfulRhymeSpan(span: RhymeSpan, purpose: RhymeType): bool
   // Single-word spans: must be a content word unless exact repetition
   if (span.spanLength === 1) {
     if (purpose === "repetition") return true; // repetition can include any repeated word
+    if (isStrongRhymeAnchor(span.normalized, span.isLineEnd)) return true;
     return isContentWord(span.normalized);
   }
 
@@ -313,12 +335,12 @@ function hasContentFinalWord(span: RhymeSpan): boolean {
 
 const NORM_MAP: Record<string, string> = {
   // dropped-g endings
-  relaxin: "relaxing", actin: "acting", rhymin: "rhyming",
+  relaxin: "relaxin", actin: "acting", rhymin: "rhyming",
   climbin: "climbing", chillin: "chilling", runnin: "running",
-  goin: "going", comin: "coming", talkin: "talking",
+  goin: "goin", comin: "coming", talkin: "talking",
   walkin: "walking", wakin: "waking", breakin: "breaking",
   shakin: "shaking", makin: "making", takin: "taking",
-  lackin: "lacking", crackin: "cracking", stackin: "stacking",
+  lackin: "lackin", crackin: "cracking", stackin: "stacking",
   packin: "packing", trackin: "tracking", atackin: "attacking",
   // contractions / slang
   em: "them", ya: "you", gon: "going",
@@ -367,125 +389,6 @@ function normalizeWord(raw: string): string {
   return w;
 }
 
-// ---------------------------------------------------------------------------
-// Phonetic approximation engine
-// ---------------------------------------------------------------------------
-
-const VOWELS = new Set(["a", "e", "i", "o", "u"]);
-
-function isVowel(ch: string): boolean {
-  return VOWELS.has(ch);
-}
-
-// Map common spelling patterns to normalized phonetic form
-function applyPhoneticMappings(s: string): string {
-  let r = s
-    .replace(/ph/g, "f")
-    .replace(/ck/g, "k")
-    .replace(/qu/g, "kw")
-    .replace(/x/g, "ks")
-    .replace(/gh(?=[aeiou])/g, "g")     // gh before vowel = g
-    .replace(/gh/g, "")                  // silent gh at end
-    .replace(/ea(?=[dklmnprst]|$)/g, "ee") // ea → ee before common consonants or word-end (sea, beat, clean, read)
-    .replace(/tion/g, "shun")
-    .replace(/sion/g, "zhun")
-    .replace(/tch/g, "ch")
-    .replace(/dge/g, "j");
-
-  // Silent final e — only strip when there's still a vowel left in the stem
-  // Don't strip from double-vowel endings (free, see, tree) or when it
-  // would leave zero vowels (cycle → keep the e as the syllable nucleus)
-  if (r.length >= 3 && r.endsWith("e")) {
-    const beforeE = r.slice(0, -1);
-    const hasVowelInStem = /[aeiou]/.test(beforeE);
-    // Keep the e if: (1) stem has no other vowel, or (2) preceding char is also a vowel (ee, oe, etc.)
-    if (hasVowelInStem && !/[aeiou]$/.test(beforeE)) {
-      r = beforeE; // true silent e: name→nam, place→plac, cycle→cycl... but check below
-    }
-    // For words like "cycle", "brittle" — the le/re ending carries a vowel sound
-    // Re-check: if stripping e left no vowel in the final syllable, restore it
-    if (r === beforeE) {
-      const finalCluster = r.match(/[^aeiou]+$/)?.[0] ?? "";
-      if (finalCluster.length >= 2 && /l$/.test(finalCluster)) {
-        // -cle, -tle, -ble, -ple, -dle, -gle → restore e (syllabic l)
-        r = r + "e";
-      }
-    }
-  }
-
-  r = r
-    .replace(/er$/g, "r")               // final er → r-colored
-    .replace(/ur$/g, "r")
-    .replace(/ir$/g, "r")
-    .replace(/ing$/g, "ing")
-    .replace(/([a-z])\1+/g, "$1");      // collapse doubled letters
-
-  return r;
-}
-
-function extractVowelSkeleton(s: string): string {
-  return s.split("").filter(isVowel).join("");
-}
-
-function extractConsonantSkeleton(s: string): string {
-  return s.split("").filter((c) => /[a-z]/.test(c) && !isVowel(c)).join("");
-}
-
-function getInitialCluster(s: string): string {
-  let i = 0;
-  while (i < s.length && !isVowel(s[i])) i++;
-  return s.slice(0, i);
-}
-
-function getFinalCluster(s: string): string {
-  let i = s.length - 1;
-  while (i >= 0 && !isVowel(s[i])) i--;
-  return s.slice(i + 1);
-}
-
-function getFinalVowelGroup(s: string): string {
-  // Find the last vowel cluster + trailing consonants
-  const match = s.match(/[aeiou]+[^aeiou]*$/);
-  return match ? match[0] : "";
-}
-
-function estimateSyllableCount(normalized: string): number {
-  // Count vowel groups as syllable nuclei
-  const groups = normalized.match(/[aeiou]+/g);
-  const count = groups ? groups.length : 1;
-  return Math.max(1, count);
-}
-
-function splitIntoSyllables(normalized: string): string[] {
-  // Rough syllable splitting: split at consonant clusters between vowel groups
-  const chunks: string[] = [];
-  let current = "";
-  let inVowel = false;
-  for (let i = 0; i < normalized.length; i++) {
-    const ch = normalized[i];
-    const v = isVowel(ch);
-    if (v !== inVowel && current.length > 0) {
-      if (!v && inVowel) {
-        // Just entered consonant zone — keep going, split before next vowel
-        current += ch;
-        inVowel = false;
-        continue;
-      }
-      if (v && !inVowel && current.length > 1) {
-        // Split: push all but last consonant, start new syllable
-        chunks.push(current);
-        current = ch;
-        inVowel = true;
-        continue;
-      }
-    }
-    current += ch;
-    inVowel = v;
-  }
-  if (current) chunks.push(current);
-  return chunks.length ? chunks : [normalized];
-}
-
 // Cache phonetic shapes for performance
 const phoneticCache = new Map<string, PhoneticShape>();
 
@@ -493,22 +396,23 @@ export function computePhoneticShape(normalized: string): PhoneticShape {
   const cached = phoneticCache.get(normalized);
   if (cached) return cached;
 
-  const phonetic = applyPhoneticMappings(normalized);
-  const vowelSkeleton = extractVowelSkeleton(phonetic);
-  const consonantSkeleton = extractConsonantSkeleton(phonetic);
-  const initialConsonantCluster = getInitialCluster(phonetic);
-  const finalConsonantCluster = getFinalCluster(phonetic);
-  const finalVowelGroup = getFinalVowelGroup(phonetic);
-  // Count syllables from the original word — phonetic mapping (er→r etc.)
-  // can collapse vowels and undercount (e.g. "center" → "centr" = 1 vowel)
-  const syllableCount = Math.max(estimateSyllableCount(phonetic), estimateSyllableCount(normalized));
-  const syllables = splitIntoSyllables(phonetic);
+  const token = getTokenPhonetics(normalized);
+  const phonetic = token.phonemeKey.replace(/-/g, "");
+  const vowelSkeleton = token.vowelSkeleton;
+  const consonantSkeleton = token.consonantSkeleton;
+  const initialConsonantCluster = token.alliterationKey || token.initialConsonants;
+  const finalConsonantCluster = token.consonanceKey || token.finalConsonants;
+  const finalVowelGroup = token.endingKey;
+  const syllableCount = token.syllableCount;
+  const syllables = token.pronunciations[0].phonemes
+    .filter((p) => /[0-2]$/.test(p))
+    .map((p) => p.replace(/[0-2]/g, ""));
 
-  // Final rhyme nucleus = final vowel group + any trailing consonants
-  const finalRhymeNucleus = finalVowelGroup || phonetic.slice(-2);
+  // Final rhyme nucleus = stressed vowel tail from the offline phonetic engine.
+  const finalRhymeNucleus = token.perfectKey || token.endingKey || phonetic.slice(-2);
 
-  // Ending shape: last 3–5 chars of phonetic form (for slant matching)
-  const endingShape = phonetic.length >= 4 ? phonetic.slice(-4) : phonetic;
+  // Ending shape: final vowel + consonant family, useful for slant matching.
+  const endingShape = token.familyKey || token.endingKey || phonetic;
 
   const shape: PhoneticShape = {
     normalized,
@@ -521,6 +425,7 @@ export function computePhoneticShape(normalized: string): PhoneticShape {
     finalVowelGroup,
     finalRhymeNucleus,
     endingShape,
+    token,
   };
   phoneticCache.set(normalized, shape);
   return shape;
@@ -531,28 +436,23 @@ export function computePhoneticShape(normalized: string): PhoneticShape {
 // ---------------------------------------------------------------------------
 
 function computeSpanPhoneticShape(words: string[]): PhoneticShape {
-  // For phrase spans, compute phonetic based on the last word primarily
-  // but also include multi-word vowel skeleton for assonance
-  const lastWord = words[words.length - 1];
-  const lastShape = computePhoneticShape(lastWord);
+  const token = getPhrasePhonetics(words);
+  const lastShape = computePhoneticShape(words[words.length - 1]);
   const allNorm = words.join(" ");
-  const combined = words.map(applyPhoneticMappings).join(" ");
-  const vowelSkeleton = extractVowelSkeleton(combined.replace(/ /g, ""));
-  const syllableCount = words.reduce(
-    (acc, w) => acc + computePhoneticShape(w).syllableCount,
-    0
-  );
   return {
     normalized: allNorm,
-    syllableCount,
-    syllables: lastShape.syllables,
-    vowelSkeleton,
-    consonantSkeleton: extractConsonantSkeleton(combined.replace(/ /g, "")),
+    syllableCount: token.syllableCount,
+    syllables: token.pronunciations[0].phonemes
+      .filter((p) => /[0-2]$/.test(p))
+      .map((p) => p.replace(/[0-2]/g, "")),
+    vowelSkeleton: token.vowelSkeleton,
+    consonantSkeleton: token.consonantSkeleton,
     initialConsonantCluster: computePhoneticShape(words[0]).initialConsonantCluster,
-    finalConsonantCluster: lastShape.finalConsonantCluster,
-    finalVowelGroup: lastShape.finalVowelGroup,
-    finalRhymeNucleus: lastShape.finalRhymeNucleus,
-    endingShape: lastShape.endingShape,
+    finalConsonantCluster: token.consonanceKey || lastShape.finalConsonantCluster,
+    finalVowelGroup: token.endingKey || lastShape.finalVowelGroup,
+    finalRhymeNucleus: token.perfectKey || lastShape.finalRhymeNucleus,
+    endingShape: token.familyKey || lastShape.endingShape,
+    token,
   };
 }
 
@@ -571,27 +471,36 @@ function scoreEndRhyme(a: PhoneticShape, b: PhoneticShape): number {
   if (a.normalized === b.normalized) return 0; // repetition, handled elsewhere
   let score = 0;
 
+  if (a.token.phonemeKey && a.token.phonemeKey === b.token.phonemeKey) {
+    return 0.98;
+  }
+
   // Perfect nucleus match
-  if (a.finalRhymeNucleus && b.finalRhymeNucleus && a.finalRhymeNucleus === b.finalRhymeNucleus) {
-    score += 0.7;
+  if (a.token.perfectKey && b.token.perfectKey && a.token.perfectKey === b.token.perfectKey) {
+    score += 0.75;
   }
   // Ending shape match (last 4 phonetic chars)
-  if (a.endingShape === b.endingShape && a.endingShape.length >= 3) {
-    score += 0.3;
+  if (a.token.endingKey && a.token.endingKey === b.token.endingKey) {
+    score += 0.25;
   }
   // Final vowel group match
-  if (a.finalVowelGroup && b.finalVowelGroup && a.finalVowelGroup === b.finalVowelGroup) {
+  if (a.token.finalVowel && b.token.finalVowel && a.token.finalVowel === b.token.finalVowel) {
     score += 0.2;
   }
   // Final consonant cluster match
-  if (a.finalConsonantCluster && b.finalConsonantCluster && a.finalConsonantCluster === b.finalConsonantCluster) {
+  if (a.token.finalConsonants && b.token.finalConsonants && a.token.finalConsonants === b.token.finalConsonants) {
     score += 0.15;
+  }
+  // Family consonants keep near matches like love/enough explainable without
+  // promoting spelling-only pairs such as love/move to true rhyme.
+  if (score < 0.6 && a.token.finalVowel === b.token.finalVowel && a.token.familyKey === b.token.familyKey) {
+    score += 0.35;
   }
   // Near-rhyme bonus: endings differ only in vowel (center/winter, ember/timber)
   // Same final consonant cluster + similar ending shape length + both multisyllabic
-  if (score < 0.4 && a.finalConsonantCluster && b.finalConsonantCluster &&
-      a.finalConsonantCluster === b.finalConsonantCluster &&
-      a.finalConsonantCluster.length >= 2 &&
+  if (score < 0.4 && a.token.finalConsonants && b.token.finalConsonants &&
+      a.token.finalConsonants === b.token.finalConsonants &&
+      a.token.finalConsonants.length >= 2 &&
       a.syllableCount >= 2 && b.syllableCount >= 2) {
     // Check if ending shapes match after stripping the vowel portion
     const stripVowel = (s: string) => s.replace(/^[aeiou]+/, "");
@@ -611,7 +520,18 @@ function scoreEndRhyme(a: PhoneticShape, b: PhoneticShape): number {
 
 function scoreSlantRhyme(a: PhoneticShape, b: PhoneticShape): number {
   if (a.normalized === b.normalized) return 0;
+  if (!a.token.finalVowel || a.token.finalVowel !== b.token.finalVowel) return 0;
   let score = 0;
+
+  score += 0.35;
+  if (a.token.familyKey && a.token.familyKey === b.token.familyKey) {
+    score += 0.25;
+  }
+  const aFinal = a.token.finalConsonants.split("-").filter(Boolean);
+  const bFinal = b.token.finalConsonants.split("-").filter(Boolean);
+  if (aFinal.length && bFinal.length && aFinal.some((p) => bFinal.includes(p))) {
+    score += 0.15;
+  }
 
   // Partial vowel skeleton overlap
   const vA = a.vowelSkeleton;
@@ -640,12 +560,14 @@ function scoreSlantRhyme(a: PhoneticShape, b: PhoneticShape): number {
 
 function scoreAssonance(a: PhoneticShape, b: PhoneticShape): number {
   if (a.normalized === b.normalized) return 0;
-  const vA = a.vowelSkeleton;
-  const vB = b.vowelSkeleton;
+  const vA = a.token.vowelSkeleton;
+  const vB = b.token.vowelSkeleton;
   if (!vA || !vB || vA.length < 1 || vB.length < 1) return 0;
+  if (a.token.assonanceKey && a.token.assonanceKey === b.token.assonanceKey) return 0.65;
+  if (a.token.finalVowel && a.token.finalVowel === b.token.finalVowel) return 0.45;
   // Match last 2 vowels or vowel group
-  const vAe = vA.slice(-2);
-  const vBe = vB.slice(-2);
+  const vAe = vA.split("-").slice(-2).join("-");
+  const vBe = vB.split("-").slice(-2).join("-");
   if (vAe === vBe && vAe.length >= 1) {
     return 0.4 + (vAe.length >= 2 ? 0.2 : 0);
   }
@@ -656,9 +578,18 @@ function scoreAssonance(a: PhoneticShape, b: PhoneticShape): number {
 
 function scoreConsonance(a: PhoneticShape, b: PhoneticShape): number {
   if (a.normalized === b.normalized) return 0;
-  const cA = a.consonantSkeleton;
-  const cB = b.consonantSkeleton;
+  if (
+    a.token.eyeKey === b.token.eyeKey &&
+    a.token.finalVowel &&
+    b.token.finalVowel &&
+    a.token.finalVowel !== b.token.finalVowel
+  ) {
+    return 0;
+  }
+  const cA = a.token.consonantSkeleton;
+  const cB = b.token.consonantSkeleton;
   if (!cA || !cB || cA.length < 1 || cB.length < 1) return 0;
+  if (a.token.consonanceKey && a.token.consonanceKey === b.token.consonanceKey) return 0.7;
   // Final consonant cluster match
   if (a.finalConsonantCluster && b.finalConsonantCluster &&
       a.finalConsonantCluster === b.finalConsonantCluster &&
@@ -671,11 +602,11 @@ function scoreConsonance(a: PhoneticShape, b: PhoneticShape): number {
 }
 
 function scoreAlliteration(a: PhoneticShape, b: PhoneticShape): number {
-  if (!a.initialConsonantCluster || !b.initialConsonantCluster) return 0;
-  if (a.initialConsonantCluster === b.initialConsonantCluster && a.initialConsonantCluster.length >= 1) {
+  if (!a.token.alliterationKey || !b.token.alliterationKey) return 0;
+  if (a.token.alliterationKey === b.token.alliterationKey && a.token.alliterationKey.length >= 1) {
     return 0.7 + (a.initialConsonantCluster.length >= 2 ? 0.2 : 0);
   }
-  if (a.initialConsonantCluster[0] === b.initialConsonantCluster[0]) return 0.4;
+  if (a.token.alliterationKey.split("-")[0] === b.token.alliterationKey.split("-")[0]) return 0.7;
   return 0;
 }
 
@@ -688,14 +619,38 @@ function scoreMultisyllabic(a: PhoneticShape, b: PhoneticShape, spanLengthA: num
 
   // Base: end rhyme score
   const endScore = scoreEndRhyme(a, b);
-  if (endScore < 0.3) return 0;
+  const mosaicScore = scoreMosaicTail(a, b);
+  if (endScore < 0.3 && mosaicScore < 0.55) return 0;
 
   // Multi bonus: more syllables = stronger
   const multiBonus = 0.15 * Math.min(minSyl - 1, 3);
   // Span bonus
   const spanBonus = 0.1 * Math.min(minSpan - 1, 2);
 
-  return Math.min(endScore + multiBonus + spanBonus, 1);
+  return Math.min(Math.max(endScore, mosaicScore) + multiBonus + spanBonus, 1);
+}
+
+function scoreMosaicTail(a: PhoneticShape, b: PhoneticShape): number {
+  const aTail = a.token.perfectKey.split("-").filter(Boolean);
+  const bTail = b.token.perfectKey.split("-").filter(Boolean);
+  if (aTail.length < 3 || bTail.length < 3) return 0;
+  const aFamilies = aTail.map((p) => p === "SH" || p === "CH" || p === "JH" ? "S" : p);
+  const bFamilies = bTail.map((p) => p === "SH" || p === "CH" || p === "JH" ? "S" : p);
+  let common = 0;
+  let cursor = 0;
+  for (const p of aFamilies) {
+    const found = bFamilies.slice(cursor).indexOf(p);
+    if (found >= 0) {
+      common++;
+      cursor += found + 1;
+    }
+  }
+  const ratio = common / Math.min(aTail.length, bTail.length);
+  const sameOpeningVowel = a.token.finalVowel === b.token.finalVowel || aTail[0] === bTail[0];
+  const sameFinalConsonant = a.token.finalConsonants.split("-").pop() === b.token.finalConsonants.split("-").pop();
+  if (ratio >= 0.6 && (sameOpeningVowel || sameFinalConsonant)) return 0.65;
+  if (ratio >= 0.5 && sameOpeningVowel && sameFinalConsonant) return 0.58;
+  return 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -807,6 +762,18 @@ function spansOverlap(a: RhymeSpan, b: RhymeSpan): boolean {
   return a.startWordIndex <= b.endWordIndex && b.startWordIndex <= a.endWordIndex;
 }
 
+function dedupeSpansByTextAndLine(spans: RhymeSpan[]): RhymeSpan[] {
+  const seen = new Set<string>();
+  const deduped: RhymeSpan[] = [];
+  for (const span of spans) {
+    const key = `${span.lineIndex}:${span.startWordIndex}-${span.endWordIndex}:${span.normalized}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(span);
+  }
+  return deduped;
+}
+
 // ---------------------------------------------------------------------------
 // Family ID generator
 // ---------------------------------------------------------------------------
@@ -820,7 +787,7 @@ function nextFamilyId(): string {
 // Color assignment — stable hash
 // ---------------------------------------------------------------------------
 
-const COLOR_COUNT = 16;
+const COLOR_COUNT = 24;
 
 function stableColorIndex(_label: string, existingIndices: Set<number>): number {
   // Sequential assignment: pick the first unused color index
@@ -828,7 +795,7 @@ function stableColorIndex(_label: string, existingIndices: Set<number>): number 
   for (let idx = 0; idx < COLOR_COUNT; idx++) {
     if (!existingIndices.has(idx)) return idx;
   }
-  // All 16 used — wrap around, pick least-recently-used
+  // All colors used — wrap around, pick least-recently-used
   const offset = existingIndices.size % COLOR_COUNT;
   return offset;
 }
@@ -1139,7 +1106,7 @@ export function analyzeRhymeLens(
   // ── Step 3: End rhyme families ────────────────────────────────────────────
   if (options.enabledTypes.has("end")) {
     // Only line-ending single words
-    const endSpans = allSpans.filter((s) => s.isLineEnd && s.spanLength === 1 && !STOP_WORDS.has(s.normalized));
+    const endSpans = allSpans.filter((s) => s.isLineEnd && s.spanLength === 1 && isMeaningfulRhymeSpan(s, "end"));
     const processed = new Set<string>();
 
     for (let i = 0; i < endSpans.length; i++) {
@@ -1192,10 +1159,10 @@ export function analyzeRhymeLens(
   if (options.enabledTypes.has("internal")) {
     // Words that are NOT line-ending (internal), single words, non-stop
     const internalSpans = allSpans.filter(
-      (s) => s.spanLength === 1 && !s.isLineEnd && !STOP_WORDS.has(s.normalized) && s.normalized.length > 2
+      (s) => s.spanLength === 1 && !s.isLineEnd && isMeaningfulRhymeSpan(s, "internal") && s.normalized.length > 2
     );
     // Also allow internal vs end-word cross-matching
-    const endSpansSingle = allSpans.filter((s) => s.isLineEnd && s.spanLength === 1 && !STOP_WORDS.has(s.normalized));
+    const endSpansSingle = allSpans.filter((s) => s.isLineEnd && s.spanLength === 1 && isMeaningfulRhymeSpan(s, "end"));
     const allIntCandidates = [...internalSpans, ...endSpansSingle];
 
     const processed = new Set<string>();
@@ -1251,11 +1218,44 @@ export function analyzeRhymeLens(
     }
   }
 
+  // ── Step 4.5: Rich / homophone rhyme ──────────────────────────────────────
+  if (options.enabledTypes.has("rich")) {
+    const homophoneBuckets = new Map<string, RhymeSpan[]>();
+    for (const span of allSpans) {
+      if (span.spanLength !== 1) continue;
+      if (!isMeaningfulRhymeSpan(span, "rich")) continue;
+      const key = span.phonetic.token.phonemeKey;
+      if (!key) continue;
+      if (!homophoneBuckets.has(key)) homophoneBuckets.set(key, []);
+      homophoneBuckets.get(key)!.push(span);
+    }
+
+    for (const [key, spans] of homophoneBuckets) {
+      const uniqueSpellings = new Set(spans.map((s) => s.normalized));
+      if (uniqueSpellings.size < 2) continue;
+      const deduped = dedupeSpansByTextAndLine(spans);
+      if (deduped.length < 2) continue;
+      const colorIdx = stableColorIndex("rich_" + key, usedColorIndices);
+      usedColorIndices.add(colorIdx);
+      families.push({
+        id: nextFamilyId(),
+        type: "rich",
+        confidence: 0.95,
+        colorIndex: colorIdx,
+        label: "rich / homophone rhyme",
+        explanation: "Different spellings share the same pronunciation",
+        spans: deduped,
+        strength: "strong",
+      });
+      for (const s of deduped) spanInStrongFamily.add(s.id);
+    }
+  }
+
   // ── Step 5: Slant rhyme ───────────────────────────────────────────────────
   if (options.enabledTypes.has("slant") && options.density !== "clean") {
     const candidates = allSpans.filter(
-      (s) => s.spanLength === 1 && !STOP_WORDS.has(s.normalized) &&
-             s.normalized.length > 2 && !spanInStrongFamily.has(s.id)
+      (s) => s.spanLength === 1 && isMeaningfulRhymeSpan(s, "slant") &&
+             s.normalized.length > 2
     );
     const processed = new Set<string>();
 
@@ -1298,10 +1298,42 @@ export function analyzeRhymeLens(
     }
   }
 
+  // ── Step 5.5: Family rhyme ────────────────────────────────────────────────
+  if (options.enabledTypes.has("family") && options.density !== "clean") {
+    const buckets = new Map<string, RhymeSpan[]>();
+    for (const span of allSpans) {
+      if (span.spanLength !== 1) continue;
+      if (!isMeaningfulRhymeSpan(span, "family")) continue;
+      const key = span.phonetic.token.familyKey;
+      if (!key || key.length < 2) continue;
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key)!.push(span);
+    }
+
+    for (const [key, spans] of buckets) {
+      const deduped = dedupeSpansByTextAndLine(spans);
+      const unique = new Set(deduped.map((s) => s.normalized));
+      if (deduped.length < 2 || unique.size < 2) continue;
+      if (deduped.every((s) => !isContentWord(s.normalized))) continue;
+      const colorIdx = stableColorIndex("family_" + key, usedColorIndices);
+      usedColorIndices.add(colorIdx);
+      families.push({
+        id: nextFamilyId(),
+        type: "family",
+        confidence: 0.55,
+        colorIndex: colorIdx,
+        label: `family rhyme (${key})`,
+        explanation: "Related consonant family and vowel color create a near-rhyme",
+        spans: deduped,
+        strength: deduped.length >= 3 ? "medium" : "light",
+      });
+    }
+  }
+
   // ── Step 6: Assonance ─────────────────────────────────────────────────────
   if (options.enabledTypes.has("assonance") && options.density !== "clean") {
     const candidates = allSpans.filter(
-      (s) => s.spanLength === 1 && !STOP_WORDS.has(s.normalized) &&
+      (s) => s.spanLength === 1 && isMeaningfulRhymeSpan(s, "assonance") &&
              s.normalized.length > 2 && s.phonetic.vowelSkeleton.length >= 1
              && !spanInStrongFamily.has(s.id)
     );
@@ -1349,7 +1381,7 @@ export function analyzeRhymeLens(
   // ── Step 7: Consonance ────────────────────────────────────────────────────
   if (options.enabledTypes.has("consonance") && options.density !== "clean") {
     const candidates = allSpans.filter(
-      (s) => s.spanLength === 1 && !STOP_WORDS.has(s.normalized) &&
+      (s) => s.spanLength === 1 && isMeaningfulRhymeSpan(s, "consonance") &&
              s.normalized.length > 2 && s.phonetic.finalConsonantCluster.length >= 1
              && !spanInStrongFamily.has(s.id)
     );
@@ -1442,6 +1474,47 @@ export function analyzeRhymeLens(
     }
   }
 
+  // ── Step 8.25: Eye rhyme / spelling echo (Detailed + Max only) ───────────
+  if (options.enabledTypes.has("eye") && options.density !== "clean") {
+    const buckets = new Map<string, RhymeSpan[]>();
+    for (const span of allSpans) {
+      if (span.spanLength !== 1) continue;
+      if (!isMeaningfulRhymeSpan(span, "eye")) continue;
+      const key = span.phonetic.token.eyeKey;
+      if (!key || key.length < 3) continue;
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key)!.push(span);
+    }
+
+    for (const [key, spans] of buckets) {
+      const candidates = dedupeSpansByTextAndLine(spans);
+      const group: RhymeSpan[] = [];
+      for (let i = 0; i < candidates.length; i++) {
+        for (let j = i + 1; j < candidates.length; j++) {
+          const a = candidates[i];
+          const b = candidates[j];
+          if (a.normalized === b.normalized) continue;
+          if (scoreEndRhyme(a.phonetic, b.phonetic) >= 0.5) continue;
+          if (!group.find((s) => s.id === a.id)) group.push(a);
+          if (!group.find((s) => s.id === b.id)) group.push(b);
+        }
+      }
+      if (group.length < 2) continue;
+      const colorIdx = stableColorIndex("eye_" + key, usedColorIndices);
+      usedColorIndices.add(colorIdx);
+      families.push({
+        id: nextFamilyId(),
+        type: "eye",
+        confidence: 0.45,
+        colorIndex: colorIdx,
+        label: `eye rhyme / spelling echo (${key})`,
+        explanation: "Similar spelling, but not a true sound rhyme",
+        spans: group,
+        strength: "light",
+      });
+    }
+  }
+
   // ── Step 8.5: Merge compatible families that share the same rhyme nucleus ─
   // e.g. end rhyme {snare, glare} + internal/cross {air, stare} → one family
   const MERGEABLE_TYPES = new Set<RhymeType>(["end", "chain", "internal", "cross"]);
@@ -1489,12 +1562,14 @@ export function analyzeRhymeLens(
     switch (t) {
       case "end": case "chain": return 10;
       case "multi": case "compound": case "mosaic": return 9;
+      case "perfect": case "rich": return 8;
       case "internal": return 7;
       case "cross": return 6;
       case "repetition": return 5;
-      case "slant": return 4;
+      case "slant": case "family": return 4;
       case "consonance": case "assonance": return 3;
       case "alliteration": return 2;
+      case "eye": return 1;
       default: return 1;
     }
   };
@@ -1521,8 +1596,12 @@ export function analyzeRhymeLens(
       if (!existing || myStrength > existing.strength) {
         keptSpans.push(span);
         claimedRanges.set(rangeKey, { familyIdx: resolvedFamilies.length, strength: myStrength });
-      } else if (fam.type === "repetition" && existing) {
-        // Repetition can coexist with rhyme — allow both if they're different types
+      } else if (
+        (fam.type === "repetition" || fam.type === "eye" || fam.type === "alliteration" ||
+          fam.type === "slant" || fam.type === "family") &&
+        existing
+      ) {
+        // Layerable annotations can coexist with the primary sound-family fill.
         keptSpans.push(span);
       }
     }
@@ -1557,7 +1636,7 @@ export function analyzeRhymeLens(
   const endFamilies = sortedFamilies.filter((f) => f.type === "end" || f.type === "chain");
   const intFamilies = sortedFamilies.filter((f) => f.type === "internal" || f.type === "cross");
   const multiFamilies = sortedFamilies.filter((f) => f.type === "multi" || f.type === "compound");
-  const slantFamilies = sortedFamilies.filter((f) => f.type === "slant");
+  const slantFamilies = sortedFamilies.filter((f) => f.type === "slant" || f.type === "family");
   const assnFamilies = sortedFamilies.filter((f) => f.type === "assonance");
   const consFamilies = sortedFamilies.filter((f) => f.type === "consonance");
   const allitFamilies = sortedFamilies.filter((f) => f.type === "alliteration");
