@@ -132,13 +132,14 @@
 
 **Test 8: Live Trumpet layer**
 1. New Take → Performance Layers → "Live Trumpet"
-2. Expected: preset selector, brightness/vibrato/output sliders appear
-3. Expected: headphones warning visible
-4. Select "Muted Trumpet"
+2. Expected: preset selector with 6 presets (Trumpet Sketch, Muted Trumpet, Brass Section, Soft Flugelhorn, Synth Brass, Miles Lead)
+3. Expected: brightness/vibrato/output sliders appear; headphones warning visible
+4. Select "Miles Lead" preset
 5. Record → sing into mic
-6. Expected: trumpet-like sound follows pitch, stops during silence
-7. Expected: no random jumping during silence
-8. Stop → Save → play back: trumpet synth audible in recording
+6. Expected: trumpet-like sound follows pitch with breathy quality, delayed vibrato, dynamic following
+7. Expected: no random jumping during silence; smooth portamento between close pitches
+8. Select "Brass Section" → expected: brighter, more aggressive attack burst
+9. Stop → Save → play back: trumpet synth audible in recording
 
 **Test 9: Gestures + Trumpet (both layers)**
 1. New Take → "Gestures + Trumpet"
@@ -180,14 +181,53 @@
 
 ---
 
-### Voice to Score (standalone — still works)
+### Voice to Score (standalone — overhauled)
 
-**Test 12: Voice to Score unchanged**
+**Test 12: Voice to Score — quality modes + note editing + MIDI export**
 1. Toolbar → "voice score"
-2. Record 5s of singing
-3. Expected: piano roll shows detected notes
-4. Expected: Re-analyze button works
-5. Expected: Original recording plays back
+2. Expected: quality mode selector (Strict / Balanced / Sensitive) visible at top
+3. Expected: quantize grid selector (None / Light / Medium / Hard) visible
+4. Record 5s of humming a clear melody
+5. Expected: piano roll shows detected notes; view mode tabs visible (Piano Roll / Note List / Staff)
+6. Click "Note List" tab → expected: same notes shown in a table format
+7. Click a note in the piano roll → expected: note selected, editing toolbar appears
+8. Click "+1" → expected: note pitch shifts up one semitone
+9. Click "Split" → expected: note splits into two equal halves
+10. Click "Delete" → expected: note removed
+11. Click "Export MIDI" → expected: .mid file downloads
+12. Click "Export JSON" → expected: .json file downloads
+13. Change quality mode to "Strict" → click "Re-analyze"
+14. Expected: fewer notes detected (stricter threshold)
+15. Change quantize to "Medium" → click "Re-analyze"
+16. Expected: notes snapped to eighth-note grid
+17. Input warnings appear if recording is too quiet or clips
+
+**Test 12a: Voice to Score — original recording playback**
+1. Record a melody, wait for analysis
+2. Toggle playback mode to "Original"
+3. Click play → expected: hears original recorded audio, not synth
+4. Toggle to "Detected" → click play → expected: synth oscillator melody
+
+---
+
+### Zone Grid & Mobile
+
+**Test 12b: Zone grid toggle + mirroring**
+1. New Take → Hand Gestures → Record
+2. Toggle "Show zones" on
+3. Expected: 4 zone columns visible on camera overlay with labels 1–4
+4. Move left hand to the left side of camera view
+5. Expected: zone 1 (leftmost) highlights — zones correctly mirror hand position
+6. Toggle "Show zones" off → zones disappear
+7. Toggle back on → zones reappear (preference persisted)
+8. Close modal, reopen → expected: zone visibility matches last setting (localStorage)
+
+**Test 12c: Mobile responsiveness**
+1. Resize browser to < 768px wide (or use mobile device)
+2. Expected: Perform button hidden from toolbar
+3. Expected: toolbar scrolls horizontally if needed (overflow-x-auto)
+4. Expected: editor layout remains usable, no overflow or cut-off content
+5. Attempt to trigger Perform via any means → expected: toast notification explaining desktop-only
 
 ---
 
@@ -232,6 +272,11 @@
 | Gesture zones stable (no flickering) | No visible flicker in demo |
 | Smart Lyric Follow fallback | Graceful if Speech API unavailable |
 | Trumpet follows pitch in < 200ms latency | Perceptible responsiveness |
+| Trumpet expression dynamics audible | Louder singing → louder output |
+| Voice to Score MIDI export valid | File opens in any DAW |
+| Voice to Score note editing works | Pitch shift, split, merge, delete |
+| Zone grid mirrors correctly | Left hand → left zone highlight |
+| Mobile UI simplified | No Perform button, no overflow |
 | Rhyme Lens inline highlights | Distinct colors per family, aligned with text |
 | Piano playable without stuck notes | 100% |
 

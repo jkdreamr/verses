@@ -53,16 +53,21 @@ These work as a unified recording session. The resulting take captures the selec
 - Chords and drums play simultaneously through a shared AudioContext — no routing conflicts
 - Improved gesture reading: history buffer, smoothed wrist position, zone hysteresis, per-action cooldowns
 - Camera overlay: optional zone grid, hand skeleton, gesture labels, L/R labels — **large camera view** (~1200px modal, 500px column) so both hands are clearly visible in frame
-- Toggles: Show zones, Show skeleton, Swap hands
+- Toggles: Show zones, Show skeleton, Swap hands — preferences persist in localStorage
+- Zone grid: subtle amber highlight on active zone, thin divider lines, monospace labels; correctly mirrors hand position (left movement → left zone)
 
 ### Live Voice-to-Trumpet Layer
 - Open a New Take and enable **Live Trumpet**
-- Choose preset: Trumpet Sketch, Muted Trumpet, Brass Section, Soft Flugelhorn, Synth Brass
+- Choose preset: Trumpet Sketch, Muted Trumpet, Brass Section, Soft Flugelhorn, Synth Brass, Miles Lead
 - Sing into the mic — hear a trumpet-like synth follow your pitch in real time
 - Browser-native implementation using pitch detection (YIN/autocorrelation) + Web Audio synthesis
-- Multi-oscillator trumpet model: saw + square layers, bandpass/lowpass filters, light reverb, breath noise
-- Fades out during silence, smooths pitch transitions, handles vibrato
-- Controls: brightness, vibrato, output gain, raw voice monitor toggle
+- Multi-oscillator trumpet model: saw + square layers with formant resonance filtering (3-band parallel peaks at 1200/2400/3800 Hz)
+- Expression dynamics: output follows input RMS for natural loud/soft control
+- Portamento: adjustable pitch glide between notes (instant to slow legato)
+- Delayed vibrato: vibrato fades in after a configurable delay (mimics real brass technique)
+- Attack burst: brightness spike on note onset for realistic brass "blat"
+- Breath noise modeling with two-stage filtering
+- Controls: brightness, vibrato amount, vibrato delay, portamento, breathiness, attack burst, dynamic follow, output gain, raw voice monitor toggle
 - The transformed trumpet audio is captured in the take recording
 - Note: this is a browser-native live voice sketch, not a studio AI voice model
 
@@ -84,11 +89,17 @@ These work as a unified recording session. The resulting take captures the selec
 
 ### Voice to Score (standalone)
 - Record a short hummed or sung melody (up to 15 seconds)
-- YIN pitch detection with median smoothing, vibrato handling, and note segmentation
-- Piano roll canvas with confidence-based coloring and playhead
+- **Quality modes**: Strict, Balanced, Sensitive — different pitch detection thresholds for different singing styles
+- **Quantize grid**: None, Light (16th), Medium (8th), Hard (quarter) — snap notes to rhythmic grid
+- YIN pitch detection with median smoothing, vibrato handling, amplitude-based onset detection, and note segmentation
+- **View modes**: Piano Roll, Note List, Staff — multiple ways to see your detected melody
+- Piano roll canvas with confidence-based coloring, click-to-select notes, and animated playhead
+- **Note editing**: select notes, pitch up/down, split, merge, delete — refine results without re-recording
 - Clear state progression: Ready → Recording → Analyzing → Results
+- **Input warnings**: real-time feedback on clipping, silence, noise during recording
 - Dual playback: detected melody (synthesized) or original recording
-- Re-analyze, JSON export, clipboard copy
+- **Export**: MIDI file, JSON, clipboard copy, formatted text
+- Re-analyze with different quality/quantize settings
 - Tips for better capture (collapsible)
 - Separate from Takes — accessed via "voice score" in the toolbar
 
@@ -182,7 +193,7 @@ Camera and microphone stay on your device.
 
 ## Limitations
 
-- Best in Chrome on desktop
+- Best in Chrome on desktop; mobile devices get a simplified UI (Perform and Trumpet hidden, responsive layout)
 - Camera/mic features require HTTPS or localhost
 - **YouTube audio cannot be captured in recordings** — browser cross-origin restrictions prevent routing YouTube audio into MediaRecorder. Drums, chord synth, and trumpet synth are captured; YouTube plays through speakers.
 - Trumpet synthesis is browser-native; it is not identical to studio voice modeling tools

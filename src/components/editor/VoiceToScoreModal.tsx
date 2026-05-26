@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-// tipsOpen state for collapsible tips panel
 import { useToast } from "@/components/Toast";
 
 // ---------------------------------------------------------------------------
@@ -10,6 +9,9 @@ import { useToast } from "@/components/Toast";
 
 type RecordingState = "idle" | "recording" | "analyzing" | "results" | "error";
 type PlaybackMode = "detected" | "original";
+type QualityMode = "strict" | "balanced" | "sensitive";
+type QuantizeMode = "raw" | "light" | "strong";
+type ViewMode = "piano" | "list" | "staff";
 
 interface NoteEvent {
   midi: number;
@@ -17,34 +19,87 @@ interface NoteEvent {
   startTime: number;
   duration: number;
   confidence: number;
+  id: string; // unique ID for editing
+}
+
+interface InputWarning {
+  type: "quiet" | "clipping" | "noise" | "no_pitch";
+  message: string;
 }
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const MAX_DURATION = 15; // seconds
-const SAMPLE_INTERVAL_MS = 20;
-const PIANO_ROLL_ROW_H = 16; // px per note row
-const PIANO_ROLL_LABEL_W = 44; // px for note name labels
-const PIANO_ROLL_PX_PER_SEC = 90; // px per second
+const MAX_DURATION = 30; // seconds (increased from 15)
+const SAMPLE_INTERVAL_MS = 15; // faster sampling for better resolution
+const PIANO_ROLL_ROW_H = 18; // px per note row
+const PIANO_ROLL_LABEL_W = 48; // px for note name labels
+const PIANO_ROLL_PX_PER_SEC = 100; // px per second
+
+// Quality mode parameters
+const QUALITY_PARAMS: Record<QualityMode, {
+  yinThreshold: number;
+  silenceRms: number;
+  noisyFallback: number;
+  confidenceFloor: number;
+  minSamples: number;
+  segmentTolerance: number;
+  mergeGap: number;
+  minNoteMs: number;
+}> = {
+  strict: {
+    yinThreshold: 0.12,
+    silenceRms: 0.02,
+    noisyFallback: 0.4,
+    confidenceFloor: 0.3,
+    minSamples: 8,  // 120ms
+    segmentTolerance: 1,
+    mergeGap: 0.12,
+    minNoteMs: 150,
+  },
+  balanced: {
+    yinThreshold: 0.18,
+    silenceRms: 0.012,
+    noisyFallback: 0.55,
+    confidenceFloor: 0.15,
+    minSamples: 5,  // 75ms
+    segmentTolerance: 2,
+    mergeGap: 0.2,
+    minNoteMs: 100,
+  },
+  sensitive: {
+    yinThreshold: 0.25,
+    silenceRms: 0.008,
+    noisyFallback: 0.7,
+    confidenceFloor: 0.08,
+    minSamples: 3,  // 45ms
+    segmentTolerance: 3,
+    mergeGap: 0.3,
+    minNoteMs: 60,
+  },
+};
+
+let noteIdCounter = 0;
+function nextNoteId(): string { return `n_${++noteIdCounter}_${Date.now()}`; }
 
 // ---------------------------------------------------------------------------
-// Pitch detection — YIN algorithm
+// Pitch detection — YIN algorithm (parameterized by quality mode)
 // ---------------------------------------------------------------------------
 
 function detectPitchYIN(
   buffer: Float32Array<ArrayBuffer>,
   sampleRate: number,
-): { freq: number; confidence: number } | null {
+  params: { yinThreshold: number; silenceRms: number; noisyFallback: number },
+): { freq: number; confidence: number; rms: number } | null {
   const W = buffer.length;
   const tau_max = Math.floor(W / 2);
 
-  // RMS check for silence (lowered to catch softer singing)
+  // RMS check for silence
   let rms = 0;
   for (let i = 0; i < W; i++) rms += buffer[i] * buffer[i];
   rms = Math.sqrt(rms / W);
-  if (rms < 0.01) return null;
+  if (rms < params.silenceRms) return null;
 
   // Step 1: difference function
   const d = new Float32Array(tau_max);
@@ -66,8 +121,8 @@ function detectPitchYIN(
     cmnd[tau] = runningSum > 0 ? (d[tau] * tau) / runningSum : 0;
   }
 
-  // Step 3: find first dip below threshold (relaxed for untrained singers)
-  const threshold = 0.2;
+  // Step 3: find first dip below threshold
+  const threshold = params.yinThreshold;
   let tau_estimate = -1;
   for (let tau = 2; tau < tau_max; tau++) {
     if (cmnd[tau] < threshold) {
@@ -87,7 +142,7 @@ function detectPitchYIN(
         tau_estimate = tau;
       }
     }
-    if (min > 0.6) return null; // too noisy
+    if (min > params.noisyFallback) return null;
   }
 
   // Step 4: parabolic interpolation for sub-sample accuracy
@@ -104,12 +159,12 @@ function detectPitchYIN(
 
   const freq = sampleRate / tau_estimate;
   const cmndAtTau = cmnd[Math.round(Math.max(1, Math.min(tau_max - 1, tau_estimate)))];
-  const confidence = 1 - Math.min(1, cmndAtTau / 0.2);
+  const confidence = 1 - Math.min(1, cmndAtTau / threshold);
 
-  // Frequency range: 80–1200 Hz (full vocal range)
-  if (freq < 80 || freq > 1200) return null;
+  // Frequency range: 75–1100 Hz (full vocal range)
+  if (freq < 75 || freq > 1100) return null;
 
-  return { freq, confidence };
+  return { freq, confidence, rms };
 }
 
 // ---------------------------------------------------------------------------
@@ -126,7 +181,7 @@ const midiToNoteName = (midi: number): string => {
 };
 
 // ---------------------------------------------------------------------------
-// Raw sample → Note segmentation (improved)
+// Raw sample → Note segmentation (improved with onset detection)
 // ---------------------------------------------------------------------------
 
 interface RawSample {
@@ -134,60 +189,89 @@ interface RawSample {
   time: number;
   confidence: number;
   freq: number;
+  rms: number;
 }
 
-function samplesToNotes(samples: RawSample[]): NoteEvent[] {
+function samplesToNotes(samples: RawSample[], quality: QualityMode = "balanced", quantize: QuantizeMode = "light"): NoteEvent[] {
   if (samples.length === 0) return [];
+
+  const params = QUALITY_PARAMS[quality];
 
   // Step 0.5: octave-error correction — if a sample jumps exactly ±12 semitones
   // from its neighbors but the neighbors agree, snap it back
-  for (let i = 1; i < samples.length - 1; i++) {
-    const prev = samples[i - 1].midi;
-    const cur = samples[i].midi;
-    const next = samples[i + 1].midi;
+  const corrected = [...samples];
+  for (let i = 1; i < corrected.length - 1; i++) {
+    const prev = corrected[i - 1].midi;
+    const cur = corrected[i].midi;
+    const next = corrected[i + 1].midi;
     if (Math.abs(prev - next) <= 2) {
-      if (Math.abs(cur - prev - 12) <= 1) samples[i] = { ...samples[i], midi: prev };
-      else if (Math.abs(cur - prev + 12) <= 1) samples[i] = { ...samples[i], midi: prev };
+      if (Math.abs(cur - prev - 12) <= 1) corrected[i] = { ...corrected[i], midi: prev };
+      else if (Math.abs(cur - prev + 12) <= 1) corrected[i] = { ...corrected[i], midi: prev };
     }
   }
 
   // Step 1: median smoothing over a 7-sample window (broader for vocal vibrato)
-  const smoothed = samples.map((s, i) => {
-    const win = samples.slice(Math.max(0, i - 3), Math.min(samples.length, i + 4));
+  const smoothed = corrected.map((s, i) => {
+    const win = corrected.slice(Math.max(0, i - 3), Math.min(corrected.length, i + 4));
     const midis = win.map((x) => x.midi).sort((a, b) => a - b);
     return { ...s, midi: midis[Math.floor(midis.length / 2)] };
   });
 
-  // Step 2: group into segments where midi stays within ±2 semitones (handles vibrato)
+  // Step 1.5: Onset detection — mark amplitude re-attacks
+  // A re-attack is when RMS drops significantly then rises again (new note articulation)
+  const onsets = new Set<number>();
+  for (let i = 2; i < smoothed.length; i++) {
+    const prevRms = smoothed[i - 2].rms;
+    const curRms = smoothed[i].rms;
+    // If there was a dip (RMS dropped to <40% of current) then came back up
+    if (smoothed[i - 1].rms < prevRms * 0.4 && curRms > smoothed[i - 1].rms * 2.0) {
+      onsets.add(i);
+    }
+  }
+
+  // Step 2: group into segments (break on pitch change OR onset re-attack)
+  const tolerance = params.segmentTolerance;
   const segments: RawSample[][] = [];
   let current: RawSample[] = [smoothed[0]];
   for (let i = 1; i < smoothed.length; i++) {
-    // Compare against the segment's median pitch (more stable than last sample)
+    // Compare against the segment's median pitch
     const segMidis = current.map(s => s.midi).sort((a, b) => a - b);
     const segMedian = segMidis[Math.floor(segMidis.length / 2)];
-    if (Math.abs(smoothed[i].midi - segMedian) <= 2) {
-      current.push(smoothed[i]);
-    } else {
+    const pitchChanged = Math.abs(smoothed[i].midi - segMedian) > tolerance;
+    const isOnset = onsets.has(i);
+
+    if (pitchChanged || isOnset) {
       segments.push(current);
       current = [smoothed[i]];
+    } else {
+      current.push(smoothed[i]);
     }
   }
   segments.push(current);
 
   // Step 3: build note events, filtering short blips
-  const MIN_SAMPLES = 4; // at 20ms intervals = 80ms minimum (catches faster passages)
+  const minSamples = params.minSamples;
   const notes: NoteEvent[] = [];
+  const sampleIntervalSec = SAMPLE_INTERVAL_MS / 1000;
 
   for (const seg of segments) {
-    if (seg.length < MIN_SAMPLES) continue;
+    if (seg.length < minSamples) continue;
 
     const startTime = seg[0].time;
-    const endTime = seg[seg.length - 1].time + 0.02;
+    const endTime = seg[seg.length - 1].time + sampleIntervalSec;
     const rawDuration = endTime - startTime;
 
-    // Light quantize to 1/8 beat
-    const QUANT = 0.125;
-    const duration = Math.max(QUANT, Math.round(rawDuration / QUANT) * QUANT);
+    // Quantization
+    let duration: number;
+    if (quantize === "strong") {
+      const QUANT = 0.125; // 1/8 note at ~120bpm
+      duration = Math.max(QUANT, Math.round(rawDuration / QUANT) * QUANT);
+    } else if (quantize === "light") {
+      const QUANT = 0.0625; // 1/16 note
+      duration = Math.max(QUANT, Math.round(rawDuration / QUANT) * QUANT);
+    } else {
+      duration = Math.max(0.04, rawDuration);
+    }
 
     // Median pitch
     const midis = seg.map((s) => s.midi).sort((a, b) => a - b);
@@ -197,26 +281,27 @@ function samplesToNotes(samples: RawSample[]): NoteEvent[] {
     const confidence = seg.reduce((s, x) => s + x.confidence, 0) / seg.length;
 
     // Skip very low confidence
-    if (confidence < 0.1) continue;
+    if (confidence < params.confidenceFloor) continue;
 
     notes.push({
       midi,
       name: midiToNoteName(midi),
-      startTime: Math.round(startTime * 100) / 100,
-      duration: Math.round(duration * 100) / 100,
+      startTime: Math.round(startTime * 1000) / 1000,
+      duration: Math.round(duration * 1000) / 1000,
       confidence: Math.round(confidence * 100) / 100,
+      id: nextNoteId(),
     });
   }
 
-  // Step 4: merge adjacent notes with same pitch (vibrato handling — wider gap)
+  // Step 4: merge adjacent notes with same pitch (vibrato handling)
   const merged: NoteEvent[] = [];
   for (const note of notes) {
     const prev = merged[merged.length - 1];
     const gap = prev ? note.startTime - (prev.startTime + prev.duration) : Infinity;
-    if (prev && Math.abs(prev.midi - note.midi) <= 1 && gap < 0.25) {
+    if (prev && Math.abs(prev.midi - note.midi) <= 1 && gap < params.mergeGap) {
       // merge
       prev.duration =
-        Math.round((note.startTime + note.duration - prev.startTime) * 100) / 100;
+        Math.round((note.startTime + note.duration - prev.startTime) * 1000) / 1000;
       prev.confidence = Math.round(((prev.confidence + note.confidence) / 2) * 100) / 100;
     } else {
       merged.push({ ...note });
@@ -461,6 +546,15 @@ export function VoiceToScoreModal({
   const [rawAudioUrl, setRawAudioUrl] = useState<string | null>(null);
   const [tipsOpen, setTipsOpen] = useState(false);
 
+  // New: quality, quantize, view mode, editing, warnings
+  const [qualityMode, setQualityMode] = useState<QualityMode>("balanced");
+  const [quantizeMode, setQuantizeMode] = useState<QuantizeMode>("light");
+  const [viewMode, setViewMode] = useState<ViewMode>("piano");
+  const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
+  const [inputWarnings, setInputWarnings] = useState<InputWarning[]>([]);
+  const [, setPeakLevel] = useState(0);
+  const [, setNoiseFloor] = useState(0);
+
   // ── Audio pipeline refs ───────────────────────────────────────────────────
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -474,6 +568,7 @@ export function VoiceToScoreModal({
   const meterRafRef = useRef<number | null>(null);
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const playbackSourcesRef = useRef<OscillatorNode[]>([]);
+  const playbackCtxRef = useRef<AudioContext | null>(null);
   const playbackAudioRef = useRef<HTMLAudioElement | null>(null);
   const playheadRafRef = useRef<number | null>(null);
 
@@ -526,6 +621,10 @@ export function VoiceToScoreModal({
       } catch {}
     }
     playbackSourcesRef.current = [];
+    if (playbackCtxRef.current) {
+      playbackCtxRef.current.close().catch(() => {});
+      playbackCtxRef.current = null;
+    }
     if (playbackAudioRef.current) {
       playbackAudioRef.current.pause();
       playbackAudioRef.current.src = "";
@@ -668,23 +767,63 @@ export function VoiceToScoreModal({
       }
     }, 200);
 
-    // YIN pitch sampling at 20ms intervals
+    // YIN pitch sampling
+    let clipCount = 0;
+    let silentFrames = 0;
+    let totalFrames = 0;
+    let maxPeak = 0;
+    let noiseAcc = 0;
+    let noiseCount = 0;
+
     sampleIntervalRef.current = setInterval(() => {
       if (!analyserRef.current || !pitchBufferRef.current || !audioCtxRef.current) return;
       analyserRef.current.getFloatTimeDomainData(pitchBufferRef.current);
       const sr = audioCtxRef.current.sampleRate;
-      const result = detectPitchYIN(pitchBufferRef.current, sr);
+      totalFrames++;
+
+      // Track input quality
+      let frameMax = 0;
+      for (let i = 0; i < pitchBufferRef.current.length; i++) {
+        const abs = Math.abs(pitchBufferRef.current[i]);
+        if (abs > frameMax) frameMax = abs;
+      }
+      if (frameMax > maxPeak) maxPeak = frameMax;
+      if (frameMax > 0.95) clipCount++;
+      if (frameMax < 0.01) { silentFrames++; noiseAcc += frameMax; noiseCount++; }
+      setPeakLevel(maxPeak);
+      if (noiseCount > 0) setNoiseFloor(noiseAcc / noiseCount);
+
+      const qParams = QUALITY_PARAMS[qualityMode];
+      const result = detectPitchYIN(pitchBufferRef.current, sr, qParams);
       if (result !== null) {
-        const { freq, confidence } = result;
+        const { freq, confidence, rms } = result;
         const midi = freqToMidi(freq);
         if (midi >= 36 && midi <= 96) {
           const time = (performance.now() - recordingStartRef.current) / 1000;
-          rawSamplesRef.current.push({ midi, time, confidence, freq });
+          rawSamplesRef.current.push({ midi, time, confidence, freq, rms });
         }
+      }
+
+      // Update warnings periodically
+      if (totalFrames % 20 === 0) {
+        const warnings: InputWarning[] = [];
+        if (maxPeak < 0.1 && totalFrames > 10) {
+          warnings.push({ type: "quiet", message: "Too quiet — sing closer to the mic" });
+        }
+        if (clipCount > 5) {
+          warnings.push({ type: "clipping", message: "Clipping detected — reduce volume or move back" });
+        }
+        if (silentFrames > totalFrames * 0.8 && totalFrames > 30) {
+          warnings.push({ type: "no_pitch", message: "No stable pitch detected" });
+        }
+        if (noiseCount > 0 && noiseAcc / noiseCount > 0.005 && rawSamplesRef.current.length < totalFrames * 0.1) {
+          warnings.push({ type: "noise", message: "Background noise may be affecting detection" });
+        }
+        setInputWarnings(warnings);
       }
     }, SAMPLE_INTERVAL_MS);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [startMeterLoop]);
+  }, [startMeterLoop, qualityMode]);
 
   // Stable ref so timer callback can call stopRecording without stale closure
   const stopRecordingRef = useRef<() => void>(() => {});
@@ -715,11 +854,12 @@ export function VoiceToScoreModal({
 
     setTimeout(() => {
       const samples = rawSamplesRef.current;
-      const detected = samplesToNotes(samples);
+      const detected = samplesToNotes(samples, qualityMode, quantizeMode);
       setNotes(detected);
+      setSelectedNoteId(null);
       setRecState("results");
     }, 80);
-  }, [recState, stopMicPipeline]);
+  }, [recState, stopMicPipeline, qualityMode, quantizeMode]);
 
   useEffect(() => {
     stopRecordingRef.current = stopRecording;
@@ -732,11 +872,12 @@ export function VoiceToScoreModal({
     setRecState("analyzing");
     stopPlayback();
     setTimeout(() => {
-      const detected = samplesToNotes(rawSamplesRef.current);
+      const detected = samplesToNotes(rawSamplesRef.current, qualityMode, quantizeMode);
       setNotes(detected);
+      setSelectedNoteId(null);
       setRecState("results");
     }, 80);
-  }, [stopPlayback]);
+  }, [stopPlayback, qualityMode, quantizeMode]);
 
   // ── Playback ──────────────────────────────────────────────────────────────
 
@@ -782,6 +923,7 @@ export function VoiceToScoreModal({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const Ctx = window.AudioContext || (window as any).webkitAudioContext;
     const ctx = new Ctx() as AudioContext;
+    playbackCtxRef.current = ctx;
 
     setIsPlaying(true);
     setPlayheadTime(0);
@@ -817,6 +959,7 @@ export function VoiceToScoreModal({
       if (t >= endTime) {
         setPlayheadTime(null);
         setIsPlaying(false);
+        playbackCtxRef.current = null;
         void ctx.close().catch(() => {});
         return;
       }
@@ -866,8 +1009,8 @@ export function VoiceToScoreModal({
 
   const copySequenceFormatted = useCallback(async () => {
     const text = notes
-      .map((n) => `${n.name} (${n.duration.toFixed(2)}s)`)
-      .join(" · ");
+      .map((n) => `${n.name} ${n.startTime.toFixed(2)}s ${n.duration.toFixed(2)}s confidence ${n.confidence.toFixed(2)}`)
+      .join("\n");
     try {
       await navigator.clipboard.writeText(text);
       toast("Formatted sequence copied", "ok");
@@ -875,6 +1018,134 @@ export function VoiceToScoreModal({
       toast("Could not access clipboard", "error");
     }
   }, [notes, toast]);
+
+  // ── MIDI export ─────────────────────────────────────────────────────────────
+
+  const exportMidi = useCallback(() => {
+    // Simple single-track MIDI file (format 0)
+    const ticksPerBeat = 480;
+    const tempo = 120; // BPM
+    const ticksPerSec = (ticksPerBeat * tempo) / 60;
+
+    // Build MIDI events
+    const events: { tick: number; data: number[] }[] = [];
+
+    // Tempo meta event
+    const uspb = Math.round(60000000 / tempo);
+    events.push({ tick: 0, data: [0xFF, 0x51, 0x03, (uspb >> 16) & 0xFF, (uspb >> 8) & 0xFF, uspb & 0xFF] });
+
+    for (const note of notes) {
+      const startTick = Math.round(note.startTime * ticksPerSec);
+      const endTick = Math.round((note.startTime + note.duration) * ticksPerSec);
+      const velocity = Math.min(127, Math.max(40, Math.round(note.confidence * 100 + 27)));
+      events.push({ tick: startTick, data: [0x90, note.midi, velocity] }); // note on
+      events.push({ tick: endTick, data: [0x80, note.midi, 0] }); // note off
+    }
+
+    // End of track
+    const lastTick = events.length > 0 ? Math.max(...events.map(e => e.tick)) + 1 : 0;
+    events.push({ tick: lastTick, data: [0xFF, 0x2F, 0x00] });
+
+    events.sort((a, b) => a.tick - b.tick);
+
+    // Encode variable-length quantity
+    function vlq(val: number): number[] {
+      if (val < 0x80) return [val];
+      const bytes: number[] = [];
+      bytes.unshift(val & 0x7F);
+      val >>= 7;
+      while (val > 0) {
+        bytes.unshift((val & 0x7F) | 0x80);
+        val >>= 7;
+      }
+      return bytes;
+    }
+
+    // Build track data
+    const trackData: number[] = [];
+    let prevTick = 0;
+    for (const ev of events) {
+      const delta = ev.tick - prevTick;
+      prevTick = ev.tick;
+      trackData.push(...vlq(delta), ...ev.data);
+    }
+
+    // Build file
+    const header = [
+      0x4D, 0x54, 0x68, 0x64, // MThd
+      0x00, 0x00, 0x00, 0x06, // header length
+      0x00, 0x00, // format 0
+      0x00, 0x01, // 1 track
+      (ticksPerBeat >> 8) & 0xFF, ticksPerBeat & 0xFF,
+    ];
+
+    const trackLen = trackData.length;
+    const track = [
+      0x4D, 0x54, 0x72, 0x6B, // MTrk
+      (trackLen >> 24) & 0xFF, (trackLen >> 16) & 0xFF, (trackLen >> 8) & 0xFF, trackLen & 0xFF,
+      ...trackData,
+    ];
+
+    const midiBytes = new Uint8Array([...header, ...track]);
+    const blob = new Blob([midiBytes], { type: "audio/midi" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `melody-${songId}-${Date.now()}.mid`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast("Exported MIDI", "ok");
+  }, [notes, songId, toast]);
+
+  // ── Note editing ────────────────────────────────────────────────────────────
+
+  const editNotePitch = useCallback((noteId: string, direction: 1 | -1) => {
+    setNotes(prev => prev.map(n => {
+      if (n.id !== noteId) return n;
+      const newMidi = n.midi + direction;
+      return { ...n, midi: newMidi, name: midiToNoteName(newMidi) };
+    }));
+  }, []);
+
+  const deleteNote = useCallback((noteId: string) => {
+    setNotes(prev => prev.filter(n => n.id !== noteId));
+    setSelectedNoteId(null);
+  }, []);
+
+  const mergeWithNext = useCallback((noteId: string) => {
+    setNotes(prev => {
+      const idx = prev.findIndex(n => n.id === noteId);
+      if (idx < 0 || idx >= prev.length - 1) return prev;
+      const curr = prev[idx];
+      const next = prev[idx + 1];
+      const merged: NoteEvent = {
+        ...curr,
+        duration: Math.round((next.startTime + next.duration - curr.startTime) * 1000) / 1000,
+        confidence: (curr.confidence + next.confidence) / 2,
+      };
+      return [...prev.slice(0, idx), merged, ...prev.slice(idx + 2)];
+    });
+  }, []);
+
+  const splitNote = useCallback((noteId: string) => {
+    setNotes(prev => {
+      const idx = prev.findIndex(n => n.id === noteId);
+      if (idx < 0) return prev;
+      const note = prev[idx];
+      if (note.duration < 0.1) return prev; // too short to split
+      const halfDur = Math.round((note.duration / 2) * 1000) / 1000;
+      const first: NoteEvent = { ...note, duration: halfDur, id: nextNoteId() };
+      const second: NoteEvent = {
+        ...note,
+        startTime: Math.round((note.startTime + halfDur) * 1000) / 1000,
+        duration: halfDur,
+        id: nextNoteId(),
+      };
+      return [...prev.slice(0, idx), first, second, ...prev.slice(idx + 1)];
+    });
+  }, []);
 
   // ── Derived UI values ─────────────────────────────────────────────────────
 
@@ -960,12 +1231,49 @@ export function VoiceToScoreModal({
       {/* ─── Scrollable body ─────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto px-5 py-5">
 
-        {/* Subtitle */}
-        <p className="mb-4 max-w-lg font-serif text-sm text-ink-mute">
-          Melody sketch —{" "}
-          <span className="text-ink-text">works best with one clear monophonic vocal line.</span>{" "}
-          Pitch detection runs entirely in your browser.
-        </p>
+        {/* Subtitle + quality controls */}
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
+          <p className="max-w-md text-sm text-ink-mute">
+            <span className="text-ink-text/80">Best for one clear vocal melody.</span>{" "}
+            Pitch detection runs entirely in your browser.
+          </p>
+          <div className="flex items-center gap-3">
+            {/* Quality mode */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[9px] uppercase tracking-wider text-ink-mute/40">Quality</span>
+              <div className="flex rounded border border-ink-line/30">
+                {(["strict", "balanced", "sensitive"] as const).map(m => (
+                  <button
+                    key={m}
+                    onClick={() => setQualityMode(m)}
+                    className={`px-2 py-0.5 text-[10px] capitalize transition-colors ${
+                      qualityMode === m ? "bg-amber-gold/10 text-amber-gold" : "text-ink-mute/50 hover:text-ink-text"
+                    }`}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* Quantize mode */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[9px] uppercase tracking-wider text-ink-mute/40">Timing</span>
+              <div className="flex rounded border border-ink-line/30">
+                {(["raw", "light", "strong"] as const).map(m => (
+                  <button
+                    key={m}
+                    onClick={() => setQuantizeMode(m)}
+                    className={`px-2 py-0.5 text-[10px] capitalize transition-colors ${
+                      quantizeMode === m ? "bg-amber-gold/10 text-amber-gold" : "text-ink-mute/50 hover:text-ink-text"
+                    }`}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
 
         {/* Idle: quick tips nudge */}
         {recState === "idle" && (
@@ -1021,6 +1329,19 @@ export function VoiceToScoreModal({
             <p className="mt-1 font-mono text-[10px] text-ink-mute/40">
               No signal — check mic permissions
             </p>
+          )}
+          {/* Input quality warnings */}
+          {recState === "recording" && inputWarnings.length > 0 && (
+            <div className="mt-1.5 flex flex-wrap gap-2">
+              {inputWarnings.map((w, i) => (
+                <span key={i} className={`font-mono text-[10px] ${
+                  w.type === "clipping" ? "text-red-400/80" :
+                  w.type === "quiet" ? "text-amber-gold/60" : "text-ink-mute/50"
+                }`}>
+                  {w.message}
+                </span>
+              ))}
+            </div>
           )}
         </div>
 
@@ -1168,8 +1489,25 @@ export function VoiceToScoreModal({
           </div>
         )}
 
-        {/* ── Piano Roll ────────────────────────────────────────────────── */}
+        {/* ── View mode tabs ────────────────────────────────────────────── */}
         {hasResults && notes.length > 0 && (
+          <div className="mb-3 flex items-center gap-1 border-b border-ink-line/20 pb-2">
+            {(["piano", "list", "staff"] as const).map(v => (
+              <button key={v} onClick={() => setViewMode(v)}
+                className={`px-3 py-1 text-[10px] uppercase tracking-wider transition-colors ${
+                  viewMode === v ? "text-amber-gold border-b border-amber-gold" : "text-ink-mute/40 hover:text-ink-text"
+                }`}>
+                {v === "piano" ? "Piano Roll" : v === "list" ? "Note List" : "Staff"}
+              </button>
+            ))}
+            <span className="ml-auto text-[9px] text-ink-mute/30">
+              Click notes to select and edit
+            </span>
+          </div>
+        )}
+
+        {/* ── Piano Roll ────────────────────────────────────────────────── */}
+        {hasResults && notes.length > 0 && viewMode === "piano" && (
           <div className="mb-6">
             <div className="mb-2 flex items-center justify-between">
               <span className="font-mono text-[10px] uppercase tracking-widest text-ink-mute/60">
@@ -1320,9 +1658,49 @@ export function VoiceToScoreModal({
           </div>
         )}
 
+        {/* ── Note editing toolbar ──────────────────────────────────────── */}
+        {hasResults && notes.length > 0 && selectedNoteId && (
+          <div className="mb-4 flex flex-wrap items-center gap-2 rounded bg-ink-surface/40 px-3 py-2">
+            <span className="text-[10px] text-ink-mute/50">Selected:</span>
+            <span className="font-mono text-xs text-amber-gold">
+              {notes.find(n => n.id === selectedNoteId)?.name ?? "—"}
+            </span>
+            <button onClick={() => editNotePitch(selectedNoteId, 1)}
+              className="rounded bg-ink-surface/60 px-2 py-0.5 text-[10px] text-ink-mute hover:text-ink-text" title="Pitch up">
+              +1
+            </button>
+            <button onClick={() => editNotePitch(selectedNoteId, -1)}
+              className="rounded bg-ink-surface/60 px-2 py-0.5 text-[10px] text-ink-mute hover:text-ink-text" title="Pitch down">
+              -1
+            </button>
+            <button onClick={() => splitNote(selectedNoteId)}
+              className="rounded bg-ink-surface/60 px-2 py-0.5 text-[10px] text-ink-mute hover:text-ink-text" title="Split note">
+              Split
+            </button>
+            <button onClick={() => mergeWithNext(selectedNoteId)}
+              className="rounded bg-ink-surface/60 px-2 py-0.5 text-[10px] text-ink-mute hover:text-ink-text" title="Merge with next">
+              Merge
+            </button>
+            <button onClick={() => deleteNote(selectedNoteId)}
+              className="rounded bg-ink-surface/60 px-2 py-0.5 text-[10px] text-red-400/70 hover:text-red-400" title="Delete note">
+              Delete
+            </button>
+            <button onClick={() => setSelectedNoteId(null)}
+              className="ml-auto text-[10px] text-ink-mute/40 hover:text-ink-mute">
+              Deselect
+            </button>
+          </div>
+        )}
+
         {/* ── Export / action row ────────────────────────────────────────── */}
         {hasResults && notes.length > 0 && (
           <div className="mb-8 flex flex-wrap gap-2">
+            <button
+              onClick={exportMidi}
+              className="border border-amber-gold/30 px-3 py-1.5 font-mono text-xs uppercase tracking-wider text-amber-gold/80 transition-colors hover:border-amber-gold hover:text-amber-gold"
+            >
+              Export MIDI
+            </button>
             <button
               onClick={exportJson}
               className="border border-ink-line/40 px-3 py-1.5 font-mono text-xs uppercase tracking-wider text-ink-mute transition-colors hover:border-amber-gold/50 hover:text-amber-gold"

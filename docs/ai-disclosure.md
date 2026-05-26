@@ -143,3 +143,25 @@ The original scaffold (created with `create-next-app`) provided only the basic N
 - **Inline highlight concept**: The decision to show rhyme highlights directly in the writing area (not just a side panel) was the author's product vision
 - **Family focus interaction**: Click-to-isolate in Sound Map was specified by the author as a needed interaction pattern
 - **Word count visibility fix**: The observation that the counter was nearly invisible and the decision to make it clearly readable was the author's
+
+---
+
+## Round 5 — Professional Polish & Feature Depth
+
+### What AI Was Used For
+
+- **Zone mirroring fix**: Correcting the Perform mode zone detection to use `1 - rawX` for display so that hand movements match on-screen zone highlights (camera is CSS-mirrored)
+- **Zone grid toggle persistence**: Adding localStorage persistence for "show zones" and "show skeleton" preferences
+- **Mobile responsive simplification**: Creating `useIsMobile` hook, hiding Perform/Trumpet buttons on mobile, adding overflow-x-auto to toolbar
+- **Voice to Score overhaul**: Quality modes (strict/balanced/sensitive), quantize grid (none/light/medium/hard), note editing (pitch shift, split, merge, delete), MIDI export, input warnings system, view mode tabs (piano/list/staff)
+- **Live Trumpet improvements**: Formant resonance filtering (3-band parallel peaks), expression dynamics (RMS→output mapping), portamento (adjustable pitch glide), delayed vibrato envelope, attack brightness burst, two-stage breath noise, "Miles Lead" preset
+- **QA: AudioContext leak fix**: Storing playback AudioContext in a ref and closing it on early stop in Voice to Score
+- **Documentation updates**
+
+### What Was Author-Designed in Round 5
+
+- **The decision to fix zone mirroring**: The author identified that zones were incorrectly mapped (moving left highlighted the right zone) and specified the fix
+- **Mobile simplification scope**: The author decided to hide performance-heavy features on mobile rather than attempting responsive layouts for camera/gesture UI
+- **Voice to Score feature set**: The author specified which editing operations (split, merge, pitch shift, delete) were needed and the quality-mode concept
+- **Trumpet synthesis direction**: The author specified that formant filtering, expression dynamics, and delayed vibrato were the key improvements needed for realism, and chose "Miles Lead" as a jazz-trumpet preset inspired by Miles Davis
+- **QA priorities**: The author identified that stuck audio and AudioContext leaks were the key reliability concerns

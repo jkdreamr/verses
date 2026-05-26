@@ -870,6 +870,12 @@ export function PerformModal({
   const [activeTab, setActiveTab] = useState<'sound' | 'chords' | 'guide'>('sound');
   const [leftHand, setLeftHand] = useState<HandState>({ gesture: null, wristX: 0.5, wristY: 0.5, present: false });
   const [rightHand, setRightHand] = useState<HandState>({ gesture: null, wristX: 0.5, wristY: 0.5, present: false });
+  const [showZoneGrid, setShowZoneGrid] = useState(() => {
+    if (typeof window === "undefined") return true;
+    const stored = localStorage.getItem("verses:showZones");
+    return stored !== null ? stored === "true" : true;
+  });
+  useEffect(() => { localStorage.setItem("verses:showZones", String(showZoneGrid)); }, [showZoneGrid]);
 
   // Hooks
   const drum = useDrumEngine(recDestNode);
@@ -983,7 +989,11 @@ export function PerformModal({
       const side = handedness[i]?.[0]?.categoryName ?? "Right";
       const gesture = detectGesture(lms);
       const wrist = lms[0];
-      const state: HandState = { gesture, wristX: wrist.x, wristY: wrist.y, present: true };
+      // Mirror X to match the CSS-mirrored video display.
+      // Raw MediaPipe x=0 is left of frame, but display shows it on the right.
+      // displayX = 1 - rawX makes zone detection match visible screen position.
+      const displayX = 1 - wrist.x;
+      const state: HandState = { gesture, wristX: displayX, wristY: wrist.y, present: true };
       // MediaPipe mirrors: "Left" in camera = user's right hand
       if (side === "Left") newRight = state;
       else newLeft = state;
@@ -1282,12 +1292,23 @@ export function PerformModal({
             </span>
           )}
         </div>
-        <button
-          onClick={onClose}
-          className="rounded px-2.5 py-1 text-[11px] text-ink-mute/50 transition-colors hover:bg-ink-surface/40 hover:text-ink-text"
-        >
-          Close
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowZoneGrid(!showZoneGrid)}
+            className={`rounded px-2 py-1 text-[10px] transition-colors ${
+              showZoneGrid ? "bg-cyan-400/10 text-cyan-400" : "text-ink-mute/40 hover:text-ink-mute/70"
+            }`}
+            title="Toggle zone grid overlay"
+          >
+            Zones
+          </button>
+          <button
+            onClick={onClose}
+            className="rounded px-2.5 py-1 text-[11px] text-ink-mute/50 transition-colors hover:bg-ink-surface/40 hover:text-ink-text"
+          >
+            Close
+          </button>
+        </div>
       </div>
 
       {/* ── Main 2-column layout: Camera (hero) + Right panel ── */}
@@ -1335,7 +1356,7 @@ export function PerformModal({
               </div>
             )}
             {/* Zone overlay indicator at bottom of camera */}
-            {camActive && (
+            {camActive && showZoneGrid && (
               <div className="absolute bottom-3 left-3 right-3 flex gap-1">
                 {[0, 1, 2, 3].map((z) => (
                   <div

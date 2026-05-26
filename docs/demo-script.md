@@ -63,7 +63,7 @@
 
 **Show the trumpet setup sub-panel:**
 
-"Trumpet preset — Trumpet Sketch. I can tune brightness and vibrato."
+"Trumpet preset — I'll pick Miles Lead for that breathy jazz tone. I can tune brightness, vibrato, portamento, and breathiness."
 
 "Headphones warning because I'm monitoring through speakers."
 
@@ -149,17 +149,35 @@
 
 ---
 
-## Part 5: Voice to Score (optional, 1 min)
+## Part 5: Voice to Score (1–2 min)
 
-"Separately, there's Voice to Score. This is for mapping out a melody."
+"Separately, there's Voice to Score. This is for mapping out a melody idea."
 
 **Open Voice to Score from toolbar.**
 
-"Hum a phrase — 4 or 5 notes."
+"I can pick a quality mode — Balanced is the default. Sensitive catches quieter notes."
+
+**Set quality mode to Balanced. Record 5s of humming.**
 
 *Record → analyze.*
 
-"YIN pitch detection, piano roll output. I can re-analyze, export the note list, or play back my original recording to compare."
+"YIN pitch detection gives me a piano roll. These notes are color-coded by confidence."
+
+**Click a note in the piano roll.**
+
+"I can select notes and edit them — pitch up/down, split, merge, delete. If it misdetected something, I fix it here rather than re-recording."
+
+**Click view mode tabs.**
+
+"Three view modes — Piano Roll, Note List for a table view, and Staff."
+
+**Click Export MIDI.**
+
+"And I can export as MIDI — drops right into a DAW for production."
+
+**Click quantize grid to 'Medium', then Re-analyze.**
+
+"The quantize grid snaps notes to rhythmic values. Medium snaps to eighth notes."
 
 ---
 

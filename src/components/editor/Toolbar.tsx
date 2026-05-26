@@ -12,6 +12,7 @@ export function Toolbar({
   onPerform,
   onVoiceScore,
   serif,
+  isMobile,
 }: {
   onInsertStructure: () => void;
   onScan: () => void;
@@ -24,10 +25,11 @@ export function Toolbar({
   onPerform: () => void;
   onVoiceScore: () => void;
   serif: boolean;
+  isMobile: boolean;
 }) {
   return (
-    <div className="fade-idle pointer-events-none fixed left-1/2 top-3 z-20 -translate-x-1/2 print:hidden">
-      <div className="pointer-events-auto flex items-center gap-1 rounded-md border border-ink-line bg-ink-surface/85 px-2 py-1 text-[11px] text-ink-mute backdrop-blur transition-colors duration-150">
+    <div className="fade-idle pointer-events-none fixed left-1/2 top-3 z-20 -translate-x-1/2 max-w-[calc(100vw-2rem)] print:hidden">
+      <div className="pointer-events-auto flex items-center gap-1 rounded-md border border-ink-line bg-ink-surface/85 px-2 py-1 text-[11px] text-ink-mute backdrop-blur transition-colors duration-150 overflow-x-auto scrollbar-hide">
         <ToolBtn onClick={onInsertStructure} title="Insert structure tag (⌘/)">
           ⌘/ tag
         </ToolBtn>
@@ -44,14 +46,18 @@ export function Toolbar({
         <ToolBtn onClick={onTakes} title="Recorded takes — audio, video, performance">
           takes
         </ToolBtn>
-        <Sep />
-        <button
-          onClick={onPerform}
-          title="New take — with gesture/trumpet/lyric follow options"
-          className="px-2.5 py-1 transition-colors duration-150 text-amber-gold hover:bg-amber-gold/10"
-        >
-          perform
-        </button>
+        {!isMobile && (
+          <>
+            <Sep />
+            <button
+              onClick={onPerform}
+              title="New take — with gesture/trumpet/lyric follow options"
+              className="px-2.5 py-1 transition-colors duration-150 text-amber-gold hover:bg-amber-gold/10"
+            >
+              perform
+            </button>
+          </>
+        )}
         <Sep />
         <ToolBtn onClick={onVoiceScore} title="Voice to Score — hum a melody">
           voice score

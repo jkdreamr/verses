@@ -267,11 +267,12 @@ type TrumpetPreset = {
 };
 
 const TRUMPET_PRESETS: TrumpetPreset[] = [
-  { name: "Trumpet Sketch",   brightness: 0.7, vibrato: 0.3, gain: 0.8 },
-  { name: "Muted Trumpet",    brightness: 0.45, vibrato: 0.15, gain: 0.7 },
-  { name: "Brass Section",    brightness: 0.85, vibrato: 0.2,  gain: 0.9 },
-  { name: "Soft Flugelhorn",  brightness: 0.35, vibrato: 0.4,  gain: 0.75 },
-  { name: "Synth Brass",      brightness: 0.9,  vibrato: 0.05, gain: 0.85 },
+  { name: "Trumpet Sketch",   brightness: 0.6, vibrato: 0.25, gain: 0.8 },
+  { name: "Muted Trumpet",    brightness: 0.2, vibrato: 0.15, gain: 0.6 },
+  { name: "Brass Section",    brightness: 0.8, vibrato: 0.2,  gain: 0.9 },
+  { name: "Soft Flugelhorn",  brightness: 0.3, vibrato: 0.35, gain: 0.7 },
+  { name: "Synth Brass",      brightness: 1.0, vibrato: 0.0,  gain: 0.85 },
+  { name: "Miles Lead",       brightness: 0.45, vibrato: 0.2, gain: 0.75 },
 ];
 
 // ─── Music utility functions ──────────────────────────────────────────────────

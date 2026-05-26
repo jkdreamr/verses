@@ -157,7 +157,16 @@ export function useHandTracking({ onGestureFrame }: UseHandTrackingConfig) {
   const [fps,              setFps]              = useState(0);
   const [swapHands,        setSwapHands]        = useState(false);
   const [showSkeleton,     setShowSkeleton]     = useState(true);
-  const [showZones,        setShowZones]        = useState(true);
+  const [showZones,        setShowZones]        = useState(() => {
+    if (typeof window === "undefined") return true;
+    const stored = localStorage.getItem("verses:showZones");
+    return stored !== null ? stored === "true" : true;
+  });
+
+  // Persist showZones preference
+  useEffect(() => {
+    localStorage.setItem("verses:showZones", String(showZones));
+  }, [showZones]);
 
   // ── Smoothing ───────────────────────────────────────────────────────────────
 
@@ -209,31 +218,44 @@ export function useHandTracking({ onGestureFrame }: UseHandTrackingConfig) {
     rightState: HandState
   ) => {
     // Zone dividers + labels
+    // The canvas is CSS-mirrored (scaleX(-1)), so we draw zones in reverse
+    // x-order so they appear correctly on screen:
+    //   display zone 0 (left of screen) = canvas x from (3/4)*w to w
+    //   display zone 3 (right of screen) = canvas x from 0 to (1/4)*w
     if (showZones) {
-      const zoneLabels = ["Z1", "Z2", "Z3", "Z4"];
+      const zoneLabels = ["1", "2", "3", "4"];
       for (let z = 0; z < 4; z++) {
-        const x = (z / 4) * w;
+        // Mirror: display zone z draws at canvas position (3-z)/4 * w
+        const canvasX = ((3 - z) / 4) * w;
+        const zoneW   = w / 4;
 
         // Determine active zone (right hand is the chord hand)
         const activeZone = rightState.present ? rightState.zone : -1;
         if (z === activeZone) {
           // Subtle amber fill for active zone
           ctx2d.fillStyle = "rgba(245, 158, 11, 0.10)";
-          ctx2d.fillRect(x, 0, w / 4, h);
+          ctx2d.fillRect(canvasX, 0, zoneW, h);
         }
 
-        // Divider line
-        ctx2d.strokeStyle = "rgba(255,255,255,0.15)";
-        ctx2d.lineWidth   = 1;
-        ctx2d.beginPath();
-        ctx2d.moveTo(x, 0);
-        ctx2d.lineTo(x, h);
-        ctx2d.stroke();
+        // Divider line (at left edge of each zone)
+        if (z > 0) {
+          ctx2d.strokeStyle = "rgba(255,255,255,0.12)";
+          ctx2d.lineWidth   = 1;
+          ctx2d.beginPath();
+          ctx2d.moveTo(canvasX + zoneW, 0);
+          ctx2d.lineTo(canvasX + zoneW, h);
+          ctx2d.stroke();
+        }
 
-        // Zone label
-        ctx2d.fillStyle = "rgba(255,255,255,0.30)";
-        ctx2d.font      = "10px monospace";
-        ctx2d.fillText(zoneLabels[z], x + 4, 14);
+        // Zone label (draw mirrored text — flip it so it reads correctly after CSS mirror)
+        ctx2d.save();
+        ctx2d.translate(canvasX + zoneW / 2, 16);
+        ctx2d.scale(-1, 1); // counter the CSS mirror
+        ctx2d.fillStyle = z === activeZone ? "rgba(245, 158, 11, 0.70)" : "rgba(255,255,255,0.30)";
+        ctx2d.font      = "bold 11px monospace";
+        ctx2d.textAlign = "center";
+        ctx2d.fillText(zoneLabels[z], 0, 0);
+        ctx2d.restore();
       }
     }
 
@@ -265,12 +287,17 @@ export function useHandTracking({ onGestureFrame }: UseHandTrackingConfig) {
         }
       }
 
-      // L/R + gesture label near wrist
+      // L/R + gesture label near wrist (flip text so it reads correctly after CSS mirror)
       const wrist = lms[0];
+      ctx2d.save();
+      ctx2d.translate(wrist.x * w + 6, wrist.y * h - 6);
+      ctx2d.scale(-1, 1); // counter the CSS mirror
       ctx2d.fillStyle = color;
       ctx2d.font      = "bold 11px monospace";
+      ctx2d.textAlign = "left";
       const gestureText = state.gesture ? state.gesture.toUpperCase() : "—";
-      ctx2d.fillText(`${label}: ${gestureText}`, wrist.x * w + 6, wrist.y * h - 6);
+      ctx2d.fillText(`${label}: ${gestureText}`, 0, 0);
+      ctx2d.restore();
     });
   }, [showSkeleton, showZones]);
 
@@ -366,11 +393,16 @@ export function useHandTracking({ onGestureFrame }: UseHandTrackingConfig) {
           if (swapHands) isRight = !isRight;
 
           const rawGesture = detectRawGesture(lms);
-          const rawX       = lms[0].x;
+          // Mirror X so zone mapping matches the mirrored video display.
+          // In raw MediaPipe coords: x=0 is left of frame, x=1 is right.
+          // But the video is CSS-mirrored (scaleX(-1)), so the user sees
+          // x=0 on the RIGHT and x=1 on the LEFT of screen.
+          // displayX = 1 - rawX makes zone 0 correspond to the left of screen.
+          const displayX   = 1 - lms[0].x;
           const rawY       = lms[0].y;
           const smooth     = updateSmooth(
             isRight ? rightSmoothRef.current : leftSmoothRef.current,
-            rawX, rawY, rawGesture
+            displayX, rawY, rawGesture
           );
 
           const state: HandState = {
