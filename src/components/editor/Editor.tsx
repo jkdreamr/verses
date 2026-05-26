@@ -19,8 +19,8 @@ import { TagsModal } from "./TagsModal";
 import { SelectionTooltip } from "./SelectionTooltip";
 import { RecorderModal } from "./RecorderModal";
 import { TakesPanel } from "./TakesPanel";
-import { LyricsOverlayModal } from "./LyricsOverlayModal";
-import { StudioModal } from "./StudioModal";
+import { PerformModal } from "./PerformModal";
+import { VoiceToScoreModal } from "./VoiceToScoreModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 const AUTOSAVE_INTERVAL_MS = 10_000;
@@ -48,10 +48,8 @@ export function Editor({ songId }: { songId: string }) {
   const [takesOpen, setTakesOpen] = useState(false);
   const [recorderOpen, setRecorderOpen] = useState(false);
   const [takesReloadKey, setTakesReloadKey] = useState(0);
-  const [lyricsOverlayTakeId, setLyricsOverlayTakeId] = useState<string | null>(
-    null
-  );
-  const [studioOpen, setStudioOpen] = useState(false);
+  const [performOpen, setPerformOpen] = useState(false);
+  const [voiceToScoreOpen, setVoiceToScoreOpen] = useState(false);
 
   const [youtube, setYoutube] = useState<YoutubeSession | null>(null);
 
@@ -493,13 +491,14 @@ export function Editor({ songId }: { songId: string }) {
         onTags={() => setTagsOpen(true)}
         onToggleFont={() => setSerif((v) => !v)}
         serif={serif}
+        onPerform={() => setPerformOpen(true)}
+        onVoiceScore={() => setVoiceToScoreOpen(true)}
       />
 
       {/* Bottom YouTube bar */}
       <YoutubeBar
         session={youtube}
         onChange={onSetYoutube}
-        onOpenStudio={() => setStudioOpen(true)}
       />
 
       {/* Right panels */}
@@ -562,7 +561,6 @@ export function Editor({ songId }: { songId: string }) {
         reloadKey={takesReloadKey}
         onClose={() => setTakesOpen(false)}
         onNewTake={() => setRecorderOpen(true)}
-        onLyricsOverlay={(id) => setLyricsOverlayTakeId(id)}
       />
 
       <RecorderModal
@@ -579,22 +577,17 @@ export function Editor({ songId }: { songId: string }) {
         }}
       />
 
-      <LyricsOverlayModal
-        open={!!lyricsOverlayTakeId}
-        takeId={lyricsOverlayTakeId}
-        lyrics={song.content}
-        onClose={() => setLyricsOverlayTakeId(null)}
-        onSaved={() => {
-          setTakesReloadKey((k) => k + 1);
-          setLyricsOverlayTakeId(null);
-        }}
+      <PerformModal
+        open={performOpen}
+        onClose={() => setPerformOpen(false)}
+        songId={song.id}
+        onTakeSaved={() => setTakesReloadKey((k) => k + 1)}
       />
 
-      <StudioModal
-        open={studioOpen}
+      <VoiceToScoreModal
+        open={voiceToScoreOpen}
+        onClose={() => setVoiceToScoreOpen(false)}
         songId={song.id}
-        songTitle={song.title}
-        onClose={() => setStudioOpen(false)}
       />
     </main>
   );

@@ -9,6 +9,8 @@ export function Toolbar({
   onExport,
   onTags,
   onToggleFont,
+  onPerform,
+  onVoiceScore,
   serif,
 }: {
   onInsertStructure: () => void;
@@ -19,11 +21,13 @@ export function Toolbar({
   onExport: () => void;
   onTags: () => void;
   onToggleFont: () => void;
+  onPerform: () => void;
+  onVoiceScore: () => void;
   serif: boolean;
 }) {
   return (
     <div className="fade-idle pointer-events-none fixed left-1/2 top-3 z-20 -translate-x-1/2 print:hidden">
-      <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-ink-line bg-ink-surface/85 px-2 py-1 text-[11px] text-ink-mute backdrop-blur transition-colors duration-150">
+      <div className="pointer-events-auto flex items-center gap-1 rounded-md border border-ink-line bg-ink-surface/85 px-2 py-1 text-[11px] text-ink-mute backdrop-blur transition-colors duration-150">
         <ToolBtn onClick={onInsertStructure} title="Insert structure tag (⌘/)">
           ⌘/ tag
         </ToolBtn>
@@ -38,6 +42,18 @@ export function Toolbar({
         <Sep />
         <ToolBtn onClick={onTakes} title="Recorded vocal takes">
           takes
+        </ToolBtn>
+        <Sep />
+        <button
+          onClick={onPerform}
+          title="Perform mode"
+          className="rounded-full px-2.5 py-1 transition-colors duration-150 text-amber-gold hover:bg-amber-gold/10"
+        >
+          perform
+        </button>
+        <Sep />
+        <ToolBtn onClick={onVoiceScore} title="Voice score">
+          voice
         </ToolBtn>
         <Sep />
         <ToolBtn onClick={onHistory} title="Version history (⌘⇧H)">
