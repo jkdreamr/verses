@@ -9,6 +9,7 @@ import type { Song, SongVersion, YoutubeSession } from "@/lib/types";
 import { useToast } from "@/components/Toast";
 import { useShortcut } from "@/hooks/useShortcut";
 import { RhymePanel } from "./RhymePanel";
+import { RhymeLens } from "./RhymeLens";
 import { Toolbar } from "./Toolbar";
 import { StructurePicker } from "./StructurePicker";
 import { YoutubeBar } from "./YoutubeBar";
@@ -39,6 +40,7 @@ export function Editor({ songId }: { songId: string }) {
   const [serif, setSerif] = useState(true);
 
   const [rhymeOpen, setRhymeOpen] = useState(false);
+  const [rhymeLensOpen, setRhymeLensOpen] = useState(false);
   const [rhymeWord, setRhymeWord] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [ocrOpen, setOcrOpen] = useState(false);
@@ -402,7 +404,14 @@ export function Editor({ songId }: { songId: string }) {
     <main
       className="relative flex min-h-screen flex-col"
       style={{
-        paddingRight: rhymeOpen || historyOpen ? "min(420px, 38vw)" : 0,
+        paddingRight:
+          (rhymeOpen || historyOpen) && rhymeLensOpen
+            ? "calc(min(420px, 38vw) + min(380px, 42vw))"
+            : rhymeOpen || historyOpen
+            ? "min(420px, 38vw)"
+            : rhymeLensOpen
+            ? "min(380px, 42vw)"
+            : 0,
         transition: "padding-right 150ms cubic-bezier(0,0,0.2,1)",
       }}
     >
@@ -570,6 +579,7 @@ export function Editor({ songId }: { songId: string }) {
         markers={youtube?.markers ?? []}
         loopStart={youtube?.loop_start ?? null}
         lyrics={song.content}
+        youtubeSession={youtube ?? null}
         onClose={() => setRecorderOpen(false)}
         onSaved={() => {
           setTakesReloadKey((k) => k + 1);
@@ -589,6 +599,12 @@ export function Editor({ songId }: { songId: string }) {
         open={voiceToScoreOpen}
         onClose={() => setVoiceToScoreOpen(false)}
         songId={song.id}
+      />
+
+      <RhymeLens
+        lyrics={song.content}
+        open={rhymeLensOpen}
+        onToggle={() => setRhymeLensOpen((v) => !v)}
       />
     </main>
   );

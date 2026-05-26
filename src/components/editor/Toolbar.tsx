@@ -40,20 +40,21 @@ export function Toolbar({
           scan
         </ToolBtn>
         <Sep />
-        <ToolBtn onClick={onTakes} title="Recorded vocal takes">
+        {/* Takes opens the takes panel; perform shortcut opens takes with record intent */}
+        <ToolBtn onClick={onTakes} title="Recorded takes — audio, video, performance">
           takes
         </ToolBtn>
         <Sep />
         <button
           onClick={onPerform}
-          title="Perform mode"
-          className="rounded-full px-2.5 py-1 transition-colors duration-150 text-amber-gold hover:bg-amber-gold/10"
+          title="New take — with gesture/trumpet/lyric follow options"
+          className="px-2.5 py-1 transition-colors duration-150 text-amber-gold hover:bg-amber-gold/10"
         >
           perform
         </button>
         <Sep />
-        <ToolBtn onClick={onVoiceScore} title="Voice score">
-          voice
+        <ToolBtn onClick={onVoiceScore} title="Voice to Score — hum a melody">
+          voice score
         </ToolBtn>
         <Sep />
         <ToolBtn onClick={onHistory} title="Version history (⌘⇧H)">
@@ -89,7 +90,7 @@ function ToolBtn({
     <button
       onClick={onClick}
       title={title}
-      className="rounded-full px-2.5 py-1 transition-colors duration-150 hover:bg-ink-line hover:text-ink-text"
+      className="px-2.5 py-1 transition-colors duration-150 hover:bg-ink-line hover:text-ink-text"
     >
       {children}
     </button>

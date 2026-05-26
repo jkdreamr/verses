@@ -1,127 +1,207 @@
-# Evaluation Plan — Verses
-
-## What Was Tested
-
-This document describes the evaluation approach, current evidence, and known limitations for Verses.
+# Verses — Evaluation Guide
 
 ## Functionality Status
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Lyric editor + autosave | Working | localStorage and Supabase both tested |
-| Rhyme finder (Datamuse) | Working | Requires network |
-| OCR scan | Working | Tesseract.js WASM in browser |
-| YouTube beat player | Working | Loop, markers, volume |
-| Vocal takes recorder | Working | Audio + video, IndexedDB |
-| Takes playback/rename/delete | Working | |
-| Perform mode - hand tracking | Working* | *Requires HTTPS or localhost for camera |
-| Perform mode - drum engine (DRUMS source) | Working | Procedural synthesis, 5 presets |
-| Perform mode - YouTube beat source | Working | Controlled via window event bridge; audio not capturable in recording |
-| Perform mode - latched transport | Working | Left open palm holds ~0.4s to latch on; fist to stop |
-| Perform mode - 8-slot chord system | Working | Open palm + zone 1-4 = slots 1-4; two fingers + zone 1-4 = slots 5-8 |
-| Perform mode - chord sustain (pinch) | Working | Sustain toggle |
-| Perform mode - recording | Working* | *Synth audio only; YouTube audio excluded by browser cross-origin policy |
-| Voice-to-Score recording | Working | Requires mic permission |
-| Voice-to-Score pitch detection (YIN) | Working* | *Best with clean monophonic input |
-| Voice-to-Score re-analyze | Working | Reprocesses same recording without re-recording |
-| Voice-to-Score playback | Working | Plays original recording for comparison |
-| Voice-to-Score piano roll | Working | Canvas-based |
-| Guest mode (no Supabase) | Working | All core features functional |
-| Dark/light theme | Working | |
+| Lyric editor + autosave | Working | 10s interval, visibilitychange flush |
+| Version history | Working | Cloud + local, 60s snapshot interval |
+| Per-word rhyme finder | Working | Datamuse API, 3 tabs, syllable groups |
+| **Rhyme Lens** | Working | Full-draft analysis, toggle bottom-left |
+| Structure tags | Working | 9 presets |
+| Export (txt/copy/print) | Working | |
+| OCR scan | Working | Tesseract.js WASM |
+| YouTube bar | Working | Load, A/B loop, markers, event bridge |
+| Takes list | Working | IndexedDB, rename/download/delete |
+| Normal audio take | Working | MediaRecorder, review-then-save |
+| Normal video take | Working | Camera + mic combined stream |
+| **Hand gesture layer** | Working | In New Take → Performance Layers |
+| **Live Trumpet layer** | Working | In New Take → Performance Layers |
+| **Gestures + Trumpet** | Working | Both layers simultaneously |
+| **Smart Lyric Follow** | Working | Web Speech API + pace/manual fallback |
+| **Playable piano** | Working | Click/touch/keyboard, octave shift |
+| Voice to Score | Working | YIN, piano roll, re-analyze, dual playback |
+| Guest mode | Working | All features work without Supabase |
 
-## Browser/Device Constraints
+---
 
-- Chrome/Edge recommended (best Web Audio + MediaRecorder support)
-- Firefox: functional, minor codec differences
-- Safari: some MediaRecorder limitations; iOS Safari may have issues with AudioContext autoplay
-- Requires HTTPS or localhost for camera/mic access
-- Tested on: Chrome 120+ (macOS), Safari 17 (macOS)
-- Mobile: editor works; Perform mode works best on desktop
+## Manual Test Checklist
 
-## Suggested User Testing Protocol
+### Writing & Rhyme Lens
 
-### Pre-session briefing
-"This is a songwriting app. I'll give you a few tasks. Think aloud as you work. There are no wrong answers — I'm testing the app, not you."
+**Test 1: Rhyme Lens toggle**
+1. Open any song, write 6+ lines with some rhyming endings (e.g., "night / light / right")
+2. Bottom-left of the editor: click **RHYME LENS**
+3. Expected: panel slides in from the right. Does not displace the editor.
+4. Expected: Summary section shows counts (end rhyme groups, internal echoes, etc.)
+5. Expected: End Rhymes section shows the rhyming group (night/light/right) with amber underline
+6. Expected: Repeated Phrases section shows any 2–4 word phrase appearing 2+ times
+7. Add more text while panel is open → analysis updates after ~0.8s pause
+8. Click toggle again → panel slides out, editor returns to full width
 
-### Tasks
+**Test 2: Per-word rhyme finder still works**
+1. Select a word in the editor
+2. Expected: "rhymes" tooltip appears above selection
+3. Click it → RhymePanel opens from the right
+4. Expected: both RhymeLens and RhymePanel can be open at the same time without overlap
 
-**Task 1: Write a lyric draft**
-- Open a new song
-- Type 4 lines of a verse
-- Highlight a word and find a rhyme
-- Time to first rhyme suggestion (target: < 10 seconds)
+---
 
-**Task 2: Start the drum loop**
-- Open Perform mode
-- Select the "Boom Bap" drum preset (DRUMS source)
-- Start the camera
-- Raise your left open palm and hold it still for about 0.4 seconds
-- Observe: the beat should start and keep looping even after the hand is lowered
-- Success: drum loop playing and continuing without the hand held up, within 20 seconds of opening Perform mode
+### New Take — Performance Layers
 
-**Task 3: Trigger chords across zones**
-- With the drum loop playing, raise your right open hand
-- Move your right hand to different horizontal positions (far left, center-left, center-right, far right)
-- Observe: the active chord slot (1–4) should change as the hand moves across the screen
-- Switch to a two-finger gesture and repeat the zone sweep to trigger slots 5–8
-- Observe: the slot grid on screen should highlight the active slot in real time
-- Success: at least 3 different slots triggered with audible chord changes and correct slot label shown
+**Test 3: Normal take (no layers)**
+1. Takes → New Take
+2. Leave Performance Layers set to "Normal"
+3. Record 5 seconds of audio
+4. Stop → review → save
+5. Expected: take appears in Takes list, plays back correctly
 
-**Task 4: Silence the chords**
-- With a chord playing, make a right fist
-- Observe: chords should go immediately silent; the UI should show a SILENCE label
-- Success: chord cuts off within one frame; SILENCE label visible
+**Test 4: Normal video take**
+1. New Take, check "record video"
+2. Record → Stop → Save
+3. Expected: take labeled "take HH:MM", has video icon in Takes list
 
-**Task 5: Record a sung melody and inspect the score**
-- Open Voice to Score
-- Click Record, grant mic permission if prompted
-- Sing a short 4-note ascending melody (e.g. C D E G)
-- Click Stop
-- View the piano roll result and note list
-- If the result looks off, click Re-analyze
-- Success: at least 2 notes correctly detected and visible on the piano roll
+**Test 5: Hand Gesture layer — basic**
+1. New Take → Performance Layers → "Hand Gestures"
+2. Expected: beat source selector (Drums/YouTube), drum preset selector, chord progression selector appear
+3. Camera section: "camera will be used for gesture tracking" note visible
+4. Set drum preset to "Trap", chord to "R&B"
+5. Click Record → grant camera+mic permissions
+6. Expected: camera feed appears with zone overlay
+7. Hold left open palm for 0.4s → beat starts and keeps looping (latch behavior)
+8. Lower hand → beat continues
+9. Hold left fist 0.4s → beat stops
+10. Right hand in zone 1 with open palm → slot 1 chord plays
+11. Right hand in zone 3 with two fingers → slot 7 chord plays
+12. Right fist → silence
+13. Stop → Save
+14. Expected: take saved, drums and chords audible in playback
 
-## Voice to Score — Manual Test Cases
+**Test 6: Hand Gesture — drums stop on close**
+1. New Take → Hand Gestures → Record
+2. Start drums (left palm hold)
+3. Click Cancel or X without stopping recording
+4. Expected: drums stop immediately, no background audio continues
 
-The following specific inputs were used during development to verify pitch detection behavior:
+**Test 7: Hand Gesture — YouTube beat source**
+1. Load a YouTube beat in the editor bar first
+2. New Take → Hand Gestures → Beat Source: "YOUTUBE BEAT"
+3. Expected: YouTube title appears, no "(no beat loaded)" warning
+4. Record → hold left palm → YouTube beat starts playing
+5. Expected: UI note about YouTube not being captured in recording
 
-| Input | Expected result |
+**Test 8: Live Trumpet layer**
+1. New Take → Performance Layers → "Live Trumpet"
+2. Expected: preset selector, brightness/vibrato/output sliders appear
+3. Expected: headphones warning visible
+4. Select "Muted Trumpet"
+5. Record → sing into mic
+6. Expected: trumpet-like sound follows pitch, stops during silence
+7. Expected: no random jumping during silence
+8. Stop → Save → play back: trumpet synth audible in recording
+
+**Test 9: Gestures + Trumpet (both layers)**
+1. New Take → "Gestures + Trumpet"
+2. Expected: compact combined monitor visible during recording
+3. Left palm → beat starts
+4. Right hand → chords
+5. Sing → trumpet follows
+6. Expected: all three layers work simultaneously without interference
+7. Stop → Save → playback includes all captured layers
+
+**Test 10: Smart Lyric Follow**
+1. Write 5+ lines of lyrics
+2. New Take → Record (any layer)
+3. Teleprompter controls: Mode = [Smart] [Pace] [Manual]
+4. If Smart: status shows "● Listening"
+5. Speak/sing lyrics clearly → expected: teleprompter advances matching lines in gold
+6. Switch to Pace → pace slider appears
+7. Switch to Manual → use ↑↓ buttons to nudge
+8. Expected: no crash if mic permission is denied for speech recognition
+9. Expected: if Smart unavailable, falls back to Pace with a status message
+
+---
+
+### Playable Piano
+
+**Test 11: Piano interaction**
+1. New Take → Hand Gestures (or Gestures + Trumpet) → Record
+2. Piano keyboard visible in center panel
+3. Click a white key → note plays, key highlights in amber
+4. Hold key → note sustains
+5. Release → note fades
+6. Click a black key → plays correct pitch
+7. Press keyboard shortcut "A" → C note plays
+8. Press "D" → E note plays
+9. Click ↑ oct → octave label advances, keys play higher notes
+10. Click ↓ oct → back to previous octave
+11. Drag across keys → each key plays as pointer enters
+12. Close modal → no stuck notes playing
+
+---
+
+### Voice to Score (standalone — still works)
+
+**Test 12: Voice to Score unchanged**
+1. Toolbar → "voice score"
+2. Record 5s of singing
+3. Expected: piano roll shows detected notes
+4. Expected: Re-analyze button works
+5. Expected: Original recording plays back
+
+---
+
+### Cleanup & Reliability
+
+**Test 13: No stuck audio after modal close**
+1. Open New Take, enable Hand Gestures
+2. Start recording, start drums, play chords
+3. Close modal (X button or Cancel)
+4. Expected: complete silence — no drums, no chords, no oscillators
+
+**Test 14: YouTube beat stops on close**
+1. Hand Gesture layer, beat source = YouTube
+2. Start recording, trigger YouTube beat via left palm
+3. Close modal
+4. Expected: YouTube beat pauses (verses:beat-pause event dispatched)
+
+---
+
+## Voice to Score Manual Test Cases
+
+| Input | Expected Result |
 |-------|----------------|
-| 4-note ascending melody (e.g. C D E G) | 4 distinct note events in ascending order |
-| One repeated note held (e.g. A4 for 2 seconds) | Single note event or near-identical consecutive notes merged |
-| Note with slight vibrato | Core pitch detected; vibrato should not fragment into multiple notes |
-| Melody with silence between notes | Notes separated cleanly; silence gaps visible in piano roll |
-| Noisy input / quiet input | Graceful degradation; low-confidence detections filtered or flagged |
+| Hum "C D E F G" (clear ascending scale) | 5 notes detected, roughly C4 D4 E4 F4 G4 |
+| Hold one note for 2 seconds | Single long note, confidence ≥ 0.7 |
+| Rest / silence for entire recording | 0 notes detected, no random garbage |
+| Fast melodic run (8th notes) | Some notes detected; short notes may be filtered |
+| Heavy vibrato on one pitch | Note detected as single pitch (merge pass working) |
+
+---
 
 ## Success Metrics
 
 | Metric | Target |
 |--------|--------|
-| Task completion rate (5 tasks) | ≥ 4/5 tasks completed without help |
-| Time to first looping beat (Task 2) | < 20 seconds |
-| Time to first saved take | < 60 seconds |
-| User rating of creative flow (1-5) | ≥ 3.5 avg |
-| Latched transport understood without explanation | ≥ 60% of users |
-| No critical errors during demo | 100% |
+| Build passes | 0 errors |
+| TypeScript strict | 0 type errors |
+| Normal take saves correctly | 100% |
+| Drums latch correctly (start, persist, stop) | Reliable in demo |
+| Drums stop on modal close | 100% |
+| No stuck chord notes | 100% |
+| Gesture zones stable (no flickering) | No visible flicker in demo |
+| Smart Lyric Follow fallback | Graceful if Speech API unavailable |
+| Trumpet follows pitch in < 200ms latency | Perceptible responsiveness |
+| Rhyme Lens detects end rhymes | Groups visible for clear rhyming pairs |
+| Piano playable without stuck notes | 100% |
 
-## Competitive Comparison
+---
 
-| Tool | Lyrics | Beat | Rhymes | Gesture | Voice Sketch | Offline | Free |
-|------|--------|------|--------|---------|--------------|---------|------|
-| Notes app | ✓ | — | — | — | — | ✓ | ✓ |
-| YouTube + Voice Memos | — | ✓ | — | — | — | partial | ✓ |
-| BandLab | ✓ | ✓ | — | — | — | — | ✓ |
-| RhymeZone | — | — | ✓ | — | — | — | ✓ |
-| GarageBand | — | ✓ | — | — | partial | ✓ | ✓ |
-| **Verses** | **✓** | **✓** | **✓** | **✓** | **✓** | **✓** | **✓** |
+## Known Limitations (Honest)
 
-The key differentiation is the combination: no other listed tool provides lyrics + beats + rhymes + gesture-based harmony in a single focused interface.
-
-## Known Limitations and Honest Assessment
-
-1. **Gesture accuracy**: Geometric gesture recognition occasionally misclassifies gestures, especially in poor lighting or when the hand is at an oblique angle to the camera. A ML-based classifier would improve this.
-2. **Pitch detection**: The YIN algorithm is more robust than basic autocorrelation, but still produces uncertain results for notes held less than 100ms, heavy vibrato, or in noisy environments.
-3. **Drum synthesis**: Procedural drums are functional but lack the warmth of sampled drums. A future version should use royalty-free sample packs.
-4. **YouTube audio gap in recordings**: Browser cross-origin restrictions prevent the YouTube player audio from being captured. This is expected behavior, not a bug, but it means a Take recorded against a YouTube beat will only contain the synth audio.
-5. **No persistence for performance sessions**: Chord mappings and drum preset selections are not persisted between sessions.
-6. **MediaPipe loading time**: First load of the hand landmarker model (~5MB) takes 2-5 seconds depending on connection.
+- **YouTube recording**: captures mic/synth/drum only, not YouTube stream directly
+- **Smart Lyric Follow**: sung lyrics harder to recognize than spoken; confidence varies
+- **Trumpet synthesis**: browser oscillator model; not studio AI
+- **Hand tracking**: ~50–100ms latency; performance degrades in poor lighting
+- **Voice to Score**: best with clean monophonic, held notes; fails on chords or noisy input
+- **MediaPipe**: may take 2–4 seconds to load model on first use

@@ -1,116 +1,165 @@
-# Verses: A Gesture-Controlled Songwriting Workbench
-
-**Track:** Application/Product + Domain-Specific Music Technology  
-**Course project, Spring 2025**
-
-## Problem Statement
-
-Songwriters constantly split their creative process across five or more apps: a notes app for lyrics, YouTube for beats, a rhyme dictionary, voice memos for melodic ideas, and a piano or DAW for harmony. Every switch costs creative momentum. The first hum of a melody, the flow-state where a hook comes together — these moments are fragile. Fragmentation breaks them.
-
-## Core Insight
-
-Most AI music tools try to generate *for* the artist. Verses takes the opposite approach. The artist stays in control. Verses gives them new *embodied* controls — their hands, their voice — for sketching musical ideas without leaving the writing environment.
-
-The thesis: **the artist's body should be the instrument.**
+# Verses — Project Overview
 
 ## What Was Built
 
-Verses is a browser-native songwriting and performance workbench. It combines:
+Verses is a browser-native songwriting and performance workbench. The core product decision is that **writing and performance are one session**, not separate apps.
 
-1. **Distraction-free lyric editor** — autosave, version history, rhyme finder (Datamuse), structure tags, OCR scan of handwritten pages
-2. **YouTube beat player** — paste a link, loop a section, drop markers, sync vocal takes to beats
-3. **Vocal takes recorder** — record audio or video takes, save them per song, rename/download/delete
-4. **Perform mode (Gesture Instrument)** — webcam hand tracking (MediaPipe) + Web Audio drum engine + chord synth. Beat source is either procedural DRUMS or a YOUTUBE beat loaded in the editor. Left hand controls transport (latched latch-on/off). Right hand triggers one of 8 mapped chord slots across two gestures and four horizontal zones.
-5. **Voice-to-Score** — record a sung melody, detect pitch via the YIN algorithm, display a piano-roll sketch of the notes with re-analyze capability
+### Writing
+- Distraction-free lyric editor with autosave, version history, and structure tags
+- Per-word rhyme finder via Datamuse (perfect, near, sounds-like)
+- **Rhyme Lens**: whole-draft analysis mode — end rhymes grouped by sound family, internal echoes, start rhymes, near/slant rhymes, repeated phrases, unrhymed lines. Toggle in the editor. Debounced, deterministic, no external API.
+- OCR: photograph handwritten lyrics, paste into editor
+- Export as text / copy / print
 
-## How It Works
+### Takes (Recording Hub)
+The New Take flow is the unified entry point for all recording and performance features. When creating a take, the user chooses a **Performance Layer**:
 
-### Lyric Editor
-Standard textarea + autosave to localStorage (guest mode) or Supabase (signed-in). Selection tooltip shows rhyme trigger. OCR via Tesseract.js runs fully in the browser.
+- **Normal** — raw mic or video+audio take with teleprompter
+- **Hand Gestures** — adds gesture-controlled drum machine and chord synth
+- **Live Trumpet** — adds real-time voice-to-brass synthesis
+- **Gestures + Trumpet** — both layers simultaneously
 
-### Gesture Instrument (Perform Mode)
+This architecture replaces the old model where Perform Mode was a disconnected separate modal.
 
-**Beat source**  
-The performer chooses between two beat sources before entering perform mode:
-- **DRUMS** — procedural synthesis using a Web Audio lookahead scheduler. Five presets (Boom Bap, Trap, R&B, House, Minimal). Runs entirely offline.
-- **YOUTUBE** — a YouTube URL loaded in the editor's bottom bar. Perform mode sends play/pause commands to the YouTube IFrame player via a `window` event bridge (`yt-transport` events), so the same beat the songwriter was listening to becomes the perform-mode beat.
+### Hand Gesture Performance Layer
+- MediaPipe Hand Landmarker (WASM, in-browser, no server)
+- **Left hand (latched transport)**: hold open palm 400ms → beat latches on; fist → stops; pinch → mutes/unmutes. Beat continues playing after hand leaves frame.
+- **Right hand (8-slot chord system)**: open palm + 4 horizontal zones → slots 1–4; two fingers + 4 zones → slots 5–8; fist = silence; pinch = sustain
+- Beat source: procedural drums (5 presets) or YouTube beat (via window event bridge)
+- Improved gesture reading: 8-frame history buffer, EMA-smoothed wrist position, zone hysteresis, per-action cooldowns
+- Camera overlay: optional zone grid, hand skeleton, gesture labels, active zone highlight
 
-**Left hand — latched transport**  
-The left hand does not play-while-held. It uses a **latched** model:
-- Raise an open palm and hold for ~0.4 seconds → beat starts and keeps looping, even after the hand is lowered
-- Make a fist → beat stops and stays stopped until re-triggered
-- Wrist height continuously controls volume; horizontal X position controls filter cutoff
+### Live Voice-to-Trumpet
+- Browser-native real-time voice transformation
+- Pitch detection (YIN / autocorrelation) on mic stream, low-latency mode
+- Multi-oscillator trumpet synthesis: saw + square layers, bandpass filter (brightness-controlled), light reverb, breath noise
+- Smooth fade-in/out (no random pitch jumps during silence)
+- 5 presets: Trumpet Sketch, Muted Trumpet, Brass Section, Soft Flugelhorn, Synth Brass
+- Captured in take recording alongside chord/drum layers
 
-This design was deliberate: hold-to-play is unmusical because any slight hand movement mid-performance would cut the beat. Latching frees both hands for expressive use.
+### Smart Lyric Follow
+- Active during any recording take
+- Three modes: Smart, Pace, Manual
+- Smart mode: Web Speech API, continuous recognition, fuzzy matching against lyric lines, forward-only advance
+- Graceful fallback to Pace if speech recognition unavailable or low confidence
+- Manual up/down nudge always available
 
-**Right hand — 8-slot chord system**  
-Eight chord slots are arranged across two gesture types and four horizontal screen zones:
-- Open palm + zone 1–4 → slots 1–4
-- Two fingers + zone 1–4 → slots 5–8
-- Fist → silence (releases all chords immediately)
-- Pinch → sustain toggle (holds the current chord even as gesture changes)
+### Playable Piano
+- Interactive keyboard in the performance view of New Take
+- Click/touch/keyboard to play notes (A-J = white keys, W E T Y U = black keys)
+- Octave shift up/down with range label
+- Active notes highlighted in amber
+- No stuck notes on blur, pointer cancel, or modal close
 
-Each slot can be assigned any chord: root, quality, octave, inversion. The zone boundaries are visible on-screen, and the active slot is highlighted as the hand moves.
+### Voice to Score (standalone)
+- Record a hummed melody, analyze with YIN pitch detection
+- Piano roll canvas with confidence coloring
+- Re-analyze button, original-recording playback, JSON/text export
 
-**Synthesis**  
-All audio synthesis uses Web Audio API: procedural drum sounds (oscillator + noise + ADSR envelope per drum voice), layered chord oscillators with LPF and amplitude envelope. Mixed audio is recorded to a Take using MediaStreamDestination + MediaRecorder.
+### Beats (YouTube Bar)
+- Paste any YouTube URL to play in the bottom bar
+- A/B loop, named markers, keyboard shortcut (⌘P)
+- Window event bridge for control from performance layers
 
-> **Note:** When beat source is YOUTUBE, browser cross-origin restrictions prevent the YouTube audio stream from being mixed into the MediaRecorder output. Only synthesized (drum/chord) audio is captured in recordings. This is a known browser limitation.
+---
 
-### Voice-to-Score
-- Microphone input captured via Web Audio API AnalyserNode
-- Pitch detection uses the **YIN algorithm** — a time-domain fundamental frequency estimator that is more robust than basic autocorrelation for singing, particularly for notes with slight vibrato or softer attacks
-- Frequency mapped to MIDI note number, quantized, and merged into note events with smoothing to suppress micro-fluctuations
-- Result displayed as a piano-roll canvas with labeled note names (C4, D#4, etc.)
-- **Re-analyze** button allows reprocessing the same raw recording without re-recording
-- Original recording can be played back for comparison with the piano roll
+## Architecture
 
-## Technical Architecture
+### How It Works
 
+#### Recording Hub (RecorderModal)
+RecorderModal owns the recording session. All performance hooks are initialized inside it and route their audio to a shared `MediaStreamDestinationNode`. The final take blob includes the mixed audio from:
+- Raw microphone
+- Chord synth output (if hand layer active)
+- Drum output (if hand layer + drums selected)
+- Trumpet synth output (if trumpet layer active)
+- Camera video track (if record video is checked)
+
+YouTube audio is not capturable due to browser cross-origin restrictions. This is documented clearly in the UI.
+
+#### Latched Transport State Machine
 ```
-Browser (Next.js 14, React 18, TypeScript, Tailwind)
-├── lib/storage.ts          localStorage for guest songs + sessions
-├── lib/takes.ts            IndexedDB for vocal takes (audio/video blobs)
-├── lib/supabase/           Supabase client for authenticated users
-├── components/editor/
-│   ├── Editor.tsx          Main editor orchestrator
-│   ├── YoutubeBar.tsx      YouTube IFrame player + loop controls
-│   │                         (dispatches + listens to window 'yt-transport' events)
-│   ├── RecorderModal.tsx   Vocal take recorder
-│   ├── TakesPanel.tsx      Takes list + playback
-│   ├── PerformModal.tsx    Gesture instrument (MediaPipe + Web Audio)
-│   │                         (listens to 'yt-transport' events for YouTube beat mode)
-│   ├── VoiceToScoreModal.tsx  YIN pitch detection + piano roll + re-analyze
-│   └── ...                 Other panels (rhymes, history, OCR, export)
-└── External
-    ├── Datamuse API         Rhyme suggestions (no key required)
-    ├── Tesseract.js         OCR (runs in browser WASM)
-    ├── MediaPipe            Hand landmark detection (WASM in browser)
-    └── YouTube IFrame API   Beat playback (controlled via window event bridge)
+stopped → (hold open palm 400ms) → playing → (hold fist 400ms) → stopped
+playing → (hold pinch 400ms) → muted → (hold pinch 400ms) → playing
+```
+Beat state persists independently of hand presence.
+
+#### Zone-Based Chord System
+Right-hand wrist X position → zone 0–3 (with hysteresis).
+```
+open palm: zone → slot 1/2/3/4
+two fingers: zone → slot 5/6/7/8
+fist: silence
+```
+Zone transitions use a committed-zone ref that only updates when movement > 0.08 units.
+
+#### Gesture Stability
+Each hand maintains an 8-frame history buffer. A gesture is only "committed" when it appears in 5 of the last 8 frames. This eliminates single-frame misdetections and prevents chord spamming.
+
+#### Audio Routing Architecture
+```
+Mic stream
+  ├→ AnalyserNode (level meter)
+  ├→ AnalyserNode (pitch detection → trumpet synth → recDest)
+  └→ MediaStreamSource → (if rawVoice enabled) → recDest
+
+Drum engine → masterGain → compressor → recDest
+Chord synth → reverb → recDest
+
+recDest.stream + [camera videoTrack] → MediaRecorder → blob → IndexedDB
 ```
 
-## Why This Is Original
+#### File Structure (key components)
+```
+src/
+  components/editor/
+    RecorderModal.tsx     — unified recording + performance hub
+    PerformModal.tsx      — thin wrapper, redirects to RecorderModal
+    RhymeLens.tsx         — whole-draft rhyme analysis panel
+    PlayablePiano.tsx     — interactive keyboard component
+    VoiceToScoreModal.tsx — standalone melody transcription
+    YoutubeBar.tsx        — YouTube player + window event bridge
+    TakesPanel.tsx        — takes list / playback
+    Editor.tsx            — main orchestrator
+  hooks/
+    perform/
+      useDrumEngine.ts    — drum machine hook
+      useChordSynth.ts    — chord synth hook
+      useHandTracking.ts  — MediaPipe gesture tracking hook
+      useLiveTrumpet.ts   — real-time trumpet synthesis hook
+      index.ts            — barrel exports
+```
 
-Most "AI songwriting" tools generate lyrics or melodies automatically. Verses is explicitly anti-generative. It is a *craft* tool. The gesture-controlled performance mode is unusual: using hand tracking not for VR/gaming but as a musical performance interface inside a writing app. The latched transport model and zone-based 8-chord system make gesture performance genuinely musical rather than a tech demo — a performer can have both hands expressive at the same time without fighting the interface.
+---
 
-The Voice-to-Score feature addresses a real gap: a songwriter who hums an idea into their phone typically loses the melodic data. Verses gives a rough transcription sketch immediately, in the same environment where the lyrics live.
+## YouTube Recording Limitation
+
+When the beat source is set to YouTube, browser security restrictions (cross-origin isolation, CORS on media elements) prevent the YouTube audio from being routed into the MediaRecorder pipeline. The take recording captures:
+- The user's voice/mic
+- The synthesized chord and drum audio
+- The trumpet synthesis output
+
+The YouTube audio plays through the device speakers and is only included in the recording if the user's microphone picks it up from the room — similar to how a phone recording in a studio captures the room sound.
+
+This is not a bug. The UI labels this clearly.
+
+---
 
 ## Limitations
 
-- **Gesture latency**: MediaPipe runs at ~15-30fps in the browser; there is inherent latency in hand tracking (~50-100ms)
-- **Pitch detection accuracy**: The YIN algorithm handles vibrato better than autocorrelation, but still struggles with heavy noise, polyphonic input, or very short notes (<100ms)
-- **Drum sounds**: Fully procedural (no samples); the sounds are functional but lack the character of real recorded drums
-- **YouTube recording gap**: Cross-origin restrictions prevent YouTube audio from being captured in Takes; only synthesized audio records
-- **Audio recording quality**: Web Audio API recording quality depends on the browser and platform
-- **No MIDI export**: Chord mappings and note data are stored as JSON only; MIDI export was not implemented in this version
-- **Guest mode only for some features**: Perform mode and Voice-to-Score are client-only and don't sync to cloud
-- **Mobile**: The perform mode requires a full camera setup and works best on desktop
+- **YouTube recording**: see above
+- **Smart Lyric Follow**: sung words are harder to transcribe than spoken; the feature is best-effort, with pace/manual fallback
+- **Trumpet synthesis**: browser-native multi-oscillator model; not a studio AI voice model
+- **Hand tracking**: best in Chrome desktop, 50–100ms latency typical
+- **Pitch detection**: works best with clean monophonic vocals
+- **Mobile**: editor works; performance layers not optimized for mobile
+
+---
 
 ## Future Work
 
-- MIDI output for the chord synth (connect to external hardware or DAW via WebMIDI API)
-- Sample-based drum engine with royalty-free samples
-- Export chord progression as notation or MIDI
-- Collaborative session sharing
-- Mobile-optimized gesture UI (using front camera)
-- Deeper Supabase integration for takes and performance sessions
+- MIDI keyboard input
+- Sample-based drum sounds (vs. procedural)
+- Export chord progressions to MIDI
+- Supabase-backed take storage (sync across devices)
+- Offline PWA with service worker

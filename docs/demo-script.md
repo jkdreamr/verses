@@ -1,111 +1,180 @@
-# Demo Script — Verses (3-5 minutes)
+# Verses — Demo Script
 
-## Setup
-
-Before the demo:
-- Open Verses in Chrome on localhost or deployed URL
-- Have a song open with a few lines typed
-- Camera and mic permissions pre-granted
-- Perform mode tested and working
-- Either a YouTube beat URL ready to paste, or Boom Bap confirmed working
+## Setup (before demo)
+- Open a song with at least 8 lines of lyrics (chorus + verse)
+- Load a YouTube beat in the bottom bar
+- Have the app in dark mode (default)
+- Use Chrome on desktop for gesture features
+- Have headphones ready (or use speakers for demo — trumpet will be louder)
 
 ---
 
-## Q1: Why did you build this?
+## Part 1: Writing + Rhyme Lens (2 min)
 
-"I'm a musician, and my songwriting process is scattered. I write lyrics in Notes, find beats on YouTube in a separate tab, use RhymeZone in another tab, hum ideas into Voice Memos, and then a week later I have fragments everywhere but no real song.
+**Open the song. Show the editor.**
 
-The problem isn't talent or time. It's friction. Every app switch costs me momentum. The moment where a hook comes together is fragile — if I stop to open a different app, I often lose the thread.
+"This is the writing view. Clean, distraction-free. Just the lyrics and the tools you need."
 
-So I wanted to build one focused environment where I could keep the early creative moment intact. Write the lyric, hear the beat, sketch the harmony, capture the melody — without ever leaving the page."
+**Highlight a word, click Rhymes tooltip.**
 
-## Q2: How exactly does it work?
+"If you want rhyme options for any word, just select it."
 
-**[Show the editor]**
-"This is the writing surface. Intentionally minimal — autosave, version history, a rhyme finder. Highlight a word, the rhymes float up. You can paste a YouTube link at the bottom and it plays under your writing while you're still on the page."
+**Show the RhymePanel with perfect/near/sounds-like tabs.**
 
-**[Show vocal takes briefly]**
-"You can record a raw vocal idea — audio or video — and it saves directly to the song. No mixing, no cloud upload. Just a take."
+"But that's single-word lookup. What if you want to understand the whole draft?"
 
-**[Open Perform mode]**
-"This is the part I want to show you. Perform mode. I'll click Start Camera."
+**Click RHYME LENS (bottom-left of editor).**
 
-*[Click Start Camera, wait for hand skeleton to appear]*
+"Rhyme Lens analyzes the entire lyric at once."
 
-"Now MediaPipe is tracking my hands in real-time — 21 landmark points per hand, 30 frames per second, running entirely in the browser.
+**Point to the panel sections:**
 
-For the beat, I can either use a YouTube URL I already have open — the beat from the editor carries over — or I can just pick a drum preset. I'll use Boom Bap."
+"End rhyme groups — these lines rhyme at the end. Internal echoes — sound patterns inside lines. Repeated phrases — which could be your hook. Unrhymed lines — lines that might need work."
 
-**[Raise left open palm, hold for ~0.4s → beat starts]**
+"It's purely local analysis. Nothing leaves the browser. It updates as you type."
 
-"I raise my left open palm and hold it for about half a second. The beat latches on — it's going to keep looping now even when I put my hand down."
-
-*[Lower hand]*
-
-"See — hand is down. Beat is still going. That's intentional. If it only played while I held my hand up, I couldn't use both hands freely. The latch frees me up."
-
-**[Make right fist → silence, then raise open palm to re-latch]**
-
-"Left fist stops it. Open palm again — latches back on."
-
-**[Use right open hand in different horizontal zones]**
-
-"Now my right hand controls chords. I've got 8 chord slots mapped. With an open hand, moving left to right across the frame, I'm hitting slots 1 through 4."
-
-*[Move right hand slowly across zones, show slot grid updating]*
-
-"Watch the slot grid — it's tracking which zone my hand is in. Each zone is a different chord."
-
-**[Switch to two-finger gesture, sweep zones]**
-
-"Two fingers gets me slots 5 through 8. Same zone logic, different gesture. So I've got eight chords total across just two hand shapes."
-
-**[Make right fist]**
-
-"Fist cuts everything. Immediate silence."
-
-*[Show SILENCE label on screen]*
-
-"And pinch is a sustain toggle — holds the chord even if I change my hand shape."
-
-**[Hit Record, perform a short phrase, stop]**
-
-"I'll hit Record and do a quick pass."
-
-*[Perform 15–20 seconds: latch beat, play through a few chord slots]*
-
-"Stop. And I can save that as a Take — it lives in this song."
-
-**[Close Perform, open Voice to Score]**
-
-"The other piece is Voice to Score. Let me show you."
-
-*[Open Voice to Score, click Record, sing a 4-note melody, click Stop]*
-
-"I just sang four notes. The app ran YIN pitch detection — a proper fundamental frequency algorithm — and here's the piano roll."
-
-*[Show piano roll with note names]*
-
-"Each block is a note: name, start time, duration. If the result looks off I can hit Re-analyze and it'll reprocess the same recording — I don't have to sing again. And I can play the original audio back to compare."
-
-*[Play back original recording if result is good]*
-
-"It's not sheet music. It's a melody sketch. But that's the right thing for this stage of writing — you just want to know the shape of the idea."
-
-## Q3: What's the point of all this?
-
-"The app keeps you in control. It doesn't generate music for you. Your hands, your voice, your song. Verses just removes the friction between the idea and the capture.
-
-There's also an accessibility angle I find interesting — the gesture instrument means someone who doesn't play piano can still explore harmony physically. Move your hand, find a chord that feels right to the lyric."
-
-## Q4: What would you add?
-
-"MIDI output is the obvious next step — same gestures, but triggering any external synth or DAW via WebMIDI. That would make it genuinely useful in a production workflow, not just for sketching.
-
-Sample-based drums are something I want too. The procedural sounds work, but they lack character.
-
-And honestly — I'd want more people to use it and break it. The core idea feels right. The execution is early."
+**Close the panel.** "Let me keep writing. It stays out of the way."
 
 ---
 
-*End of demo. Total time: approximately 3-4 minutes.*
+## Part 2: New Take — Setup (2 min)
+
+**Click takes → New Take.**
+
+"In Verses, Perform Mode isn't a separate app. It's part of how you record a take."
+
+**Point to Performance Layers section.**
+
+"When I open a new take, I choose how much of the performance system to turn on."
+
+**Click "Gestures + Trumpet".**
+
+"I'm enabling both hand gestures and live trumpet."
+
+**Show the gesture setup sub-panel:**
+
+"Beat source — I'll use Drum Preset for now. Boom Bap at 88 BPM. Chord progression — I'll use R&B."
+
+**Show the trumpet setup sub-panel:**
+
+"Trumpet preset — Trumpet Sketch. I can tune brightness and vibrato."
+
+"Headphones warning because I'm monitoring through speakers."
+
+**Check "record video".**
+
+"I'll record video so the hand tracking is visible in the take."
+
+---
+
+## Part 3: Recording (3–4 min)
+
+**Click Record. Grant permissions.**
+
+"One permission prompt for camera and mic."
+
+**Show the camera feed with zone overlay.**
+
+"Four zones on the right side of the camera. Those are my chord zones."
+
+**Raise left hand, open palm, hold.**
+
+"Hold open palm. The beat latches on."
+
+*Beat starts and keeps playing.*
+
+"My hand is down. Beat is still going. That's the latch — I triggered it once, it loops until I stop it."
+
+**Move right hand across zones with open palm.**
+
+"Right hand, open palm — I'm sweeping through the chord slots. Each zone is a different chord."
+
+**Switch to two-finger gesture.**
+
+"Two fingers activates slots 5 through 8. Different chords."
+
+**Make right fist.**
+
+"Fist — silence. No chord."
+
+**Start singing.**
+
+"Now I'm singing into the mic. Listen."
+
+*Trumpet sound follows voice.*
+
+"That's the trumpet synthesis following my pitch in real time. When I stop singing, it fades out. When I start again, it comes back."
+
+**Point to teleprompter.**
+
+"The teleprompter is in Smart Lyric Follow mode. It's listening to what I sing and trying to match it to the lines. It's not perfect — sung words are harder than spoken — but it moves forward as I go. I can also nudge it manually."
+
+**Play some chords while the beat runs.**
+
+"So I have a looping beat, I'm controlling the harmonic content with my right hand, and the melody is being transformed live."
+
+**Click the piano keyboard.**
+
+"I can also click the piano to audition individual notes — or to preview what a chord root sounds like before I assign it."
+
+**Make left fist, hold.**
+
+"Fist to stop the beat."
+
+*Beat stops.*
+
+**Click Stop recording.**
+
+---
+
+## Part 4: Save and Review (1 min)
+
+**Review screen appears.**
+
+"The take is captured. Everything mixed together — drums, chords, trumpet — minus the YouTube audio which can't be routed for browser security reasons. The label auto-suggests 'gesture + trumpet take 12:40'."
+
+**Save the take.**
+
+**Show TakesPanel with the new take.**
+
+"There it is. Play it back."
+
+*Playback of the take — drums/chords/trumpet audible.*
+
+---
+
+## Part 5: Voice to Score (optional, 1 min)
+
+"Separately, there's Voice to Score. This is for mapping out a melody."
+
+**Open Voice to Score from toolbar.**
+
+"Hum a phrase — 4 or 5 notes."
+
+*Record → analyze.*
+
+"YIN pitch detection, piano roll output. I can re-analyze, export the note list, or play back my original recording to compare."
+
+---
+
+## Closing
+
+"The app keeps you in control. It doesn't generate music for you. Your hands, your voice, your song."
+
+"Writing, performing, and recording are one session — not three separate tools."
+
+---
+
+## Q&A Prep
+
+**Q: Does this use AI for the music?**
+A: No. The drum machine is procedural synthesis. The chord synth is a standard oscillator stack. The trumpet is a multi-oscillator Web Audio model that follows your pitch. The only "smart" things are gesture recognition (MediaPipe, runs locally) and the rhyme analysis (local phonetic matching).
+
+**Q: Why can't you record the YouTube audio?**
+A: Browser security restrictions prevent capturing audio from cross-origin iframes like YouTube. The take captures everything synthesized in the browser — drums, chords, trumpet — plus whatever your mic picks up from the room. This is documented and not hidden.
+
+**Q: Does it work offline?**
+A: The editor works fully offline. MediaPipe downloads its model once from a CDN on first use. YouTube requires network access. Datamuse rhyme lookup requires network.
+
+**Q: Future work?**
+A: MIDI keyboard input, sample-based drums, export chord progressions to MIDI, Supabase-backed take sync across devices.
