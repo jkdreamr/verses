@@ -11,10 +11,20 @@ import { Modal } from "@/components/Modal";
 import { useToast } from "@/components/Toast";
 import { takesStore, newTakeId, formatBytes, formatDuration } from "@/lib/takes";
 import type { Take, YoutubeMarker } from "@/lib/types";
+import { DRUM_PRESETS, useDrumEngine } from "@/hooks/perform/useDrumEngine";
+import {
+  NOTE_NAMES,
+  SLOT_PRESETS,
+  chordLabel,
+  createReverb,
+  useChordSynth,
+} from "@/hooks/perform/useChordSynth";
+import type { ChordSlot } from "@/hooks/perform/useChordSynth";
+import { useIsMobile } from "@/hooks/useIsMobile";
 
 // ─── Recording state ──────────────────────────────────────────────────────────
 
-type RecState = "idle" | "preparing" | "recording" | "review";
+type RecState = "idle" | "preparing" | "recording" | "paused" | "review";
 type PerformLayer = "none" | "hand" | "trumpet" | "both";
 type LyricFollowMode = "smart" | "pace" | "manual";
 
@@ -83,30 +93,9 @@ const splitLyricLines = (lyrics: string): string[] =>
 const normalizeLine = (s: string): string =>
   s.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
 
-// ─── Music / chord types ──────────────────────────────────────────────────────
+// ─── Local types ──────────────────────────────────────────────────────────────
 
 type GestureId = "open" | "pinch" | "two" | "fist" | "point";
-
-type DrumPreset = {
-  name: string;
-  bpm: number;
-  swing: number;
-  pattern: { kick: number[]; snare: number[]; hihat: number[]; perc: number[] };
-  levels: { kick: number; snare: number; hihat: number; perc: number };
-  description: string;
-};
-
-type ChordQuality =
-  | "major" | "minor" | "maj7" | "min7" | "dom7"
-  | "sus2" | "sus4" | "dim" | "aug" | "add9" | "6" | "min6";
-
-type ChordSlot = {
-  slot: number;
-  root: string;
-  quality: ChordQuality;
-  octave: number;
-  inversion: "root" | "first" | "second";
-};
 
 type HandState = {
   gesture: GestureId | null;
@@ -120,142 +109,16 @@ type HandState = {
 const LATCH_HOLD_MS = 400;
 const LATCH_COOLDOWN_MS = 800;
 
-// ─── Drum presets ─────────────────────────────────────────────────────────────
 
-const DRUM_PRESETS: DrumPreset[] = [
-  {
-    name: "Boom Bap",
-    bpm: 88,
-    swing: 0.55,
-    pattern: {
-      kick:  [1,0,0,0,0,0,1,0,0,1,0,0,0,0,0,0],
-      snare: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],
-      hihat: [1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0],
-      perc:  [0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0],
-    },
-    levels: { kick: 0.9, snare: 0.75, hihat: 0.5, perc: 0.45 },
-    description: "Hip-hop groove w/ swing",
-  },
-  {
-    name: "Trap",
-    bpm: 140,
-    swing: 0.1,
-    pattern: {
-      kick:  [1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
-      snare: [0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
-      hihat: [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
-      perc:  [0,0,1,0,0,0,0,1,0,0,1,0,0,0,1,0],
-    },
-    levels: { kick: 0.95, snare: 0.8, hihat: 0.25, perc: 0.5 },
-    description: "Hard trap, rolling hihat",
-  },
-  {
-    name: "R&B",
-    bpm: 72,
-    swing: 0.4,
-    pattern: {
-      kick:  [1,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0],
-      snare: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],
-      hihat: [1,0,0,1,0,0,1,0,0,1,0,0,1,0,0,0],
-      perc:  [0,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0],
-    },
-    levels: { kick: 0.85, snare: 0.7, hihat: 0.45, perc: 0.5 },
-    description: "Smooth R&B pocket",
-  },
-  {
-    name: "House",
-    bpm: 120,
-    swing: 0,
-    pattern: {
-      kick:  [1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0],
-      snare: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],
-      hihat: [0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0],
-      perc:  [0,1,0,0,0,0,0,1,0,0,0,0,0,1,0,0],
-    },
-    levels: { kick: 0.9, snare: 0.7, hihat: 0.5, perc: 0.45 },
-    description: "Four-on-floor house",
-  },
-  {
-    name: "Minimal",
-    bpm: 100,
-    swing: 0,
-    pattern: {
-      kick:  [1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
-      snare: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],
-      hihat: [1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0],
-      perc:  [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-    },
-    levels: { kick: 0.85, snare: 0.65, hihat: 0.4, perc: 0 },
-    description: "Sparse, clean groove",
-  },
-];
+// ─── Local music helpers (used by inline trumpet synth) ──────────────────────
 
-// ─── Chord slot presets ───────────────────────────────────────────────────────
-
-const NOTE_NAMES = ["C","C#","D","Eb","E","F","F#","G","Ab","A","Bb","B"];
-
-const SLOT_PRESETS: Record<string, ChordSlot[]> = {
-  Pop: [
-    { slot:1, root:"C",  quality:"major", octave:4, inversion:"root" },
-    { slot:2, root:"G",  quality:"major", octave:4, inversion:"root" },
-    { slot:3, root:"A",  quality:"minor", octave:4, inversion:"root" },
-    { slot:4, root:"F",  quality:"major", octave:4, inversion:"root" },
-    { slot:5, root:"E",  quality:"minor", octave:4, inversion:"root" },
-    { slot:6, root:"D",  quality:"minor", octave:4, inversion:"root" },
-    { slot:7, root:"F",  quality:"maj7",  octave:4, inversion:"root" },
-    { slot:8, root:"G",  quality:"sus4",  octave:4, inversion:"root" },
-  ],
-  "R&B": [
-    { slot:1, root:"F",  quality:"maj7",  octave:4, inversion:"root" },
-    { slot:2, root:"G",  quality:"min7",  octave:4, inversion:"root" },
-    { slot:3, root:"A",  quality:"min7",  octave:4, inversion:"root" },
-    { slot:4, root:"C",  quality:"dom7",  octave:4, inversion:"root" },
-    { slot:5, root:"D",  quality:"min7",  octave:4, inversion:"root" },
-    { slot:6, root:"E",  quality:"min7",  octave:4, inversion:"root" },
-    { slot:7, root:"Bb", quality:"maj7",  octave:4, inversion:"root" },
-    { slot:8, root:"C",  quality:"dom7",  octave:5, inversion:"root" },
-  ],
-  Sad: [
-    { slot:1, root:"A",  quality:"minor", octave:4, inversion:"root" },
-    { slot:2, root:"F",  quality:"major", octave:4, inversion:"root" },
-    { slot:3, root:"C",  quality:"major", octave:4, inversion:"root" },
-    { slot:4, root:"G",  quality:"major", octave:4, inversion:"root" },
-    { slot:5, root:"D",  quality:"minor", octave:4, inversion:"root" },
-    { slot:6, root:"E",  quality:"minor", octave:4, inversion:"root" },
-    { slot:7, root:"F",  quality:"maj7",  octave:4, inversion:"root" },
-    { slot:8, root:"G",  quality:"sus4",  octave:4, inversion:"root" },
-  ],
-  Jazz: [
-    { slot:1, root:"D",  quality:"min7",  octave:4, inversion:"root" },
-    { slot:2, root:"G",  quality:"dom7",  octave:4, inversion:"root" },
-    { slot:3, root:"C",  quality:"maj7",  octave:4, inversion:"root" },
-    { slot:4, root:"A",  quality:"min7",  octave:4, inversion:"root" },
-    { slot:5, root:"F",  quality:"maj7",  octave:4, inversion:"root" },
-    { slot:6, root:"B",  quality:"min7",  octave:4, inversion:"root" },
-    { slot:7, root:"E",  quality:"dom7",  octave:4, inversion:"root" },
-    { slot:8, root:"A",  quality:"min7",  octave:5, inversion:"root" },
-  ],
-  "Trap Dark": [
-    { slot:1, root:"C",  quality:"minor", octave:4, inversion:"root" },
-    { slot:2, root:"Ab", quality:"major", octave:4, inversion:"root" },
-    { slot:3, root:"Eb", quality:"major", octave:4, inversion:"root" },
-    { slot:4, root:"Bb", quality:"minor", octave:4, inversion:"root" },
-    { slot:5, root:"F",  quality:"minor", octave:4, inversion:"root" },
-    { slot:6, root:"G",  quality:"minor", octave:4, inversion:"root" },
-    { slot:7, root:"Db", quality:"major", octave:4, inversion:"root" },
-    { slot:8, root:"G",  quality:"dom7",  octave:4, inversion:"root" },
-  ],
-  Gospel: [
-    { slot:1, root:"C",  quality:"maj7",  octave:4, inversion:"root" },
-    { slot:2, root:"D",  quality:"min7",  octave:4, inversion:"root" },
-    { slot:3, root:"E",  quality:"min7",  octave:4, inversion:"root" },
-    { slot:4, root:"F",  quality:"maj7",  octave:4, inversion:"root" },
-    { slot:5, root:"G",  quality:"dom7",  octave:4, inversion:"root" },
-    { slot:6, root:"A",  quality:"min7",  octave:4, inversion:"root" },
-    { slot:7, root:"D",  quality:"dom7",  octave:4, inversion:"root" },
-    { slot:8, root:"G",  quality:"sus4",  octave:4, inversion:"root" },
-  ],
-};
+function freqToNoteName(freq: number): string {
+  if (freq <= 0) return "--";
+  const midi = Math.round(69 + 12 * Math.log2(freq / 440));
+  const name = NOTE_NAMES[((midi % 12) + 12) % 12];
+  const oct = Math.floor(midi / 12) - 1;
+  return `${name}${oct}`;
+}
 
 // ─── Trumpet presets ──────────────────────────────────────────────────────────
 
@@ -274,404 +137,6 @@ const TRUMPET_PRESETS: TrumpetPreset[] = [
   { name: "Synth Brass",      brightness: 1.0, vibrato: 0.0,  gain: 0.85 },
   { name: "Miles Lead",       brightness: 0.45, vibrato: 0.2, gain: 0.75 },
 ];
-
-// ─── Music utility functions ──────────────────────────────────────────────────
-
-function noteNameToMidi(name: string, octave: number): number {
-  const idx = NOTE_NAMES.indexOf(name);
-  if (idx === -1) return 60;
-  return 12 * (octave + 1) + idx;
-}
-
-function midiToFreq(midi: number): number {
-  return 440 * Math.pow(2, (midi - 69) / 12);
-}
-
-function freqToNoteName(freq: number): string {
-  if (freq <= 0) return "--";
-  const midi = Math.round(69 + 12 * Math.log2(freq / 440));
-  const name = NOTE_NAMES[((midi % 12) + 12) % 12];
-  const oct = Math.floor(midi / 12) - 1;
-  return `${name}${oct}`;
-}
-
-function chordIntervals(quality: ChordQuality): number[] {
-  switch (quality) {
-    case "major": return [0, 4, 7];
-    case "minor": return [0, 3, 7];
-    case "maj7":  return [0, 4, 7, 11];
-    case "min7":  return [0, 3, 7, 10];
-    case "dom7":  return [0, 4, 7, 10];
-    case "sus2":  return [0, 2, 7];
-    case "sus4":  return [0, 5, 7];
-    case "dim":   return [0, 3, 6];
-    case "aug":   return [0, 4, 8];
-    case "add9":  return [0, 4, 7, 14];
-    case "6":     return [0, 4, 7, 9];
-    case "min6":  return [0, 3, 7, 9];
-  }
-}
-
-function safeExp(ratio: number): number {
-  return Math.max(0.0001, ratio);
-}
-
-function chordFrequencies(
-  root: string,
-  octave: number,
-  quality: ChordQuality,
-  inversion: "root" | "first" | "second"
-): number[] {
-  const baseMidi = noteNameToMidi(root, octave);
-  const intervals = chordIntervals(quality);
-  let notes = intervals.map((i) => baseMidi + i);
-  if (inversion === "first" && notes.length > 1) {
-    notes = [...notes.slice(1), notes[0] + 12];
-  } else if (inversion === "second" && notes.length > 2) {
-    notes = [...notes.slice(2), notes[0] + 12, notes[1] + 12];
-  }
-  return notes.map(midiToFreq);
-}
-
-function chordMidiNotes(root: string, octave: number, quality: ChordQuality): number[] {
-  const baseMidi = noteNameToMidi(root, octave);
-  return chordIntervals(quality).map((i) => baseMidi + i);
-}
-
-function chordLabel(root: string, quality: ChordQuality): string {
-  const suffixes: Record<ChordQuality, string> = {
-    major: "", minor: "m", maj7: "maj7", min7: "m7",
-    dom7: "7", sus2: "sus2", sus4: "sus4", dim: "°",
-    aug: "aug", add9: "add9", 6: "6", min6: "m6",
-  };
-  return root + suffixes[quality];
-}
-
-// ─── Reverb helper ────────────────────────────────────────────────────────────
-
-function createReverb(
-  ctx: AudioContext,
-  wet: number
-): { input: GainNode; output: GainNode } {
-  const input = ctx.createGain();
-  const dryGain = ctx.createGain();
-  const wetGain = ctx.createGain();
-  const output = ctx.createGain();
-  dryGain.gain.value = 1 - wet;
-  wetGain.gain.value = wet;
-  const sampleRate = ctx.sampleRate;
-  const length = sampleRate * 2.0;
-  const impulse = ctx.createBuffer(2, length, sampleRate);
-  for (let ch = 0; ch < 2; ch++) {
-    const data = impulse.getChannelData(ch);
-    for (let i = 0; i < length; i++) {
-      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, 2.5);
-    }
-  }
-  const conv = ctx.createConvolver();
-  conv.buffer = impulse;
-  input.connect(dryGain);
-  input.connect(conv);
-  conv.connect(wetGain);
-  dryGain.connect(output);
-  wetGain.connect(output);
-  return { input, output };
-}
-
-// ─── Inline drum engine hook ──────────────────────────────────────────────────
-
-function useDrumEngine(destNode: AudioNode | null) {
-  const ctxRef = useRef<AudioContext | null>(null);
-  const masterGainRef = useRef<GainNode | null>(null);
-  const drumGainRef = useRef<GainNode | null>(null);
-  const filterRef = useRef<BiquadFilterNode | null>(null);
-  const schedulerRef = useRef<number | null>(null);
-  const stepRef = useRef(0);
-  const nextBeatTimeRef = useRef(0);
-  const playingRef = useRef(false);
-  const presetRef = useRef<DrumPreset>(DRUM_PRESETS[0]);
-  const bpmRef = useRef<number>(DRUM_PRESETS[0].bpm);
-
-  const [playing, setPlaying] = useState(false);
-  const [presetName, setPresetNameState] = useState(DRUM_PRESETS[0].name);
-  const [masterVolume, setMasterVolumeState] = useState(0.8);
-  const [drumVolume, setDrumVolumeState] = useState(0.7);
-  const [filterCutoff, setFilterCutoffState] = useState(4000);
-  const [currentBpm, setCurrentBpmState] = useState<number>(DRUM_PRESETS[0].bpm);
-
-  const ensureCtx = useCallback(() => {
-    if (ctxRef.current) return ctxRef.current;
-    const Ctx =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    const ctx = new Ctx();
-    ctxRef.current = ctx;
-
-    const masterGain = ctx.createGain();
-    masterGain.gain.value = 0.8;
-    masterGainRef.current = masterGain;
-
-    const drumGain = ctx.createGain();
-    drumGain.gain.value = 0.7;
-    drumGainRef.current = drumGain;
-
-    const filter = ctx.createBiquadFilter();
-    filter.type = "lowpass";
-    filter.frequency.value = 4000;
-    filterRef.current = filter;
-
-    const comp = ctx.createDynamicsCompressor();
-    comp.threshold.value = -6;
-    comp.knee.value = 10;
-    comp.ratio.value = 6;
-    comp.attack.value = 0.003;
-    comp.release.value = 0.1;
-
-    drumGain.connect(filter);
-    filter.connect(masterGain);
-    masterGain.connect(comp);
-    comp.connect(ctx.destination);
-    if (destNode) comp.connect(destNode as AudioNode);
-
-    return ctx;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [destNode]);
-
-  const scheduleKick = useCallback((ctx: AudioContext, gain: GainNode, time: number, level: number) => {
-    const osc = ctx.createOscillator();
-    const env = ctx.createGain();
-    osc.connect(env); env.connect(gain);
-    osc.frequency.setValueAtTime(140, time);
-    osc.frequency.exponentialRampToValueAtTime(safeExp(40), time + 0.15);
-    env.gain.setValueAtTime(0.001, time);
-    env.gain.linearRampToValueAtTime(level, time + 0.001);
-    env.gain.exponentialRampToValueAtTime(0.001, time + 0.4);
-    osc.start(time); osc.stop(time + 0.45);
-  }, []);
-
-  const scheduleSnare = useCallback((ctx: AudioContext, gain: GainNode, time: number, level: number) => {
-    const bufLen = ctx.sampleRate * 0.2;
-    const buf = ctx.createBuffer(1, bufLen, ctx.sampleRate);
-    const data = buf.getChannelData(0);
-    for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
-    const noise = ctx.createBufferSource();
-    noise.buffer = buf;
-    const noiseFilter = ctx.createBiquadFilter();
-    noiseFilter.type = "bandpass"; noiseFilter.frequency.value = 1200; noiseFilter.Q.value = 1.5;
-    const noiseEnv = ctx.createGain();
-    noise.connect(noiseFilter); noiseFilter.connect(noiseEnv); noiseEnv.connect(gain);
-    noiseEnv.gain.setValueAtTime(level * 0.7, time);
-    noiseEnv.gain.exponentialRampToValueAtTime(0.001, time + 0.18);
-    noise.start(time); noise.stop(time + 0.2);
-    const osc = ctx.createOscillator();
-    const oscEnv = ctx.createGain();
-    osc.connect(oscEnv); oscEnv.connect(gain);
-    osc.frequency.value = 200;
-    oscEnv.gain.setValueAtTime(level * 0.5, time);
-    oscEnv.gain.exponentialRampToValueAtTime(0.001, time + 0.1);
-    osc.start(time); osc.stop(time + 0.12);
-  }, []);
-
-  const scheduleHihat = useCallback((ctx: AudioContext, gain: GainNode, time: number, level: number) => {
-    const bufLen = ctx.sampleRate * 0.1;
-    const buf = ctx.createBuffer(1, bufLen, ctx.sampleRate);
-    const data = buf.getChannelData(0);
-    for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
-    const noise = ctx.createBufferSource();
-    noise.buffer = buf;
-    const hpf = ctx.createBiquadFilter();
-    hpf.type = "highpass"; hpf.frequency.value = 7000;
-    const env = ctx.createGain();
-    noise.connect(hpf); hpf.connect(env); env.connect(gain);
-    env.gain.setValueAtTime(level * 0.45, time);
-    env.gain.exponentialRampToValueAtTime(0.001, time + 0.06);
-    noise.start(time); noise.stop(time + 0.08);
-  }, []);
-
-  const schedulePerc = useCallback((ctx: AudioContext, gain: GainNode, time: number, level: number) => {
-    const bufLen = ctx.sampleRate * 0.12;
-    const buf = ctx.createBuffer(1, bufLen, ctx.sampleRate);
-    const data = buf.getChannelData(0);
-    for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
-    const noise = ctx.createBufferSource();
-    noise.buffer = buf;
-    const bpf = ctx.createBiquadFilter();
-    bpf.type = "bandpass"; bpf.frequency.value = 600; bpf.Q.value = 2;
-    const env = ctx.createGain();
-    noise.connect(bpf); bpf.connect(env); env.connect(gain);
-    env.gain.setValueAtTime(level * 0.3, time);
-    env.gain.exponentialRampToValueAtTime(0.001, time + 0.06);
-    noise.start(time); noise.stop(time + 0.08);
-    const osc = ctx.createOscillator();
-    osc.frequency.value = 600;
-    const oscEnv = ctx.createGain();
-    osc.connect(oscEnv); oscEnv.connect(gain);
-    oscEnv.gain.setValueAtTime(level * 0.4, time);
-    oscEnv.gain.exponentialRampToValueAtTime(0.001, time + 0.07);
-    osc.start(time); osc.stop(time + 0.08);
-  }, []);
-
-  const scheduleStep = useCallback((ctx: AudioContext, dGain: GainNode, step: number, time: number) => {
-    const p = presetRef.current;
-    if (p.pattern.kick[step])  scheduleKick(ctx, dGain, time, p.levels.kick);
-    if (p.pattern.snare[step]) scheduleSnare(ctx, dGain, time, p.levels.snare);
-    if (p.pattern.hihat[step]) scheduleHihat(ctx, dGain, time, p.levels.hihat);
-    if (p.pattern.perc[step])  schedulePerc(ctx, dGain, time, p.levels.perc);
-  }, [scheduleKick, scheduleSnare, scheduleHihat, schedulePerc]);
-
-  const runScheduler = useCallback(() => {
-    const ctx = ctxRef.current;
-    const dGain = drumGainRef.current;
-    if (!ctx || !dGain || !playingRef.current) return;
-    const lookahead = 0.1;
-    const p = presetRef.current;
-    const stepDuration = 60 / bpmRef.current / 4;
-    while (nextBeatTimeRef.current < ctx.currentTime + lookahead) {
-      const step = stepRef.current % 16;
-      const swingOffset = (step % 2 === 1) ? stepDuration * (p.swing - 0.5) : 0;
-      const time = nextBeatTimeRef.current + swingOffset;
-      scheduleStep(ctx, dGain, step, time);
-      nextBeatTimeRef.current += stepDuration;
-      stepRef.current++;
-    }
-    schedulerRef.current = requestAnimationFrame(runScheduler);
-  }, [scheduleStep]);
-
-  const play = useCallback(() => {
-    const ctx = ensureCtx();
-    if (playingRef.current) return;
-    playingRef.current = true;
-    setPlaying(true);
-    stepRef.current = 0;
-    nextBeatTimeRef.current = ctx.currentTime;
-    runScheduler();
-  }, [ensureCtx, runScheduler]);
-
-  const stop = useCallback(() => {
-    playingRef.current = false;
-    setPlaying(false);
-    if (schedulerRef.current !== null) {
-      cancelAnimationFrame(schedulerRef.current);
-      schedulerRef.current = null;
-    }
-  }, []);
-
-  const setPreset = useCallback((name: string) => {
-    const preset = DRUM_PRESETS.find((p) => p.name === name);
-    if (!preset) return;
-    presetRef.current = preset;
-    setPresetNameState(name);
-    bpmRef.current = preset.bpm;
-    setCurrentBpmState(preset.bpm);
-  }, []);
-
-  const setMasterVolume = useCallback((vol: number) => {
-    setMasterVolumeState(vol);
-    if (masterGainRef.current) masterGainRef.current.gain.value = vol;
-  }, []);
-
-  const setDrumVolume = useCallback((vol: number) => {
-    setDrumVolumeState(vol);
-    if (drumGainRef.current) drumGainRef.current.gain.value = vol;
-  }, []);
-
-  const setFilterCutoff = useCallback((freq: number) => {
-    setFilterCutoffState(freq);
-    if (filterRef.current) filterRef.current.frequency.value = freq;
-  }, []);
-
-  const setBpm = useCallback((bpm: number) => {
-    const clamped = Math.max(50, Math.min(200, bpm));
-    bpmRef.current = clamped;
-    setCurrentBpmState(clamped);
-  }, []);
-
-  const getMasterGain = useCallback(() => masterGainRef.current, []);
-  const getCtx = useCallback(() => ctxRef.current, []);
-
-  return {
-    playing, presetName, masterVolume, drumVolume, filterCutoff, currentBpm,
-    play, stop, setPreset, setMasterVolume, setDrumVolume, setFilterCutoff, setBpm,
-    currentPreset: presetRef.current,
-    getMasterGain, getCtx,
-  };
-}
-
-// ─── Inline chord synth hook ──────────────────────────────────────────────────
-
-function useChordSynth(sharedCtx: AudioContext | null, destNode: AudioNode | null) {
-  const ctxRef = useRef<AudioContext | null>(null);
-  const activeNotesRef = useRef<number[]>([]);
-  const [activeNotes, setActiveNotes] = useState<number[]>([]);
-  const [currentChordName, setCurrentChordName] = useState<string | null>(null);
-
-  const ensureCtx = useCallback(() => {
-    if (sharedCtx) return sharedCtx;
-    if (ctxRef.current) return ctxRef.current;
-    const Ctx =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    const ctx = new Ctx();
-    ctxRef.current = ctx;
-    return ctx;
-  }, [sharedCtx]);
-
-  const playChord = useCallback(
-    (chord: { root: string; quality: ChordQuality; octave: number; inversion: "root" | "first" | "second" }) => {
-      const ctx = ensureCtx();
-      const { root, quality, octave, inversion } = chord;
-      const name = chordLabel(root, quality);
-      activeNotesRef.current = [];
-      setActiveNotes([]);
-      setCurrentChordName(null);
-
-      const freqs = chordFrequencies(root, octave, quality, inversion);
-      activeNotesRef.current = chordMidiNotes(root, octave, quality);
-      setActiveNotes(activeNotesRef.current);
-      setCurrentChordName(name);
-
-      const reverb = createReverb(ctx, 0.2);
-      const attackTime = 0.04;
-      const releaseTime = 0.5;
-
-      freqs.forEach((freq, i) => {
-        const oscType: OscillatorType = i % 2 === 0 ? "sine" : "triangle";
-        const osc = ctx.createOscillator();
-        osc.type = oscType;
-        osc.frequency.value = freq;
-        if (i > 0) osc.detune.value = (Math.random() - 0.5) * 5;
-
-        const env = ctx.createGain();
-        env.gain.setValueAtTime(0, ctx.currentTime);
-        env.gain.linearRampToValueAtTime(0.3, ctx.currentTime + attackTime);
-        osc.connect(env);
-        env.connect(reverb.input);
-        osc.start(ctx.currentTime);
-        osc.stop(ctx.currentTime + attackTime + releaseTime + 1);
-
-        setTimeout(() => {
-          try {
-            env.gain.cancelScheduledValues(ctx.currentTime);
-            env.gain.setValueAtTime(0.3, ctx.currentTime);
-            env.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + releaseTime);
-          } catch {}
-        }, attackTime * 1000);
-      });
-
-      reverb.output.connect(destNode ?? ctx.destination);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [ensureCtx, destNode]
-  );
-
-  const releaseChord = useCallback(() => {
-    activeNotesRef.current = [];
-    setActiveNotes([]);
-    setCurrentChordName(null);
-  }, []);
-
-  return { activeNotes, currentChordName, playChord, releaseChord };
-}
 
 // ─── Inline trumpet synth hook ────────────────────────────────────────────────
 
@@ -946,6 +411,7 @@ export function RecorderModal({
   } | null;
 }) {
   const { toast } = useToast();
+  const isMobile = useIsMobile();
 
   // ── Core recording state ──
   const [state, setState] = useState<RecState>("idle");
@@ -1003,6 +469,7 @@ export function RecorderModal({
   const rafRef = useRef<number | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const startedAtRef = useRef<number>(0);
+  const pausedElapsedRef = useRef<number>(0); // accumulated time before current pause
   const tickRef = useRef<number | null>(null);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const capturedMicStreamRef = useRef<MediaStream | null>(null);
@@ -1040,7 +507,7 @@ export function RecorderModal({
 
   // ── Drum + chord engines ──
   const drum = useDrumEngine(recDestNode);
-  const chord = useChordSynth(drum.getCtx(), recDestNode);
+  const chord = useChordSynth(recDestNode, drum.getCtx);
 
   // ── Trumpet synth ──
   const trumpetEnabled =
@@ -1487,6 +954,7 @@ export function RecorderModal({
 
   // ─── Effective teleprompter line ──────────────────────────────────────────
   const isRecording = state === "recording";
+  const isPaused = state === "paused";
   const isReview = state === "review";
   const canStart = state === "idle";
 
@@ -1714,6 +1182,7 @@ export function RecorderModal({
       recorderRef.current = recorder;
       recorder.start(250);
       startedAtRef.current = Date.now();
+      pausedElapsedRef.current = 0;
       setElapsed(0);
       setManualLineOffset(0);
       setSmartLineIndex(0);
@@ -1746,6 +1215,47 @@ export function RecorderModal({
     startGestureCamera, drum, lyricFollowMode, hasLyrics, initSmartFollow,
     stopSmartFollow,
   ]);
+
+  // ─── Pause / Resume recording ─────────────────────────────────────────────
+  const pauseRecording = useCallback(() => {
+    if (state !== "recording") return;
+    const r = recorderRef.current;
+    if (r && r.state === "recording") {
+      try { r.pause(); } catch {}
+    }
+    // Accumulate elapsed time so far
+    pausedElapsedRef.current = (Date.now() - startedAtRef.current) / 1000;
+    if (tickRef.current !== null) { window.clearInterval(tickRef.current); tickRef.current = null; }
+    // Pause beat if playing
+    if (autoPlayBeat && hasYoutube) {
+      window.dispatchEvent(new CustomEvent("verses:beat-pause"));
+    }
+    if (performLayer === "hand" || performLayer === "both") {
+      drum.stop();
+    }
+    setState("paused");
+  }, [state, autoPlayBeat, hasYoutube, performLayer, drum]);
+
+  const resumeRecording = useCallback(() => {
+    if (state !== "paused") return;
+    const r = recorderRef.current;
+    if (r && r.state === "paused") {
+      try { r.resume(); } catch {}
+    }
+    // Restart elapsed timer from accumulated offset
+    startedAtRef.current = Date.now() - pausedElapsedRef.current * 1000;
+    tickRef.current = window.setInterval(() => {
+      setElapsed((Date.now() - startedAtRef.current) / 1000);
+    }, 200);
+    // Resume beat
+    if (autoPlayBeat && hasYoutube) {
+      window.dispatchEvent(new CustomEvent("verses:beat-play"));
+    }
+    if (performLayer === "hand" || performLayer === "both") {
+      drum.play();
+    }
+    setState("recording");
+  }, [state, autoPlayBeat, hasYoutube, performLayer, drum]);
 
   // ─── Stop recording ───────────────────────────────────────────────────────
   const stopRecording = useCallback(() => {
@@ -1805,12 +1315,16 @@ export function RecorderModal({
   }, [label, onClose, onSaved, reviewBlob, reviewDuration, reviewMime, songId, toast, performLayer]);
 
   // ─── Layer selector helpers ───────────────────────────────────────────────
-  const layerOptions: { value: PerformLayer; label: string }[] = [
+  const allLayerOptions: { value: PerformLayer; label: string }[] = [
     { value: "none",     label: "Normal" },
     { value: "hand",     label: "Hand Gestures" },
     { value: "trumpet",  label: "Live Trumpet" },
     { value: "both",     label: "Gestures + Trumpet" },
   ];
+  // On mobile, restrict to Normal only — gesture/trumpet layers require desktop
+  const layerOptions = isMobile
+    ? allLayerOptions.filter(o => o.value === "none")
+    : allLayerOptions;
 
   const GESTURE_LABELS: Record<GestureId, string> = {
     open: "OPEN", pinch: "PINCH", two: "TWO", fist: "FIST", point: "POINT",
@@ -1840,7 +1354,7 @@ export function RecorderModal({
                 <input
                   type="checkbox"
                   checked={withVideo}
-                  disabled={isRecording || state === "preparing"}
+                  disabled={isRecording || isPaused || state === "preparing"}
                   onChange={(e) => setWithVideo(e.target.checked)}
                   className="accent-amber-gold"
                 />
@@ -1851,7 +1365,7 @@ export function RecorderModal({
                   <input
                     type="checkbox"
                     checked={autoPlayBeat}
-                    disabled={isRecording || state === "preparing"}
+                    disabled={isRecording || isPaused || state === "preparing"}
                     onChange={(e) => setAutoPlayBeat(e.target.checked)}
                     className="accent-amber-gold"
                   />
@@ -1868,7 +1382,7 @@ export function RecorderModal({
                   <select
                     value={startAtSel}
                     onChange={(e) => setStartAtSel(e.target.value)}
-                    disabled={isRecording || state === "preparing"}
+                    disabled={isRecording || isPaused || state === "preparing"}
                     className="rounded border border-ink-line bg-ink/40 px-2 py-1 text-sm text-ink-text outline-none"
                   >
                     {startAtOptions.map((o, i) => (
@@ -1884,7 +1398,7 @@ export function RecorderModal({
                       placeholder="0:42"
                       value={customStart}
                       onChange={(e) => { setCustomStart(e.target.value); setCustomStartError(null); }}
-                      disabled={isRecording || state === "preparing"}
+                      disabled={isRecording || isPaused || state === "preparing"}
                       className={`w-24 rounded border bg-ink/40 px-2 py-1 text-sm text-ink-text outline-none ${
                         customStartError ? "border-red-400/60" : "border-ink-line"
                       }`}
@@ -1921,7 +1435,7 @@ export function RecorderModal({
                         <button
                           key={opt.value}
                           type="button"
-                          disabled={isRecording || state === "preparing"}
+                          disabled={isRecording || isPaused || state === "preparing"}
                           onClick={() => setPerformLayer(opt.value)}
                           className={`rounded border px-3 py-1 font-mono text-[11px] transition-colors ${
                             active
@@ -1983,7 +1497,7 @@ export function RecorderModal({
                             <button
                               key={p.name}
                               type="button"
-                              disabled={isRecording}
+                              disabled={isRecording || isPaused}
                               onClick={() => setDrumPresetName(p.name)}
                               className={`rounded border px-2 py-0.5 font-mono text-[11px] transition-colors ${
                                 drumPresetName === p.name
@@ -2038,7 +1552,7 @@ export function RecorderModal({
                             <button
                               key={key}
                               type="button"
-                              disabled={isRecording}
+                              disabled={isRecording || isPaused}
                               onClick={() => setChordPresetName(key)}
                               className={`rounded border px-2 py-0.5 font-mono text-[11px] transition-colors ${
                                 chordPresetName === key
@@ -2124,7 +1638,7 @@ export function RecorderModal({
                             <button
                               key={p.name}
                               type="button"
-                              disabled={isRecording}
+                              disabled={isRecording || isPaused}
                               onClick={() => {
                                 setTrumpetPresetName(p.name);
                                 setTrumpetBrightness(p.brightness);
@@ -2271,7 +1785,7 @@ export function RecorderModal({
                       <>
                         <span className="font-mono text-[10px] text-ink-mute">|</span>
                         <span className="font-mono text-[10px] text-indigo-400">
-                          Slot {activeSlot}: {chord.currentChordName ?? "—"}
+                          Slot {activeSlot}: {chord.currentChord ?? "—"}
                         </span>
                       </>
                     ) : null}
@@ -2336,7 +1850,7 @@ export function RecorderModal({
                     <div className="mt-1 flex justify-between text-[11px] text-ink-mute">
                       <span>mic</span>
                       <span className="font-mono">
-                        {isRecording ? `\u25CF ${formatDuration(elapsed)}` : state === "preparing" ? "preparing\u2026" : "ready"}
+                        {isRecording ? `\u25CF ${formatDuration(elapsed)}` : isPaused ? `\u275A\u275A ${formatDuration(elapsed)}` : state === "preparing" ? "preparing\u2026" : "ready"}
                       </span>
                     </div>
                   </div>
@@ -2412,14 +1926,33 @@ export function RecorderModal({
               >
                 Cancel
               </button>
-              {isRecording ? (
-                <button
-                  type="button"
-                  onClick={stopRecording}
-                  className="rounded border border-red-400/70 bg-red-500/20 px-4 py-1.5 text-sm text-red-100 hover:bg-red-500/30"
-                >
-                  &#9632; Stop
-                </button>
+              {isRecording || isPaused ? (
+                <div className="flex items-center gap-2">
+                  {isRecording ? (
+                    <button
+                      type="button"
+                      onClick={pauseRecording}
+                      className="rounded border border-amber-gold/50 bg-amber-gold/10 px-3 py-1.5 text-sm text-amber-gold hover:bg-amber-gold/20"
+                    >
+                      &#9646;&#9646; Pause
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={resumeRecording}
+                      className="rounded border border-emerald-400/50 bg-emerald-500/10 px-3 py-1.5 text-sm text-emerald-300 hover:bg-emerald-500/20"
+                    >
+                      &#9654; Resume
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={stopRecording}
+                    className="rounded border border-red-400/70 bg-red-500/20 px-3 py-1.5 text-sm text-red-100 hover:bg-red-500/30"
+                  >
+                    &#9632; Stop
+                  </button>
+                </div>
               ) : (
                 <button
                   type="button"

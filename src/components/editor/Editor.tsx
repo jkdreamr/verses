@@ -10,7 +10,7 @@ import { useToast } from "@/components/Toast";
 import { useShortcut } from "@/hooks/useShortcut";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { RhymePanel } from "./RhymePanel";
-import { RhymeLens, buildCharHighlights, FAMILY_COLORS, type CharHighlight } from "./RhymeLens";
+import { RhymeLens, buildCharHighlights, FAMILY_COLORS, FAMILY_BORDER_COLORS, type CharHighlight } from "./RhymeLens";
 import type { RhymeLensResult } from "@/lib/rhymeLens";
 import { Toolbar } from "./Toolbar";
 import { StructurePicker } from "./StructurePicker";
@@ -42,19 +42,32 @@ export function Editor({ songId }: { songId: string }) {
   const [savingFlash, setSavingFlash] = useState(false);
   const [serif, setSerif] = useState(true);
 
-  const [rhymeOpen, setRhymeOpen] = useState(false);
-  const [rhymeLensOpen, setRhymeLensOpen] = useState(false);
+  // ── Exclusive panel / modal state ──────────────────────────────────────
+  // Only one right-side rail can be open at a time.
+  // Only one modal can be open at a time.
+  const [activeRail, setActiveRail] = useState<"none" | "rhymes" | "history" | "takes" | "rhymeLens">("none");
+  const [activeModal, setActiveModal] = useState<"none" | "ocr" | "export" | "tags" | "recorder" | "perform" | "voiceScore" | "structure">("none");
   const [rhymeWord, setRhymeWord] = useState<string | null>(null);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [ocrOpen, setOcrOpen] = useState(false);
-  const [exportOpen, setExportOpen] = useState(false);
-  const [tagsOpen, setTagsOpen] = useState(false);
-  const [structureOpen, setStructureOpen] = useState(false);
-  const [takesOpen, setTakesOpen] = useState(false);
-  const [recorderOpen, setRecorderOpen] = useState(false);
   const [takesReloadKey, setTakesReloadKey] = useState(0);
-  const [performOpen, setPerformOpen] = useState(false);
-  const [voiceToScoreOpen, setVoiceToScoreOpen] = useState(false);
+
+  // Derived booleans for child components (keeps props interface stable)
+  const rhymeOpen = activeRail === "rhymes";
+  const rhymeLensOpen = activeRail === "rhymeLens";
+  const historyOpen = activeRail === "history";
+  const takesOpen = activeRail === "takes";
+  const ocrOpen = activeModal === "ocr";
+  const exportOpen = activeModal === "export";
+  const tagsOpen = activeModal === "tags";
+  const structureOpen = activeModal === "structure";
+  const recorderOpen = activeModal === "recorder";
+  const performOpen = activeModal === "perform";
+  const voiceToScoreOpen = activeModal === "voiceScore";
+
+  // Helpers
+  const openRail = useCallback((id: typeof activeRail) => setActiveRail(id), []);
+  const closeRail = useCallback(() => setActiveRail("none"), []);
+  const openModal = useCallback((id: typeof activeModal) => setActiveModal(id), []);
+  const closeModal = useCallback(() => setActiveModal("none"), []);
 
   const [youtube, setYoutube] = useState<YoutubeSession | null>(null);
 
@@ -86,6 +99,9 @@ export function Editor({ songId }: { songId: string }) {
       hl.scrollLeft = ta.scrollLeft;
     }
   }, []);
+
+  // Re-sync scroll when highlights change (e.g. analysis updated, focus toggled)
+  useEffect(() => { syncScroll(); }, [charHighlights, syncScroll]);
 
   // Load song — only depend on songId so we don't refetch when guestMode flips
   const initialGuestParam = searchParams.get("guest") === "1";
@@ -329,8 +345,8 @@ export function Editor({ songId }: { songId: string }) {
       return;
     }
     setRhymeWord(word);
-    setRhymeOpen(true);
-  }, [toast]);
+    openRail("rhymes");
+  }, [toast, openRail]);
 
   // Highlight currently looked-up word: simple visual marker via overlay would be heavy.
   // Instead, when the panel is open, briefly select that word in the textarea on demand.
@@ -347,24 +363,20 @@ export function Editor({ songId }: { songId: string }) {
     if (!rhymeOpen) {
       onTriggerRhymesFromSelection();
     } else {
-      setRhymeOpen(false);
+      closeRail();
     }
   });
   useShortcut({ key: "/", meta: true }, (e) => {
     e.preventDefault();
-    setStructureOpen((v) => !v);
+    if (structureOpen) closeModal(); else openModal("structure");
   });
   useShortcut({ key: "h", meta: true, shift: true }, (e) => {
     e.preventDefault();
-    setHistoryOpen((v) => !v);
+    if (historyOpen) closeRail(); else openRail("history");
   });
   useShortcut({ key: "Escape" }, () => {
-    setRhymeOpen(false);
-    setHistoryOpen(false);
-    setOcrOpen(false);
-    setExportOpen(false);
-    setTagsOpen(false);
-    setStructureOpen(false);
+    if (activeModal !== "none") { closeModal(); return; }
+    if (activeRail !== "none") { closeRail(); return; }
   });
 
   // Restore version
@@ -373,9 +385,9 @@ export function Editor({ songId }: { songId: string }) {
       if (!song) return;
       setContent(version.content);
       toast("Restored a previous version", "ok");
-      setHistoryOpen(false);
+      closeRail();
     },
-    [song, toast]
+    [song, toast, closeRail]
   );
 
   // YouTube session handlers
@@ -431,9 +443,7 @@ export function Editor({ songId }: { songId: string }) {
       className="relative flex min-h-screen flex-col"
       style={{
         paddingRight:
-          (rhymeOpen || historyOpen) && rhymeLensOpen
-            ? "calc(min(420px, 38vw) + min(380px, 42vw))"
-            : rhymeOpen || historyOpen
+          rhymeOpen || historyOpen || takesOpen
             ? "min(420px, 38vw)"
             : rhymeLensOpen
             ? "min(380px, 42vw)"
@@ -539,13 +549,13 @@ export function Editor({ songId }: { songId: string }) {
 
       {/* Floating toolbar */}
       <Toolbar
-        onInsertStructure={() => setStructureOpen(true)}
-        onScan={() => setOcrOpen(true)}
+        onInsertStructure={() => openModal("structure")}
+        onScan={() => openModal("ocr")}
         onRhymes={onTriggerRhymesFromSelection}
-        onHistory={() => setHistoryOpen(true)}
-        onTakes={() => setTakesOpen(true)}
-        onExport={() => setExportOpen(true)}
-        onTags={() => setTagsOpen(true)}
+        onHistory={() => openRail("history")}
+        onTakes={() => openRail("takes")}
+        onExport={() => openModal("export")}
+        onTags={() => openModal("tags")}
         onToggleFont={() => setSerif((v) => !v)}
         serif={serif}
         onPerform={() => {
@@ -553,9 +563,9 @@ export function Editor({ songId }: { songId: string }) {
             toast("Perform is desktop-only. Use desktop for hand gestures, chords, and live instruments.", "info");
             return;
           }
-          setPerformOpen(true);
+          openModal("perform");
         }}
-        onVoiceScore={() => setVoiceToScoreOpen(true)}
+        onVoiceScore={() => openModal("voiceScore")}
         isMobile={isMobile}
       />
 
@@ -569,7 +579,7 @@ export function Editor({ songId }: { songId: string }) {
       <RhymePanel
         open={rhymeOpen}
         word={rhymeWord}
-        onClose={() => setRhymeOpen(false)}
+        onClose={closeRail}
         onPickWord={(w) => setRhymeWord(w)}
       />
 
@@ -577,31 +587,31 @@ export function Editor({ songId }: { songId: string }) {
         open={historyOpen}
         songId={song.id}
         guestMode={guestMode || !configured}
-        onClose={() => setHistoryOpen(false)}
+        onClose={closeRail}
         onRestore={onRestore}
       />
 
       {/* Modals */}
       <StructurePicker
         open={structureOpen}
-        onClose={() => setStructureOpen(false)}
+        onClose={closeModal}
         onPick={(tag) => {
           insertAtCursor(`\n${tag}\n`);
-          setStructureOpen(false);
+          closeModal();
         }}
       />
 
       <OcrModal
         open={ocrOpen}
-        onClose={() => setOcrOpen(false)}
+        onClose={closeModal}
         onInsert={(text) => {
           insertAtCursor(text);
-          setOcrOpen(false);
+          closeModal();
           toast("Inserted scanned text", "ok");
         }}
         onReplace={(text) => {
           replaceContent(text);
-          setOcrOpen(false);
+          closeModal();
           toast("Replaced with scanned text", "ok");
         }}
       />
@@ -609,22 +619,22 @@ export function Editor({ songId }: { songId: string }) {
       <ExportModal
         open={exportOpen}
         song={song}
-        onClose={() => setExportOpen(false)}
+        onClose={closeModal}
       />
 
       <TagsModal
         open={tagsOpen}
         tags={song.tags ?? []}
         onChange={setTags}
-        onClose={() => setTagsOpen(false)}
+        onClose={closeModal}
       />
 
       <TakesPanel
         open={takesOpen}
         songId={song.id}
         reloadKey={takesReloadKey}
-        onClose={() => setTakesOpen(false)}
-        onNewTake={() => setRecorderOpen(true)}
+        onClose={closeRail}
+        onNewTake={() => openModal("recorder")}
       />
 
       <RecorderModal
@@ -635,17 +645,17 @@ export function Editor({ songId }: { songId: string }) {
         loopStart={youtube?.loop_start ?? null}
         lyrics={song.content}
         youtubeSession={youtube ?? null}
-        onClose={() => setRecorderOpen(false)}
+        onClose={closeModal}
         onSaved={() => {
           setTakesReloadKey((k) => k + 1);
-          setTakesOpen(true);
+          openRail("takes");
         }}
       />
 
       {!isMobile && (
         <PerformModal
           open={performOpen}
-          onClose={() => setPerformOpen(false)}
+          onClose={closeModal}
           songId={song.id}
           onTakeSaved={() => setTakesReloadKey((k) => k + 1)}
           youtubeSession={youtube}
@@ -654,14 +664,14 @@ export function Editor({ songId }: { songId: string }) {
 
       <VoiceToScoreModal
         open={voiceToScoreOpen}
-        onClose={() => setVoiceToScoreOpen(false)}
+        onClose={closeModal}
         songId={song.id}
       />
 
       <RhymeLens
         lyrics={song.content}
         open={rhymeLensOpen}
-        onToggle={() => setRhymeLensOpen((v) => !v)}
+        onToggle={() => activeRail === "rhymeLens" ? closeRail() : openRail("rhymeLens")}
         onAnalysis={onRhymeLensAnalysis}
       />
     </main>
@@ -734,16 +744,25 @@ function renderHighlightedText(
         j++;
       }
       const color = FAMILY_COLORS[h.colorIndex % FAMILY_COLORS.length];
+      const borderColor = FAMILY_BORDER_COLORS[h.colorIndex % FAMILY_BORDER_COLORS.length];
+      const isRepetition = h.type === "repetition";
       nodes.push(
         createElement(
           "mark",
           {
             key: `${i}-${familyId}`,
-            style: {
-              backgroundColor: color,
-              color: "transparent",
-              borderRadius: "2px",
-            },
+            style: isRepetition
+              ? {
+                  backgroundColor: "transparent",
+                  borderBottom: `1.5px dashed ${borderColor}`,
+                  color: "transparent",
+                  borderRadius: "0",
+                }
+              : {
+                  backgroundColor: color,
+                  color: "transparent",
+                  borderRadius: "2px",
+                },
           },
           text.slice(i, j)
         )

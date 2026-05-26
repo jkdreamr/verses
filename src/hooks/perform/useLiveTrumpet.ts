@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { detectPitchYIN, computeRMS } from "@/lib/pitchDetection";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -94,8 +95,6 @@ export const TRUMPET_PRESETS: TrumpetPreset[] = [
 
 // ─── YIN pitch detection constants ───────────────────────────────────────────
 
-const YIN_THRESHOLD      = 0.15;
-const SILENCE_RMS_THRESH = 0.015;
 const CONFIDENCE_THRESH  = 0.3;
 const MIN_FREQ           = 80;   // Hz — low end of singing range
 const MAX_FREQ           = 900;  // Hz — high end
@@ -106,77 +105,6 @@ const VIBRATO_RATE_HZ    = 5.2;  // slightly above 5 for realism
 const FORMANT_FREQS      = [1200, 2400, 3800]; // trumpet formant resonances
 const FORMANT_QS         = [3.5, 4.0, 3.0];    // Q factors for formants
 const FORMANT_GAINS      = [1.0, 0.5, 0.2];    // relative gains
-
-// ─── YIN algorithm implementation ────────────────────────────────────────────
-
-function computeRMS(buf: Float32Array): number {
-  let sum = 0;
-  for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
-  return Math.sqrt(sum / buf.length);
-}
-
-/**
- * Simplified YIN pitch estimator.
- * Returns { freq, confidence } or { freq: 0, confidence: 0 } when silent / unpitched.
- */
-function yinPitch(
-  buffer: Float32Array,
-  sampleRate: number
-): { freq: number; confidence: number } {
-  const N     = buffer.length;
-  const half  = Math.floor(N / 2);
-  const d     = new Float32Array(half);
-
-  // Step 1 & 2: difference function
-  for (let tau = 1; tau < half; tau++) {
-    let s = 0;
-    for (let i = 0; i < half; i++) {
-      const diff = buffer[i] - buffer[i + tau];
-      s += diff * diff;
-    }
-    d[tau] = s;
-  }
-
-  // Step 3: cumulative mean normalised difference
-  d[0] = 1;
-  let cumSum = 0;
-  const cmnd = new Float32Array(half);
-  cmnd[0] = 1;
-  for (let tau = 1; tau < half; tau++) {
-    cumSum += d[tau];
-    cmnd[tau] = d[tau] * tau / cumSum;
-  }
-
-  // Step 4: absolute threshold — find first tau where cmnd < threshold
-  let tau = -1;
-  for (let t = 2; t < half; t++) {
-    if (cmnd[t] < YIN_THRESHOLD) {
-      // Find local minimum in this dip
-      while (t + 1 < half && cmnd[t + 1] < cmnd[t]) t++;
-      tau = t;
-      break;
-    }
-  }
-
-  if (tau === -1) return { freq: 0, confidence: 0 };
-
-  // Step 5: Parabolic interpolation
-  let betterTau = tau;
-  if (tau > 0 && tau < half - 1) {
-    const s0 = cmnd[tau - 1];
-    const s1 = cmnd[tau];
-    const s2 = cmnd[tau + 1];
-    const denom = 2 * s1 - s2 - s0;
-    if (Math.abs(denom) > 0.001) {
-      betterTau = tau + (s2 - s0) / (2 * denom);
-    }
-  }
-
-  const freq       = sampleRate / betterTau;
-  const confidence = 1 - cmnd[tau];
-
-  return { freq, confidence };
-}
 
 // ─── WaveShaper curve (soft-clip / tanh approximation) ───────────────────────
 
@@ -610,14 +538,20 @@ export function useLiveTrumpet({
     const rms = computeRMS(buf);
     setInputLevel(rms);
 
-    if (rms < SILENCE_RMS_THRESH) {
-      // Silence — fade out
+    const result = detectPitchYIN(buf, nodes.ctx.sampleRate, {
+      yinThreshold: 0.15,
+      silenceRms: 0.015,
+      noisyFallback: 0.4,
+    });
+
+    if (!result) {
+      // Silence or unpitched — fade out
       applySynthParams(nodes, smoothedFreqRef.current, 0, rms);
       setConfidence(0);
       setDetectedNote(null);
       setDetectedFreq(0);
     } else {
-      const { freq, confidence: conf } = yinPitch(buf, nodes.ctx.sampleRate);
+      const { freq, confidence: conf } = result;
 
       if (conf > 0) {
         // EMA smooth
@@ -631,7 +565,7 @@ export function useLiveTrumpet({
         setDetectedNote(freqToNoteName(smoothedFreqRef.current));
       }
 
-      applySynthParams(nodes, smoothedFreqRef.current, conf, rms);
+      applySynthParams(nodes, smoothedFreqRef.current, conf, result.rms);
     }
 
     rafRef.current = requestAnimationFrame(runPitchLoop);

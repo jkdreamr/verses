@@ -3,51 +3,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { takesStore, newTakeId } from "@/lib/takes";
 import type { Take } from "@/lib/types";
+import { DRUM_PRESETS, useDrumEngine } from "@/hooks/perform/useDrumEngine";
+import {
+  NOTE_NAMES,
+  INSTRUMENT_PRESETS,
+  SLOT_PRESETS,
+  chordLabel,
+  useChordSynth,
+} from "@/hooks/perform/useChordSynth";
+import type { ChordQuality, ChordSlot } from "@/hooks/perform/useChordSynth";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Local Types ─────────────────────────────────────────────────────────────
 
 type GestureId = "open" | "pinch" | "two" | "fist" | "point";
-
-type DrumPreset = {
-  name: string;
-  bpm: number;
-  swing: number;
-  pattern: { kick: number[]; snare: number[]; hihat: number[]; perc: number[] };
-  levels: { kick: number; snare: number; hihat: number; perc: number };
-  description: string;
-};
-
-type InstrumentPreset = {
-  name: string;
-  oscillatorTypes: OscillatorType[];
-  detuneSpread: number;
-  filterFreq: number;
-  reverbWet: number;
-  attackTime: number;
-  releaseTime: number;
-};
-
-type ChordQuality =
-  | "major"
-  | "minor"
-  | "maj7"
-  | "min7"
-  | "dom7"
-  | "sus2"
-  | "sus4"
-  | "dim"
-  | "aug"
-  | "add9"
-  | "6"
-  | "min6";
-
-type ChordSlot = {
-  slot: number; // 1-8
-  root: string;
-  quality: ChordQuality;
-  octave: number;
-  inversion: 'root' | 'first' | 'second';
-};
 
 type HandState = {
   gesture: GestureId | null;
@@ -58,187 +26,7 @@ type HandState = {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const DRUM_PRESETS: DrumPreset[] = [
-  {
-    name: "Boom Bap",
-    bpm: 88,
-    swing: 0.55,
-    pattern: {
-      kick:  [1,0,0,0,0,0,1,0,0,1,0,0,0,0,0,0],
-      snare: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],
-      hihat: [1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0],
-      perc:  [0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0],
-    },
-    levels: { kick: 0.9, snare: 0.75, hihat: 0.5, perc: 0.45 },
-    description: "Hip-hop groove w/ swing",
-  },
-  {
-    name: "Trap",
-    bpm: 140,
-    swing: 0.1,
-    pattern: {
-      kick:  [1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
-      snare: [0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
-      hihat: [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
-      perc:  [0,0,1,0,0,0,0,1,0,0,1,0,0,0,1,0],
-    },
-    levels: { kick: 0.95, snare: 0.8, hihat: 0.25, perc: 0.5 },
-    description: "Hard trap, rolling hihat",
-  },
-  {
-    name: "R&B",
-    bpm: 72,
-    swing: 0.4,
-    pattern: {
-      kick:  [1,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0],
-      snare: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],
-      hihat: [1,0,0,1,0,0,1,0,0,1,0,0,1,0,0,0],
-      perc:  [0,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0],
-    },
-    levels: { kick: 0.85, snare: 0.7, hihat: 0.45, perc: 0.5 },
-    description: "Smooth R&B pocket",
-  },
-  {
-    name: "House",
-    bpm: 120,
-    swing: 0,
-    pattern: {
-      kick:  [1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0],
-      snare: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],
-      hihat: [0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0],
-      perc:  [0,1,0,0,0,0,0,1,0,0,0,0,0,1,0,0],
-    },
-    levels: { kick: 0.9, snare: 0.7, hihat: 0.5, perc: 0.45 },
-    description: "Four-on-floor house",
-  },
-  {
-    name: "Minimal",
-    bpm: 100,
-    swing: 0,
-    pattern: {
-      kick:  [1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
-      snare: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],
-      hihat: [1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0],
-      perc:  [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-    },
-    levels: { kick: 0.85, snare: 0.65, hihat: 0.4, perc: 0 },
-    description: "Sparse, clean groove",
-  },
-];
-
-const INSTRUMENT_PRESETS: InstrumentPreset[] = [
-  {
-    name: "Warm Keys",
-    oscillatorTypes: ["sine", "triangle"],
-    detuneSpread: 5,
-    filterFreq: 3000,
-    reverbWet: 0.2,
-    attackTime: 0.04,
-    releaseTime: 0.5,
-  },
-  {
-    name: "Soft Pad",
-    oscillatorTypes: ["sine", "sine"],
-    detuneSpread: 10,
-    filterFreq: 1500,
-    reverbWet: 0.5,
-    attackTime: 0.15,
-    releaseTime: 1.0,
-  },
-  {
-    name: "Glass Synth",
-    oscillatorTypes: ["sine", "triangle", "sawtooth"],
-    detuneSpread: 3,
-    filterFreq: 5000,
-    reverbWet: 0.3,
-    attackTime: 0.01,
-    releaseTime: 0.4,
-  },
-  {
-    name: "Bass",
-    oscillatorTypes: ["sawtooth", "square"],
-    detuneSpread: 0,
-    filterFreq: 800,
-    reverbWet: 0,
-    attackTime: 0.02,
-    releaseTime: 0.2,
-  },
-  {
-    name: "Brass-ish",
-    oscillatorTypes: ["sawtooth", "triangle"],
-    detuneSpread: 8,
-    filterFreq: 2500,
-    reverbWet: 0.1,
-    attackTime: 0.06,
-    releaseTime: 0.3,
-  },
-];
-
-const SLOT_PRESETS: Record<string, ChordSlot[]> = {
-  Pop: [
-    { slot:1, root:'C',  quality:'major', octave:4, inversion:'root' },
-    { slot:2, root:'G',  quality:'major', octave:4, inversion:'root' },
-    { slot:3, root:'A',  quality:'minor', octave:4, inversion:'root' },
-    { slot:4, root:'F',  quality:'major', octave:4, inversion:'root' },
-    { slot:5, root:'E',  quality:'minor', octave:4, inversion:'root' },
-    { slot:6, root:'D',  quality:'minor', octave:4, inversion:'root' },
-    { slot:7, root:'F',  quality:'maj7',  octave:4, inversion:'root' },
-    { slot:8, root:'G',  quality:'sus4',  octave:4, inversion:'root' },
-  ],
-  'R&B': [
-    { slot:1, root:'F',  quality:'maj7',  octave:4, inversion:'root' },
-    { slot:2, root:'G',  quality:'min7',  octave:4, inversion:'root' },
-    { slot:3, root:'A',  quality:'min7',  octave:4, inversion:'root' },
-    { slot:4, root:'C',  quality:'dom7',  octave:4, inversion:'root' },
-    { slot:5, root:'D',  quality:'min7',  octave:4, inversion:'root' },
-    { slot:6, root:'E',  quality:'min7',  octave:4, inversion:'root' },
-    { slot:7, root:'Bb', quality:'maj7',  octave:4, inversion:'root' },
-    { slot:8, root:'C',  quality:'dom7',  octave:5, inversion:'root' },
-  ],
-  Sad: [
-    { slot:1, root:'A',  quality:'minor', octave:4, inversion:'root' },
-    { slot:2, root:'F',  quality:'major', octave:4, inversion:'root' },
-    { slot:3, root:'C',  quality:'major', octave:4, inversion:'root' },
-    { slot:4, root:'G',  quality:'major', octave:4, inversion:'root' },
-    { slot:5, root:'D',  quality:'minor', octave:4, inversion:'root' },
-    { slot:6, root:'E',  quality:'minor', octave:4, inversion:'root' },
-    { slot:7, root:'F',  quality:'maj7',  octave:4, inversion:'root' },
-    { slot:8, root:'G',  quality:'sus4',  octave:4, inversion:'root' },
-  ],
-  Jazz: [
-    { slot:1, root:'D',  quality:'min7',  octave:4, inversion:'root' },
-    { slot:2, root:'G',  quality:'dom7',  octave:4, inversion:'root' },
-    { slot:3, root:'C',  quality:'maj7',  octave:4, inversion:'root' },
-    { slot:4, root:'A',  quality:'min7',  octave:4, inversion:'root' },
-    { slot:5, root:'F',  quality:'maj7',  octave:4, inversion:'root' },
-    { slot:6, root:'B',  quality:'min7',  octave:4, inversion:'root' },
-    { slot:7, root:'E',  quality:'dom7',  octave:4, inversion:'root' },
-    { slot:8, root:'A',  quality:'min7',  octave:5, inversion:'root' },
-  ],
-  'Trap Dark': [
-    { slot:1, root:'C',  quality:'minor', octave:4, inversion:'root' },
-    { slot:2, root:'Ab', quality:'major', octave:4, inversion:'root' },
-    { slot:3, root:'Eb', quality:'major', octave:4, inversion:'root' },
-    { slot:4, root:'Bb', quality:'minor', octave:4, inversion:'root' },
-    { slot:5, root:'F',  quality:'minor', octave:4, inversion:'root' },
-    { slot:6, root:'G',  quality:'minor', octave:4, inversion:'root' },
-    { slot:7, root:'Db', quality:'major', octave:4, inversion:'root' },
-    { slot:8, root:'G',  quality:'dom7',  octave:4, inversion:'root' },
-  ],
-  Gospel: [
-    { slot:1, root:'C',  quality:'maj7',  octave:4, inversion:'root' },
-    { slot:2, root:'D',  quality:'min7',  octave:4, inversion:'root' },
-    { slot:3, root:'E',  quality:'min7',  octave:4, inversion:'root' },
-    { slot:4, root:'F',  quality:'maj7',  octave:4, inversion:'root' },
-    { slot:5, root:'G',  quality:'dom7',  octave:4, inversion:'root' },
-    { slot:6, root:'A',  quality:'min7',  octave:4, inversion:'root' },
-    { slot:7, root:'D',  quality:'dom7',  octave:4, inversion:'root' },
-    { slot:8, root:'G',  quality:'sus4',  octave:4, inversion:'root' },
-  ],
-};
-
-const NOTE_NAMES = ["C","C#","D","Eb","E","F","F#","G","Ab","A","Bb","B"];
-const ROOTS = ["C","C#","D","Eb","E","F","F#","G","Ab","A","Bb","B"];
+const ROOTS = NOTE_NAMES;
 const QUALITIES: ChordQuality[] = ["major","minor","maj7","min7","dom7","sus2","sus4","dim","aug","add9","6","min6"];
 const GESTURE_LABELS: Record<GestureId, string> = {
   open: "OPEN",
@@ -251,492 +39,6 @@ const GESTURE_LABELS: Record<GestureId, string> = {
 // Latch timing constants
 const LATCH_HOLD_MS = 400;
 const LATCH_COOLDOWN_MS = 800;
-
-// ─── Music Utilities ─────────────────────────────────────────────────────────
-
-function noteNameToMidi(name: string, octave: number): number {
-  const idx = NOTE_NAMES.indexOf(name);
-  if (idx === -1) return 60;
-  return 12 * (octave + 1) + idx;
-}
-
-function midiToFreq(midi: number): number {
-  return 440 * Math.pow(2, (midi - 69) / 12);
-}
-
-function chordIntervals(quality: ChordQuality): number[] {
-  switch (quality) {
-    case "major": return [0, 4, 7];
-    case "minor": return [0, 3, 7];
-    case "maj7":  return [0, 4, 7, 11];
-    case "min7":  return [0, 3, 7, 10];
-    case "dom7":  return [0, 4, 7, 10];
-    case "sus2":  return [0, 2, 7];
-    case "sus4":  return [0, 5, 7];
-    case "dim":   return [0, 3, 6];
-    case "aug":   return [0, 4, 8];
-    case "add9":  return [0, 4, 7, 14];
-    case "6":     return [0, 4, 7, 9];
-    case "min6":  return [0, 3, 7, 9];
-  }
-}
-
-function safeExp(ratio: number): number {
-  return Math.max(0.0001, ratio);
-}
-
-function chordFrequencies(
-  root: string,
-  octave: number,
-  quality: ChordQuality,
-  inversion: "root" | "first" | "second"
-): number[] {
-  const baseMidi = noteNameToMidi(root, octave);
-  const intervals = chordIntervals(quality);
-  let notes = intervals.map((i) => baseMidi + i);
-
-  if (inversion === "first" && notes.length > 1) {
-    notes = [...notes.slice(1), notes[0] + 12];
-  } else if (inversion === "second" && notes.length > 2) {
-    notes = [...notes.slice(2), notes[0] + 12, notes[1] + 12];
-  }
-
-  return notes.map(midiToFreq);
-}
-
-function chordMidiNotes(
-  root: string,
-  octave: number,
-  quality: ChordQuality
-): number[] {
-  const baseMidi = noteNameToMidi(root, octave);
-  return chordIntervals(quality).map((i) => baseMidi + i);
-}
-
-function chordLabel(root: string, quality: ChordQuality): string {
-  const suffixes: Record<ChordQuality, string> = {
-    major: "", minor: "m", maj7: "maj7", min7: "m7",
-    dom7: "7", sus2: "sus2", sus4: "sus4", dim: "°",
-    aug: "aug", add9: "add9", 6: "6", min6: "m6",
-  };
-  return root + suffixes[quality];
-}
-
-// ─── Web Audio helpers ────────────────────────────────────────────────────────
-
-function createReverb(ctx: AudioContext, wet: number): { input: GainNode; output: GainNode } {
-  const input = ctx.createGain();
-  const dryGain = ctx.createGain();
-  const wetGain = ctx.createGain();
-  const output = ctx.createGain();
-
-  dryGain.gain.value = 1 - wet;
-  wetGain.gain.value = wet;
-
-  // Simple impulse response: white noise with exponential decay
-  const sampleRate = ctx.sampleRate;
-  const length = sampleRate * 2.5;
-  const impulse = ctx.createBuffer(2, length, sampleRate);
-  for (let ch = 0; ch < 2; ch++) {
-    const data = impulse.getChannelData(ch);
-    for (let i = 0; i < length; i++) {
-      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, 2.5);
-    }
-  }
-
-  const convolver = ctx.createConvolver();
-  convolver.buffer = impulse;
-
-  input.connect(dryGain);
-  input.connect(convolver);
-  convolver.connect(wetGain);
-  dryGain.connect(output);
-  wetGain.connect(output);
-
-  return { input, output };
-}
-
-// ─── Drum Engine Hook ─────────────────────────────────────────────────────────
-
-function useDrumEngine(destNode: AudioNode | null) {
-  const ctxRef = useRef<AudioContext | null>(null);
-  const masterGainRef = useRef<GainNode | null>(null);
-  const drumGainRef = useRef<GainNode | null>(null);
-  const filterRef = useRef<BiquadFilterNode | null>(null);
-  const schedulerRef = useRef<number | null>(null);
-  const stepRef = useRef(0);
-  const nextBeatTimeRef = useRef(0);
-  const playingRef = useRef(false);
-  const presetRef = useRef<DrumPreset>(DRUM_PRESETS[0]);
-  const bpmRef = useRef<number>(DRUM_PRESETS[0].bpm);
-
-  const [playing, setPlaying] = useState(false);
-  const [presetName, setPresetNameState] = useState(DRUM_PRESETS[0].name);
-  const [masterVolume, setMasterVolumeState] = useState(0.8);
-  const [drumVolume, setDrumVolumeState] = useState(0.7);
-  const [filterCutoff, setFilterCutoffState] = useState(4000);
-  const [currentBpm, setCurrentBpmState] = useState(DRUM_PRESETS[0].bpm);
-
-  const ensureCtx = useCallback(() => {
-    if (ctxRef.current) {
-      // Resume if suspended (browser requires user gesture)
-      if (ctxRef.current.state === "suspended") ctxRef.current.resume();
-      return ctxRef.current;
-    }
-    const ctx = new AudioContext();
-    ctxRef.current = ctx;
-
-    const masterGain = ctx.createGain();
-    masterGain.gain.value = masterVolume;
-    masterGainRef.current = masterGain;
-
-    const drumGain = ctx.createGain();
-    drumGain.gain.value = drumVolume;
-    drumGainRef.current = drumGain;
-
-    const filter = ctx.createBiquadFilter();
-    filter.type = "lowpass";
-    filter.frequency.value = filterCutoff;
-    filterRef.current = filter;
-
-    // Add dynamics compressor
-    const comp = ctx.createDynamicsCompressor();
-    comp.threshold.value = -6;
-    comp.knee.value = 10;
-    comp.ratio.value = 6;
-    comp.attack.value = 0.003;
-    comp.release.value = 0.1;
-
-    drumGain.connect(filter);
-    filter.connect(masterGain);
-    masterGain.connect(comp);
-    comp.connect(ctx.destination);
-
-    if (destNode) {
-      comp.connect(destNode as AudioNode);
-    }
-
-    return ctx;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [destNode]);
-
-  const scheduleKick = useCallback((ctx: AudioContext, gain: GainNode, time: number, level: number) => {
-    const osc = ctx.createOscillator();
-    const env = ctx.createGain();
-    osc.connect(env);
-    env.connect(gain);
-    osc.frequency.setValueAtTime(140, time);
-    osc.frequency.exponentialRampToValueAtTime(safeExp(40), time + 0.15);
-    env.gain.setValueAtTime(0.001, time);
-    env.gain.linearRampToValueAtTime(level, time + 0.001);
-    env.gain.exponentialRampToValueAtTime(0.001, time + 0.4);
-    osc.start(time);
-    osc.stop(time + 0.45);
-  }, []);
-
-  const scheduleSnare = useCallback((ctx: AudioContext, gain: GainNode, time: number, level: number) => {
-    // White noise component
-    const bufLen = ctx.sampleRate * 0.2;
-    const buf = ctx.createBuffer(1, bufLen, ctx.sampleRate);
-    const data = buf.getChannelData(0);
-    for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
-    const noise = ctx.createBufferSource();
-    noise.buffer = buf;
-    const noiseFilter = ctx.createBiquadFilter();
-    noiseFilter.type = "bandpass";
-    noiseFilter.frequency.value = 1200;
-    noiseFilter.Q.value = 1.5;
-    const noiseEnv = ctx.createGain();
-    noise.connect(noiseFilter);
-    noiseFilter.connect(noiseEnv);
-    noiseEnv.connect(gain);
-    noiseEnv.gain.setValueAtTime(level * 0.7, time);
-    noiseEnv.gain.exponentialRampToValueAtTime(0.001, time + 0.18);
-    noise.start(time);
-    noise.stop(time + 0.2);
-
-    // Sine tone component
-    const osc = ctx.createOscillator();
-    const oscEnv = ctx.createGain();
-    osc.connect(oscEnv);
-    oscEnv.connect(gain);
-    osc.frequency.value = 200;
-    oscEnv.gain.setValueAtTime(level * 0.5, time);
-    oscEnv.gain.exponentialRampToValueAtTime(0.001, time + 0.1);
-    osc.start(time);
-    osc.stop(time + 0.12);
-  }, []);
-
-  const scheduleHihat = useCallback((ctx: AudioContext, gain: GainNode, time: number, level: number) => {
-    const bufLen = ctx.sampleRate * 0.1;
-    const buf = ctx.createBuffer(1, bufLen, ctx.sampleRate);
-    const data = buf.getChannelData(0);
-    for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
-    const noise = ctx.createBufferSource();
-    noise.buffer = buf;
-    const hpf = ctx.createBiquadFilter();
-    hpf.type = "highpass";
-    hpf.frequency.value = 7000;
-    const env = ctx.createGain();
-    noise.connect(hpf);
-    hpf.connect(env);
-    env.connect(gain);
-    env.gain.setValueAtTime(level * 0.45, time);
-    env.gain.exponentialRampToValueAtTime(0.001, time + 0.06);
-    noise.start(time);
-    noise.stop(time + 0.08);
-  }, []);
-
-  const schedulePerc = useCallback((ctx: AudioContext, gain: GainNode, time: number, level: number) => {
-    const bufLen = ctx.sampleRate * 0.12;
-    const buf = ctx.createBuffer(1, bufLen, ctx.sampleRate);
-    const data = buf.getChannelData(0);
-    for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
-    const noise = ctx.createBufferSource();
-    noise.buffer = buf;
-    const bpf = ctx.createBiquadFilter();
-    bpf.type = "bandpass";
-    bpf.frequency.value = 600;
-    bpf.Q.value = 2;
-
-    const osc = ctx.createOscillator();
-    osc.frequency.value = 600;
-    const oscEnv = ctx.createGain();
-    osc.connect(oscEnv);
-    oscEnv.gain.setValueAtTime(level * 0.4, time);
-    oscEnv.gain.exponentialRampToValueAtTime(0.001, time + 0.07);
-    osc.start(time);
-    osc.stop(time + 0.08);
-    oscEnv.connect(gain);
-
-    const env = ctx.createGain();
-    noise.connect(bpf);
-    bpf.connect(env);
-    env.connect(gain);
-    env.gain.setValueAtTime(level * 0.3, time);
-    env.gain.exponentialRampToValueAtTime(0.001, time + 0.06);
-    noise.start(time);
-    noise.stop(time + 0.08);
-  }, []);
-
-  const scheduleStep = useCallback((ctx: AudioContext, drumGain: GainNode, step: number, time: number) => {
-    const p = presetRef.current;
-    if (p.pattern.kick[step]  && drumGainRef.current) scheduleKick(ctx, drumGain, time, p.levels.kick);
-    if (p.pattern.snare[step] && drumGainRef.current) scheduleSnare(ctx, drumGain, time, p.levels.snare);
-    if (p.pattern.hihat[step] && drumGainRef.current) scheduleHihat(ctx, drumGain, time, p.levels.hihat);
-    if (p.pattern.perc[step]  && drumGainRef.current) schedulePerc(ctx, drumGain, time, p.levels.perc);
-  }, [scheduleKick, scheduleSnare, scheduleHihat, schedulePerc]);
-
-  const runScheduler = useCallback(() => {
-    const ctx = ctxRef.current;
-    const dGain = drumGainRef.current;
-    if (!ctx || !dGain || !playingRef.current) return;
-
-    const lookahead = 0.1; // seconds
-    const p = presetRef.current;
-    const stepDuration = 60 / bpmRef.current / 4; // 16th note duration
-
-    while (nextBeatTimeRef.current < ctx.currentTime + lookahead) {
-      const step = stepRef.current % 16;
-      // Apply swing: odd steps are pushed forward
-      const swingOffset = (step % 2 === 1) ? stepDuration * (p.swing - 0.5) : 0;
-      const time = nextBeatTimeRef.current + swingOffset;
-      scheduleStep(ctx, dGain, step, time);
-      nextBeatTimeRef.current += stepDuration;
-      stepRef.current++;
-    }
-
-    schedulerRef.current = requestAnimationFrame(runScheduler);
-  }, [scheduleStep]);
-
-  const play = useCallback(() => {
-    const ctx = ensureCtx();
-    if (playingRef.current) return;
-    playingRef.current = true;
-    setPlaying(true);
-    stepRef.current = 0;
-    nextBeatTimeRef.current = ctx.currentTime;
-    runScheduler();
-  }, [ensureCtx, runScheduler]);
-
-  const stop = useCallback(() => {
-    playingRef.current = false;
-    setPlaying(false);
-    if (schedulerRef.current) {
-      cancelAnimationFrame(schedulerRef.current);
-      schedulerRef.current = null;
-    }
-  }, []);
-
-  const setPreset = useCallback((name: string) => {
-    const preset = DRUM_PRESETS.find((p) => p.name === name);
-    if (!preset) return;
-    presetRef.current = preset;
-    bpmRef.current = preset.bpm;
-    setPresetNameState(name);
-    setCurrentBpmState(preset.bpm);
-  }, []);
-
-  const setBpm = useCallback((bpm: number) => {
-    const clamped = Math.max(50, Math.min(200, bpm));
-    bpmRef.current = clamped;
-    setCurrentBpmState(clamped);
-  }, []);
-
-  const setMasterVolume = useCallback((vol: number) => {
-    setMasterVolumeState(vol);
-    if (masterGainRef.current) masterGainRef.current.gain.value = vol;
-  }, []);
-
-  const setDrumVolume = useCallback((vol: number) => {
-    setDrumVolumeState(vol);
-    if (drumGainRef.current) drumGainRef.current.gain.value = vol;
-  }, []);
-
-  const setFilterCutoff = useCallback((freq: number) => {
-    setFilterCutoffState(freq);
-    if (filterRef.current) filterRef.current.frequency.value = freq;
-  }, []);
-
-  const getMasterGain = useCallback(() => masterGainRef.current, []);
-  // getCtx ensures the AudioContext exists — creates it if needed.
-  // This allows chord synth to share the same context before drums start.
-  const getCtx = useCallback(() => {
-    if (!ctxRef.current) ensureCtx();
-    return ctxRef.current;
-  }, [ensureCtx]);
-
-  return {
-    playing,
-    presetName,
-    masterVolume,
-    drumVolume,
-    filterCutoff,
-    currentBpm,
-    play,
-    stop,
-    setPreset,
-    setBpm,
-    setMasterVolume,
-    setDrumVolume,
-    setFilterCutoff,
-    currentPreset: presetRef.current,
-    getMasterGain,
-    getCtx,
-  };
-}
-
-// ─── Chord Synth Hook ─────────────────────────────────────────────────────────
-// Uses the SAME AudioContext as the drum engine to ensure chords play while drums run.
-
-function useChordSynth(destNode: AudioNode | null, getSharedCtx: () => AudioContext | null) {
-  const activeNotesRef = useRef<number[]>([]);
-  const currentChordRef = useRef<string | null>(null);
-  const chordGainRef = useRef<GainNode | null>(null);
-  const activeVoicesRef = useRef<{ osc: OscillatorNode; env: GainNode }[]>([]);
-
-  const [activeNotes, setActiveNotes] = useState<number[]>([]);
-
-  const ensureCtx = useCallback((): AudioContext => {
-    // Use the shared AudioContext from the drum engine
-    const shared = getSharedCtx();
-    if (shared) {
-      // Resume if suspended (browser policy)
-      if (shared.state === "suspended") shared.resume();
-      return shared;
-    }
-    // Fallback: create standalone context (should not happen in normal flow)
-    const ctx = new AudioContext();
-    return ctx;
-  }, [getSharedCtx]);
-
-  const ensureChordGain = useCallback((ctx: AudioContext): GainNode => {
-    if (chordGainRef.current) return chordGainRef.current;
-    const gain = ctx.createGain();
-    gain.gain.value = 0.7;
-    // Connect chord gain → destination (speakers)
-    gain.connect(ctx.destination);
-    // Also connect to recording destination if available
-    if (destNode) {
-      try { gain.connect(destNode); } catch { /* already connected or invalid */ }
-    }
-    chordGainRef.current = gain;
-    return gain;
-  }, [destNode]);
-
-  const releaseChord = useCallback(() => {
-    // Fade out and stop all active voices
-    const voices = activeVoicesRef.current;
-    if (voices.length > 0) {
-      const ctx = getSharedCtx();
-      const now = ctx?.currentTime ?? 0;
-      for (const v of voices) {
-        try {
-          v.env.gain.cancelScheduledValues(now);
-          v.env.gain.setValueAtTime(v.env.gain.value, now);
-          v.env.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
-          v.osc.stop(now + 0.1);
-        } catch { /* already stopped */ }
-      }
-      activeVoicesRef.current = [];
-    }
-    activeNotesRef.current = [];
-    setActiveNotes([]);
-    currentChordRef.current = null;
-  }, [getSharedCtx]);
-
-  const playChord = useCallback((chord: { root: string; quality: ChordQuality; octave: number; inversion: "root" | "first" | "second" }) => {
-    const ctx = ensureCtx();
-    const chordGain = ensureChordGain(ctx);
-    const { root, quality, octave, inversion } = chord;
-    const chordName = chordLabel(root, quality);
-
-    // Release previous chord cleanly
-    releaseChord();
-
-    const freqs = chordFrequencies(root, octave, quality, inversion);
-    activeNotesRef.current = chordMidiNotes(root, octave, quality);
-    setActiveNotes(activeNotesRef.current);
-    currentChordRef.current = chordName;
-
-    const preset = INSTRUMENT_PRESETS[0]; // Warm Keys
-    const reverb = createReverb(ctx, preset.reverbWet);
-    // Route reverb output → chordGain (which goes to speakers + recording)
-    reverb.output.connect(chordGain);
-
-    const newVoices: { osc: OscillatorNode; env: GainNode }[] = [];
-
-    freqs.forEach((freq, i) => {
-      const osc = ctx.createOscillator();
-      const oscType = preset.oscillatorTypes[i % preset.oscillatorTypes.length];
-      osc.type = oscType;
-      osc.frequency.value = freq;
-      if (preset.detuneSpread && i > 0) {
-        osc.detune.value = (Math.random() - 0.5) * preset.detuneSpread;
-      }
-
-      const env = ctx.createGain();
-      env.gain.setValueAtTime(0, ctx.currentTime);
-      env.gain.linearRampToValueAtTime(0.28, ctx.currentTime + preset.attackTime);
-      env.connect(reverb.input);
-
-      osc.connect(env);
-      osc.start(ctx.currentTime);
-      // Don't auto-stop; we control release explicitly
-      newVoices.push({ osc, env });
-    });
-
-    activeVoicesRef.current = newVoices;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ensureCtx, ensureChordGain, releaseChord]);
-
-  return {
-    activeNotes,
-    playChord,
-    releaseChord,
-    currentChord: currentChordRef.current,
-  };
-}
 
 // ─── Piano Keyboard Component ─────────────────────────────────────────────────
 
@@ -877,6 +179,13 @@ export function PerformModal({
   });
   useEffect(() => { localStorage.setItem("verses:showZones", String(showZoneGrid)); }, [showZoneGrid]);
 
+  // Filter range (adjustable low/high cutoff in Hz)
+  const [filterLo, setFilterLo] = useState(200);
+  const [filterHi, setFilterHi] = useState(8000);
+
+  // Live volume level for visual feedback (0-1)
+  const [liveVolume, setLiveVolume] = useState(0);
+
   // Hooks
   const drum = useDrumEngine(recDestNode);
   const chord = useChordSynth(recDestNode, drum.getCtx);
@@ -1010,9 +319,13 @@ export function PerformModal({
       const gesture = left.gesture;
       
       // Update volume/filter continuously while hand is visible
-      const vol = 1 - left.wristY; // high hand = loud
+      // Exponential curve: hand position 0-1 maps to volume via x^2.5
+      // This gives finer control at low volumes and a natural loudness feel
+      const rawVol = Math.max(0, Math.min(1, 1 - left.wristY)); // high hand = loud
+      const vol = Math.pow(rawVol, 2.5);
       lastLeftVolumeRef.current = vol;
-      lastLeftFilterRef.current = 200 + left.wristX * 7800;
+      setLiveVolume(rawVol);
+      lastLeftFilterRef.current = filterLo + left.wristX * (filterHi - filterLo);
       
       // Apply volume (respecting mute)
       if (beatLatchRef.current !== 'muted') {
@@ -1109,7 +422,7 @@ export function PerformModal({
       // This is intentional — sustain by default when hand leaves
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [beatSource, chord, chordSlots, activeSlot, drum]);
+  }, [beatSource, chord, chordSlots, activeSlot, drum, filterLo, filterHi]);
 
   // Camera controls
   // ── Detection loop (RAF-based) ──
@@ -1355,6 +668,20 @@ export function PerformModal({
                 </span>
               </div>
             )}
+            {/* Left-hand volume bar (vertical, left edge of camera) */}
+            {camActive && leftHand.present && (
+              <div className="absolute bottom-12 left-3 top-12 flex w-3 flex-col justify-end overflow-hidden rounded-full bg-ink/40 backdrop-blur-sm">
+                <div
+                  className="w-full rounded-full transition-all duration-75"
+                  style={{
+                    height: `${Math.round(liveVolume * 100)}%`,
+                    background: liveVolume > 0.8 ? "rgba(248,113,113,0.7)"
+                      : liveVolume > 0.5 ? "rgba(201,168,76,0.7)"
+                      : "rgba(201,168,76,0.45)",
+                  }}
+                />
+              </div>
+            )}
             {/* Zone overlay indicator at bottom of camera */}
             {camActive && showZoneGrid && (
               <div className="absolute bottom-3 left-3 right-3 flex gap-1">
@@ -1526,6 +853,25 @@ export function PerformModal({
                   </div>
                 </div>
 
+                {/* Filter range (gesture-controlled sweep bounds) */}
+                <div className="space-y-2">
+                  <div className="mb-1.5 text-[9px] uppercase tracking-widest text-ink-mute/50">Filter Range (left hand X)</div>
+                  <div>
+                    <div className="mb-1 flex items-center justify-between text-[9px] text-ink-mute/50">
+                      <span>Low</span><span>{filterLo} Hz</span>
+                    </div>
+                    <input type="range" min="50" max="2000" step="50" value={filterLo}
+                      onChange={(e) => setFilterLo(Math.min(parseInt(e.target.value), filterHi - 200))} className="w-full" />
+                  </div>
+                  <div>
+                    <div className="mb-1 flex items-center justify-between text-[9px] text-ink-mute/50">
+                      <span>High</span><span>{filterHi} Hz</span>
+                    </div>
+                    <input type="range" min="1000" max="16000" step="200" value={filterHi}
+                      onChange={(e) => setFilterHi(Math.max(parseInt(e.target.value), filterLo + 200))} className="w-full" />
+                  </div>
+                </div>
+
                 {/* Step Sequencer (read-only visualization) */}
                 <div>
                   <div className="mb-1.5 text-[9px] uppercase tracking-widest text-ink-mute/50">Pattern</div>
@@ -1549,7 +895,12 @@ export function PerformModal({
                     {INSTRUMENT_PRESETS.map(preset => (
                       <button
                         key={preset.name}
-                        className="rounded bg-ink-surface/40 px-2 py-1 text-[10px] text-ink-mute/60 hover:text-ink-text"
+                        onClick={() => chord.setInstrumentPreset(preset.name)}
+                        className={`rounded px-2 py-1 text-[10px] transition-colors ${
+                          chord.instrumentName === preset.name
+                            ? 'bg-amber-gold/15 text-amber-gold'
+                            : 'bg-ink-surface/40 text-ink-mute/60 hover:text-ink-text'
+                        }`}
                       >
                         {preset.name}
                       </button>

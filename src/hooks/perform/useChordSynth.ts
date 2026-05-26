@@ -260,24 +260,79 @@ export function createReverb(ctx: AudioContext, wet: number): { input: GainNode;
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
-export function useChordSynth(destNode: AudioNode | null) {
-  const ctxRef           = useRef<AudioContext | null>(null);
-  const activeNotesRef   = useRef<number[]>([]);
-  const currentChordRef  = useRef<string | null>(null);
-  const presetIndexRef   = useRef<number>(0);
+/**
+ * Chord synthesiser hook.
+ *
+ * @param destNode     AudioNode for recording capture (optional).
+ * @param getSharedCtx Getter for a shared AudioContext (e.g. from drum engine).
+ *                     When provided, the chord synth piggy-backs on that context
+ *                     so drums + chords share a single AudioContext.
+ *                     When omitted, creates its own context on first use.
+ */
+export function useChordSynth(
+  destNode: AudioNode | null,
+  getSharedCtx?: () => AudioContext | null,
+) {
+  const ctxRef             = useRef<AudioContext | null>(null);
+  const activeNotesRef     = useRef<number[]>([]);
+  const currentChordRef    = useRef<string | null>(null);
+  const presetIndexRef     = useRef<number>(0);
+  const chordGainRef       = useRef<GainNode | null>(null);
+  const activeVoicesRef    = useRef<{ osc: OscillatorNode; env: GainNode }[]>([]);
 
-  const [activeNotes, setActiveNotes]     = useState<number[]>([]);
+  const [activeNotes, setActiveNotes]       = useState<number[]>([]);
   const [instrumentName, setInstrumentName] = useState<string>(INSTRUMENT_PRESETS[0].name);
 
-  const ensureCtx = useCallback(() => {
+  const ensureCtx = useCallback((): AudioContext => {
+    // Prefer shared context when available
+    if (getSharedCtx) {
+      const shared = getSharedCtx();
+      if (shared) {
+        if (shared.state === "suspended") shared.resume();
+        return shared;
+      }
+    }
+    // Fallback: own context
     if (ctxRef.current) return ctxRef.current;
-    const ctx = new AudioContext();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+    const ctx = new Ctx() as AudioContext;
     ctxRef.current = ctx;
     return ctx;
-  }, []);
+  }, [getSharedCtx]);
 
-  // Call releaseChord defined below — use a ref to avoid circular dep
-  const releaseChordRef = useRef<() => void>(() => {/* initialised below */});
+  const ensureChordGain = useCallback((ctx: AudioContext): GainNode => {
+    if (chordGainRef.current) return chordGainRef.current;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.7;
+    gain.connect(ctx.destination);
+    if (destNode) {
+      try { gain.connect(destNode); } catch { /* already connected */ }
+    }
+    chordGainRef.current = gain;
+    return gain;
+  }, [destNode]);
+
+  const releaseChord = useCallback(() => {
+    // Fade out and stop all active voices
+    const voices = activeVoicesRef.current;
+    if (voices.length > 0) {
+      const ctx = getSharedCtx ? getSharedCtx() : ctxRef.current;
+      const now = ctx?.currentTime ?? 0;
+      for (const v of voices) {
+        try {
+          v.env.gain.cancelScheduledValues(now);
+          v.env.gain.setValueAtTime(v.env.gain.value, now);
+          v.env.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+          v.osc.stop(now + 0.1);
+        } catch { /* already stopped */ }
+      }
+      activeVoicesRef.current = [];
+    }
+    activeNotesRef.current  = [];
+    currentChordRef.current = null;
+    setActiveNotes([]);
+  }, [getSharedCtx]);
 
   const playChord = useCallback(
     (chord: {
@@ -287,11 +342,12 @@ export function useChordSynth(destNode: AudioNode | null) {
       inversion: "root" | "first" | "second";
     }) => {
       const ctx               = ensureCtx();
+      const chordGain         = ensureChordGain(ctx);
       const { root, quality, octave, inversion } = chord;
       const chordName         = chordLabel(root, quality);
 
-      // Release whatever is currently playing
-      releaseChordRef.current();
+      // Release previous chord cleanly
+      releaseChord();
 
       const freqs  = chordFrequencies(root, octave, quality, inversion);
       activeNotesRef.current = chordMidiNotes(root, octave, quality);
@@ -300,7 +356,9 @@ export function useChordSynth(destNode: AudioNode | null) {
 
       const preset = INSTRUMENT_PRESETS[presetIndexRef.current];
       const reverb = createReverb(ctx, preset.reverbWet);
-      reverb.output.connect(destNode ?? ctx.destination);
+      reverb.output.connect(chordGain);
+
+      const newVoices: { osc: OscillatorNode; env: GainNode }[] = [];
 
       freqs.forEach((freq, i) => {
         const osc     = ctx.createOscillator();
@@ -313,38 +371,20 @@ export function useChordSynth(destNode: AudioNode | null) {
 
         const env = ctx.createGain();
         env.gain.setValueAtTime(0, ctx.currentTime);
-        env.gain.linearRampToValueAtTime(0.3, ctx.currentTime + preset.attackTime);
+        env.gain.linearRampToValueAtTime(0.28, ctx.currentTime + preset.attackTime);
         env.connect(reverb.input);
 
         osc.connect(env);
         osc.start(ctx.currentTime);
-        // Give enough time for attack + sustained ring + release
-        osc.stop(ctx.currentTime + preset.attackTime + preset.releaseTime + 2);
-
-        // Schedule auto-release after attack completes
-        setTimeout(() => {
-          try {
-            env.gain.cancelScheduledValues(ctx.currentTime);
-            env.gain.setValueAtTime(0.3, ctx.currentTime);
-            env.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + preset.releaseTime);
-          } catch {
-            // node may already be stopped
-          }
-        }, preset.attackTime * 1000);
+        // Don't auto-stop; we control release explicitly via releaseChord()
+        newVoices.push({ osc, env });
       });
+
+      activeVoicesRef.current = newVoices;
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [ensureCtx, destNode]
+    [ensureCtx, ensureChordGain, releaseChord]
   );
-
-  const releaseChord = useCallback(() => {
-    activeNotesRef.current  = [];
-    currentChordRef.current = null;
-    setActiveNotes([]);
-  }, []);
-
-  // Keep ref in sync so playChord can call the latest releaseChord
-  releaseChordRef.current = releaseChord;
 
   const setInstrumentPreset = useCallback((nameOrIndex: string | number) => {
     if (typeof nameOrIndex === "number") {

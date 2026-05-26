@@ -99,17 +99,25 @@ export function useDrumEngine(destNode: AudioNode | null) {
   const nextBeatTimeRef = useRef(0);
   const playingRef     = useRef(false);
   const presetRef      = useRef<DrumPreset>(DRUM_PRESETS[0]);
+  const bpmRef         = useRef<number>(DRUM_PRESETS[0].bpm);
 
   const [playing, setPlaying]              = useState(false);
   const [presetName, setPresetNameState]   = useState(DRUM_PRESETS[0].name);
   const [masterVolume, setMasterVolumeState] = useState(0.8);
   const [drumVolume, setDrumVolumeState]   = useState(0.7);
   const [filterCutoff, setFilterCutoffState] = useState(4000);
+  const [currentBpm, setCurrentBpmState]   = useState(DRUM_PRESETS[0].bpm);
 
   // ── Lazy AudioContext creation ──────────────────────────────────────────────
   const ensureCtx = useCallback(() => {
-    if (ctxRef.current) return ctxRef.current;
-    const ctx = new AudioContext();
+    if (ctxRef.current) {
+      // Resume if suspended (browser requires user gesture)
+      if (ctxRef.current.state === "suspended") ctxRef.current.resume();
+      return ctxRef.current;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+    const ctx = new Ctx() as AudioContext;
     ctxRef.current = ctx;
 
     const masterGain = ctx.createGain();
@@ -272,7 +280,7 @@ export function useDrumEngine(destNode: AudioNode | null) {
 
     const lookahead    = 0.1; // seconds
     const p            = presetRef.current;
-    const stepDuration = 60 / p.bpm / 4; // 16th-note duration
+    const stepDuration = 60 / bpmRef.current / 4; // 16th-note duration
 
     while (nextBeatTimeRef.current < ctx.currentTime + lookahead) {
       const step = stepRef.current % 16;
@@ -314,7 +322,15 @@ export function useDrumEngine(destNode: AudioNode | null) {
     const preset = DRUM_PRESETS.find((p) => p.name === name);
     if (!preset) return;
     presetRef.current = preset;
+    bpmRef.current = preset.bpm;
     setPresetNameState(name);
+    setCurrentBpmState(preset.bpm);
+  }, []);
+
+  const setBpm = useCallback((bpm: number) => {
+    const clamped = Math.max(50, Math.min(200, bpm));
+    bpmRef.current = clamped;
+    setCurrentBpmState(clamped);
   }, []);
 
   const setMasterVolume = useCallback((vol: number) => {
@@ -333,7 +349,12 @@ export function useDrumEngine(destNode: AudioNode | null) {
   }, []);
 
   const getMasterGain = useCallback(() => masterGainRef.current, []);
-  const getCtx        = useCallback(() => ctxRef.current, []);
+  // getCtx ensures the AudioContext exists — creates it if needed.
+  // This allows chord synth to share the same context before drums start.
+  const getCtx = useCallback(() => {
+    if (!ctxRef.current) ensureCtx();
+    return ctxRef.current;
+  }, [ensureCtx]);
 
   return {
     // State
@@ -342,12 +363,14 @@ export function useDrumEngine(destNode: AudioNode | null) {
     masterVolume,
     drumVolume,
     filterCutoff,
+    currentBpm,
     currentPreset: presetRef.current,
     // Transport
     play,
     stop,
     // Setters
     setPreset,
+    setBpm,
     setMasterVolume,
     setDrumVolume,
     setFilterCutoff,

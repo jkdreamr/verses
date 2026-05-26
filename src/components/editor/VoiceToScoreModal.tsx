@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useToast } from "@/components/Toast";
+import { detectPitchYIN, freqToMidi, midiToNoteName } from "@/lib/pitchDetection";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -82,103 +83,6 @@ const QUALITY_PARAMS: Record<QualityMode, {
 
 let noteIdCounter = 0;
 function nextNoteId(): string { return `n_${++noteIdCounter}_${Date.now()}`; }
-
-// ---------------------------------------------------------------------------
-// Pitch detection — YIN algorithm (parameterized by quality mode)
-// ---------------------------------------------------------------------------
-
-function detectPitchYIN(
-  buffer: Float32Array<ArrayBuffer>,
-  sampleRate: number,
-  params: { yinThreshold: number; silenceRms: number; noisyFallback: number },
-): { freq: number; confidence: number; rms: number } | null {
-  const W = buffer.length;
-  const tau_max = Math.floor(W / 2);
-
-  // RMS check for silence
-  let rms = 0;
-  for (let i = 0; i < W; i++) rms += buffer[i] * buffer[i];
-  rms = Math.sqrt(rms / W);
-  if (rms < params.silenceRms) return null;
-
-  // Step 1: difference function
-  const d = new Float32Array(tau_max);
-  for (let tau = 1; tau < tau_max; tau++) {
-    let sum = 0;
-    for (let i = 0; i < tau_max; i++) {
-      const delta = buffer[i] - buffer[i + tau];
-      sum += delta * delta;
-    }
-    d[tau] = sum;
-  }
-
-  // Step 2: cumulative mean normalized difference
-  const cmnd = new Float32Array(tau_max);
-  cmnd[0] = 1;
-  let runningSum = 0;
-  for (let tau = 1; tau < tau_max; tau++) {
-    runningSum += d[tau];
-    cmnd[tau] = runningSum > 0 ? (d[tau] * tau) / runningSum : 0;
-  }
-
-  // Step 3: find first dip below threshold
-  const threshold = params.yinThreshold;
-  let tau_estimate = -1;
-  for (let tau = 2; tau < tau_max; tau++) {
-    if (cmnd[tau] < threshold) {
-      // local minimum search
-      while (tau + 1 < tau_max && cmnd[tau + 1] < cmnd[tau]) tau++;
-      tau_estimate = tau;
-      break;
-    }
-  }
-
-  if (tau_estimate === -1) {
-    // No dip found — find global minimum
-    let min = Infinity;
-    for (let tau = 2; tau < tau_max; tau++) {
-      if (cmnd[tau] < min) {
-        min = cmnd[tau];
-        tau_estimate = tau;
-      }
-    }
-    if (min > params.noisyFallback) return null;
-  }
-
-  // Step 4: parabolic interpolation for sub-sample accuracy
-  if (tau_estimate > 1 && tau_estimate < tau_max - 1) {
-    const alpha = cmnd[tau_estimate - 1];
-    const beta = cmnd[tau_estimate];
-    const gamma = cmnd[tau_estimate + 1];
-    const denom = 2 * (2 * beta - alpha - gamma);
-    if (Math.abs(denom) > 1e-10) {
-      const offset = (gamma - alpha) / denom;
-      tau_estimate += offset;
-    }
-  }
-
-  const freq = sampleRate / tau_estimate;
-  const cmndAtTau = cmnd[Math.round(Math.max(1, Math.min(tau_max - 1, tau_estimate)))];
-  const confidence = 1 - Math.min(1, cmndAtTau / threshold);
-
-  // Frequency range: 75–1100 Hz (full vocal range)
-  if (freq < 75 || freq > 1100) return null;
-
-  return { freq, confidence, rms };
-}
-
-// ---------------------------------------------------------------------------
-// MIDI / note helpers
-// ---------------------------------------------------------------------------
-
-const freqToMidi = (freq: number): number =>
-  Math.round(12 * Math.log2(freq / 440) + 69);
-
-const midiToNoteName = (midi: number): string => {
-  const names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-  const octave = Math.floor(midi / 12) - 1;
-  return names[midi % 12] + octave;
-};
 
 // ---------------------------------------------------------------------------
 // Raw sample → Note segmentation (improved with onset detection)
@@ -320,6 +224,7 @@ function drawPianoRoll(
   notes: NoteEvent[],
   totalDuration: number,
   playheadTime: number | null,
+  selectedNoteId: string | null = null,
 ) {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
@@ -419,6 +324,13 @@ function drawPianoRoll(
     ctx.quadraticCurveTo(x, y + 1, x + r, y + 1);
     ctx.closePath();
     ctx.fill();
+
+    // Selection ring
+    if (selectedNoteId === note.id) {
+      ctx.strokeStyle = "rgba(201,168,76,1)";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
 
     // Note name label inside block if wide enough — crisp monospace
     if (w > 28) {
@@ -674,8 +586,8 @@ export function VoiceToScoreModal({
 
   useEffect(() => {
     if (!canvasRef.current || notes.length === 0) return;
-    drawPianoRoll(canvasRef.current, notes, totalDuration, playheadTime);
-  }, [notes, totalDuration, playheadTime]);
+    drawPianoRoll(canvasRef.current, notes, totalDuration, playheadTime, selectedNoteId);
+  }, [notes, totalDuration, playheadTime, selectedNoteId]);
 
   // ── Level meter (RAF loop) ─────────────────────────────────────────────────
 
@@ -1542,7 +1454,42 @@ export function VoiceToScoreModal({
               className="overflow-x-auto border border-ink-line/30"
               style={{ maxHeight: 360, background: "#141414" }}
             >
-              <canvas ref={canvasRef} style={{ display: "block" }} />
+              <canvas
+                ref={canvasRef}
+                style={{ display: "block", cursor: "pointer" }}
+                onClick={(e) => {
+                  const canvas = canvasRef.current;
+                  if (!canvas || notes.length === 0) return;
+                  const rect = canvas.getBoundingClientRect();
+                  const scaleX = canvas.width / rect.width;
+                  const scaleY = canvas.height / rect.height;
+                  const cx = (e.clientX - rect.left) * scaleX;
+                  const cy = (e.clientY - rect.top) * scaleY;
+
+                  // Reconstruct MIDI range (must match drawPianoRoll)
+                  const midiValues = notes.map(n => n.midi);
+                  const rawMin = Math.min(...midiValues);
+                  const rawMax = Math.max(...midiValues);
+                  const spread = rawMax - rawMin;
+                  const padding = Math.max(4, Math.floor((14 - spread) / 2));
+                  const midiMax = Math.min(127, rawMax + padding);
+
+                  // Hit-test each note
+                  let hitId: string | null = null;
+                  for (const note of notes) {
+                    const row = midiMax - note.midi;
+                    const ny = row * PIANO_ROLL_ROW_H;
+                    const nx = PIANO_ROLL_LABEL_W + note.startTime * PIANO_ROLL_PX_PER_SEC;
+                    const nw = Math.max(3, note.duration * PIANO_ROLL_PX_PER_SEC - 2);
+                    const nh = PIANO_ROLL_ROW_H - 2;
+                    if (cx >= nx && cx <= nx + nw && cy >= ny + 1 && cy <= ny + 1 + nh) {
+                      hitId = note.id;
+                      break;
+                    }
+                  }
+                  setSelectedNoteId(hitId === selectedNoteId ? null : hitId);
+                }}
+              />
             </div>
           </div>
         )}
@@ -1564,16 +1511,19 @@ export function VoiceToScoreModal({
             </div>
             <div className="flex flex-wrap gap-1.5">
               {notes.map((note, i) => (
-                <span
+                <button
                   key={i}
+                  onClick={() => setSelectedNoteId(selectedNoteId === note.id ? null : note.id)}
                   title={`Start: ${note.startTime.toFixed(2)}s · Duration: ${note.duration.toFixed(2)}s · Confidence: ${Math.round(note.confidence * 100)}%`}
                   className={[
-                    "inline-flex items-baseline gap-1 border px-2 py-0.5",
-                    note.confidence >= 0.7
-                      ? "border-amber-gold/35 text-amber-gold"
-                      : note.confidence >= 0.4
-                        ? "border-amber-gold/15 text-amber-gold/55"
-                        : "border-ink-line/40 text-ink-mute/40",
+                    "inline-flex items-baseline gap-1 border px-2 py-0.5 transition-colors",
+                    selectedNoteId === note.id
+                      ? "border-amber-gold bg-amber-gold/10 text-amber-gold"
+                      : note.confidence >= 0.7
+                        ? "border-amber-gold/35 text-amber-gold hover:bg-amber-gold/5"
+                        : note.confidence >= 0.4
+                          ? "border-amber-gold/15 text-amber-gold/55 hover:bg-amber-gold/5"
+                          : "border-ink-line/40 text-ink-mute/40 hover:bg-ink-surface/40",
                   ].join(" ")}
                 >
                   <span className="font-mono text-xs tracking-tight">{note.name}</span>
@@ -1583,14 +1533,60 @@ export function VoiceToScoreModal({
                   {note.confidence < 0.4 && (
                     <span className="font-mono text-[9px] opacity-35">?</span>
                   )}
-                </span>
+                </button>
               ))}
             </div>
           </div>
         )}
 
+        {/* ── Staff view (simple notation) ──────────────────────────────── */}
+        {hasResults && notes.length > 0 && viewMode === "staff" && (
+          <div className="mb-6">
+            <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute/60">
+              Staff (simplified)
+            </div>
+            <div className="overflow-x-auto border border-ink-line/30 bg-[#141414] p-4" style={{ minHeight: 120 }}>
+              <svg viewBox={`0 0 ${Math.max(400, notes.length * 40 + 60)} 100`} className="h-24 w-full" style={{ minWidth: notes.length * 40 + 60 }}>
+                {/* Staff lines */}
+                {[30, 40, 50, 60, 70].map(y => (
+                  <line key={y} x1="0" y1={y} x2="100%" y2={y} stroke="rgba(255,255,255,0.08)" strokeWidth="0.5" />
+                ))}
+                {/* Clef label */}
+                <text x="8" y="54" fill="rgba(201,168,76,0.5)" fontSize="14" fontFamily="serif">&#119070;</text>
+                {/* Notes */}
+                {notes.map((note, i) => {
+                  const x = 50 + i * 40;
+                  // Map MIDI to staff position: C4=60 is on middle (ledger) line
+                  const staffPos = (note.midi - 60) * 2.5;
+                  const y = 70 - staffPos;
+                  const clampedY = Math.max(10, Math.min(90, y));
+                  const isSelected = selectedNoteId === note.id;
+                  const conf = note.confidence;
+                  return (
+                    <g key={note.id} onClick={() => setSelectedNoteId(isSelected ? null : note.id)} style={{ cursor: "pointer" }}>
+                      {/* Ledger lines if needed */}
+                      {clampedY > 70 && <line x1={x - 6} y1={80} x2={x + 6} y2={80} stroke="rgba(255,255,255,0.1)" strokeWidth="0.5" />}
+                      {clampedY < 30 && <line x1={x - 6} y1={20} x2={x + 6} y2={20} stroke="rgba(255,255,255,0.1)" strokeWidth="0.5" />}
+                      {/* Note head */}
+                      <ellipse
+                        cx={x} cy={clampedY} rx="4.5" ry="3.5"
+                        fill={isSelected ? "rgba(201,168,76,1)" : conf >= 0.7 ? "rgba(201,168,76,0.85)" : conf >= 0.4 ? "rgba(201,168,76,0.5)" : "rgba(120,120,120,0.6)"}
+                        transform={`rotate(-15,${x},${clampedY})`}
+                      />
+                      {/* Stem */}
+                      <line x1={x + 4} y1={clampedY} x2={x + 4} y2={clampedY - 20} stroke={conf >= 0.4 ? "rgba(201,168,76,0.5)" : "rgba(120,120,120,0.3)"} strokeWidth="0.8" />
+                      {/* Note name below */}
+                      <text x={x} y={95} textAnchor="middle" fill="rgba(255,255,255,0.25)" fontSize="7" fontFamily="monospace">{note.name}</text>
+                    </g>
+                  );
+                })}
+              </svg>
+            </div>
+          </div>
+        )}
+
         {/* ── Detailed note table ────────────────────────────────────────── */}
-        {hasResults && notes.length > 0 && (
+        {hasResults && notes.length > 0 && viewMode === "list" && (
           <div className="mb-6 overflow-x-auto">
             <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute/60">
               Detected Notes
@@ -1622,7 +1618,10 @@ export function VoiceToScoreModal({
                 {notes.map((note, i) => (
                   <tr
                     key={i}
-                    className="border-b border-ink-line/30 last:border-0 hover:bg-ink-surface/60"
+                    onClick={() => setSelectedNoteId(selectedNoteId === note.id ? null : note.id)}
+                    className={`cursor-pointer border-b border-ink-line/30 last:border-0 transition-colors ${
+                      selectedNoteId === note.id ? "bg-amber-gold/8" : "hover:bg-ink-surface/60"
+                    }`}
                   >
                     <td className="py-1.5 pr-3 text-ink-mute/40">{i + 1}</td>
                     <td className="py-1.5 pr-4">

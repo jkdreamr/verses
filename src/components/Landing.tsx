@@ -27,7 +27,7 @@ export function Landing() {
         <span className="font-serif text-lg tracking-tight text-ink-text/90">
           Verses
         </span>
-        <nav className="flex items-center gap-6">
+        <nav className="flex items-center gap-3 sm:gap-6">
           <button
             onClick={() =>
               featuresRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -66,7 +66,7 @@ export function Landing() {
           <div className="mt-14 flex items-center gap-6">
             <Link
               href="/app"
-              className="group relative overflow-hidden border border-amber-gold/40 px-8 py-3.5 font-mono text-[10px] uppercase tracking-[0.25em] text-amber-gold transition-all duration-300 hover:border-amber-gold/70 hover:shadow-[0_0_30px_rgba(201,168,76,0.08)]"
+              className="group relative overflow-hidden border border-amber-gold/40 px-6 py-3 font-mono text-[10px] uppercase tracking-[0.25em] text-amber-gold transition-all duration-300 hover:border-amber-gold/70 hover:shadow-[0_0_30px_rgba(201,168,76,0.08)] sm:px-8 sm:py-3.5"
             >
               <span className="relative z-10">Open in browser</span>
               <span className="absolute inset-0 -translate-x-full bg-amber-gold/5 transition-transform duration-300 group-hover:translate-x-0" />
@@ -82,8 +82,8 @@ export function Landing() {
           </div>
         </div>
 
-        {/* Scroll hint */}
-        <div className="absolute bottom-12 left-1/2 -translate-x-1/2">
+        {/* Scroll hint — hidden on small screens, gentle pulse on desktop */}
+        <div className="absolute bottom-12 left-1/2 hidden -translate-x-1/2 animate-pulse sm:block">
           <div className="h-8 w-px bg-gradient-to-b from-transparent to-ink-mute/20" />
         </div>
       </section>
@@ -218,7 +218,7 @@ function FeatureCard({
   body: string;
 }) {
   return (
-    <div className="group border-b border-r border-ink-line/10 px-8 py-12 transition-colors duration-300 hover:bg-ink-surface/30 sm:px-10 sm:py-14">
+    <div className="group border-b border-ink-line/10 px-8 py-12 transition-colors duration-300 hover:bg-ink-surface/30 sm:border-r sm:px-10 sm:py-14">
       <span className="font-mono text-[8px] uppercase tracking-[0.3em] text-ink-mute/30">
         {num}
       </span>
@@ -242,7 +242,7 @@ function ShowcaseCard({
   body: string;
 }) {
   return (
-    <div className="bg-ink-surface/40 px-10 py-14 transition-colors duration-300 hover:bg-ink-surface/60">
+    <div className="bg-ink-surface/40 px-6 py-10 transition-colors duration-300 hover:bg-ink-surface/60 sm:px-10 sm:py-14">
       <span className="font-mono text-[8px] uppercase tracking-[0.3em] text-amber-gold/50">
         {num}
       </span>

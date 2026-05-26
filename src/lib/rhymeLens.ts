@@ -379,24 +379,48 @@ function isVowel(ch: string): boolean {
 
 // Map common spelling patterns to normalized phonetic form
 function applyPhoneticMappings(s: string): string {
-  return s
+  let r = s
     .replace(/ph/g, "f")
     .replace(/ck/g, "k")
     .replace(/qu/g, "kw")
     .replace(/x/g, "ks")
     .replace(/gh(?=[aeiou])/g, "g")     // gh before vowel = g
     .replace(/gh/g, "")                  // silent gh at end
+    .replace(/ea(?=[dklmnprst]|$)/g, "ee") // ea → ee before common consonants or word-end (sea, beat, clean, read)
     .replace(/tion/g, "shun")
     .replace(/sion/g, "zhun")
     .replace(/tch/g, "ch")
-    .replace(/dge/g, "j")
-    .replace(/([aeiou])e$/g, "$1")       // silent final e: "name" → "nam"
-    .replace(/([^aeiou])e$/g, "$1")      // consonant + e → just consonant
+    .replace(/dge/g, "j");
+
+  // Silent final e — only strip when there's still a vowel left in the stem
+  // Don't strip from double-vowel endings (free, see, tree) or when it
+  // would leave zero vowels (cycle → keep the e as the syllable nucleus)
+  if (r.length >= 3 && r.endsWith("e")) {
+    const beforeE = r.slice(0, -1);
+    const hasVowelInStem = /[aeiou]/.test(beforeE);
+    // Keep the e if: (1) stem has no other vowel, or (2) preceding char is also a vowel (ee, oe, etc.)
+    if (hasVowelInStem && !/[aeiou]$/.test(beforeE)) {
+      r = beforeE; // true silent e: name→nam, place→plac, cycle→cycl... but check below
+    }
+    // For words like "cycle", "brittle" — the le/re ending carries a vowel sound
+    // Re-check: if stripping e left no vowel in the final syllable, restore it
+    if (r === beforeE) {
+      const finalCluster = r.match(/[^aeiou]+$/)?.[0] ?? "";
+      if (finalCluster.length >= 2 && /l$/.test(finalCluster)) {
+        // -cle, -tle, -ble, -ple, -dle, -gle → restore e (syllabic l)
+        r = r + "e";
+      }
+    }
+  }
+
+  r = r
     .replace(/er$/g, "r")               // final er → r-colored
     .replace(/ur$/g, "r")
     .replace(/ir$/g, "r")
     .replace(/ing$/g, "ing")
     .replace(/([a-z])\1+/g, "$1");      // collapse doubled letters
+
+  return r;
 }
 
 function extractVowelSkeleton(s: string): string {
@@ -475,7 +499,9 @@ export function computePhoneticShape(normalized: string): PhoneticShape {
   const initialConsonantCluster = getInitialCluster(phonetic);
   const finalConsonantCluster = getFinalCluster(phonetic);
   const finalVowelGroup = getFinalVowelGroup(phonetic);
-  const syllableCount = estimateSyllableCount(phonetic);
+  // Count syllables from the original word — phonetic mapping (er→r etc.)
+  // can collapse vowels and undercount (e.g. "center" → "centr" = 1 vowel)
+  const syllableCount = Math.max(estimateSyllableCount(phonetic), estimateSyllableCount(normalized));
   const syllables = splitIntoSyllables(phonetic);
 
   // Final rhyme nucleus = final vowel group + any trailing consonants
@@ -560,6 +586,18 @@ function scoreEndRhyme(a: PhoneticShape, b: PhoneticShape): number {
   // Final consonant cluster match
   if (a.finalConsonantCluster && b.finalConsonantCluster && a.finalConsonantCluster === b.finalConsonantCluster) {
     score += 0.15;
+  }
+  // Near-rhyme bonus: endings differ only in vowel (center/winter, ember/timber)
+  // Same final consonant cluster + similar ending shape length + both multisyllabic
+  if (score < 0.4 && a.finalConsonantCluster && b.finalConsonantCluster &&
+      a.finalConsonantCluster === b.finalConsonantCluster &&
+      a.finalConsonantCluster.length >= 2 &&
+      a.syllableCount >= 2 && b.syllableCount >= 2) {
+    // Check if ending shapes match after stripping the vowel portion
+    const stripVowel = (s: string) => s.replace(/^[aeiou]+/, "");
+    if (stripVowel(a.endingShape) === stripVowel(b.endingShape) && stripVowel(a.endingShape).length >= 2) {
+      score += 0.55; // strong near-rhyme
+    }
   }
   // Multi-syllabic bonus — ONLY when there's a meaningful phonetic match
   // (requires at least a vowel match, not just a consonant cluster)
@@ -1401,6 +1439,46 @@ export function analyzeRhymeLens(
           strength: group.length >= 4 ? "strong" : "medium",
         });
       }
+    }
+  }
+
+  // ── Step 8.5: Merge compatible families that share the same rhyme nucleus ─
+  // e.g. end rhyme {snare, glare} + internal/cross {air, stare} → one family
+  const MERGEABLE_TYPES = new Set<RhymeType>(["end", "chain", "internal", "cross"]);
+  for (let i = 0; i < families.length; i++) {
+    const fi = families[i];
+    if (!MERGEABLE_TYPES.has(fi.type)) continue;
+    const nucleusI = fi.spans[0]?.phonetic.finalRhymeNucleus;
+    if (!nucleusI) continue;
+
+    for (let j = families.length - 1; j > i; j--) {
+      const fj = families[j];
+      if (!MERGEABLE_TYPES.has(fj.type)) continue;
+      const nucleusJ = fj.spans[0]?.phonetic.finalRhymeNucleus;
+      if (!nucleusJ || nucleusI !== nucleusJ) continue;
+
+      // Merge fj into fi — absorb unique spans
+      const existingIds = new Set(fi.spans.map((s) => s.id));
+      for (const s of fj.spans) {
+        if (!existingIds.has(s.id)) {
+          fi.spans.push(s);
+          existingIds.add(s.id);
+        }
+      }
+      // Promote type: if either is end/chain, the merged family is end/chain
+      if ((fj.type === "end" || fj.type === "chain") && fi.type !== "end" && fi.type !== "chain") {
+        fi.type = fj.type;
+      }
+      fi.confidence = Math.max(fi.confidence, fj.confidence);
+      if (fi.spans.length >= 3 && (fi.type === "end" || fi.type === "internal" || fi.type === "cross")) {
+        fi.type = "chain";
+      }
+      fi.label = endRhymeLabel(fi.spans);
+      fi.explanation = fi.spans.length >= 3
+        ? `Rhyme chain — ${fi.spans.length} words share the same ending sound`
+        : `End rhyme — matching ending sounds`;
+      fi.strength = fi.confidence >= 0.7 ? "strong" : fi.confidence >= 0.5 ? "medium" : "light";
+      families.splice(j, 1);
     }
   }
 
