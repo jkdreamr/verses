@@ -193,9 +193,9 @@ export function YoutubeBar({
     togglePlay();
   });
 
-  // External controllers (e.g. RecorderModal) can dispatch these events
-  // to play / pause the loaded YouTube beat. The play event accepts an
-  // optional `detail.startAt` (seconds) to seek before playback.
+  // External controllers (e.g. RecorderModal, PerformModal) can dispatch these events
+  // to control the loaded YouTube beat. The play event accepts an optional
+  // `detail.startAt` (seconds) to seek before playback.
   useEffect(() => {
     const onPlay = (ev: Event) => {
       const p = playerRef.current;
@@ -214,19 +214,55 @@ export function YoutubeBar({
     const onPause = () => {
       const p = playerRef.current;
       if (!p) return;
+      try { p.pauseVideo(); } catch { /* ignore */ }
+    };
+    const onToggle = () => {
+      const p = playerRef.current;
+      if (!p) return;
       try {
-        p.pauseVideo();
-      } catch {
-        /* ignore */
+        if (playing) p.pauseVideo();
+        else p.playVideo();
+      } catch { /* ignore */ }
+    };
+    const onVolume = (ev: Event) => {
+      const p = playerRef.current;
+      if (!p) return;
+      const detail = (ev as CustomEvent<{ volume: number }>).detail;
+      if (typeof detail?.volume === "number") {
+        try {
+          p.setVolume(Math.max(0, Math.min(100, detail.volume)));
+          setVolume(Math.round(detail.volume));
+        } catch { /* ignore */ }
       }
     };
+    const onLoopOn = () => setLoopOn(true);
+    const onLoopOff = () => setLoopOn(false);
+    const onSeek = (ev: Event) => {
+      const p = playerRef.current;
+      if (!p) return;
+      const detail = (ev as CustomEvent<{ time: number }>).detail;
+      if (typeof detail?.time === "number") {
+        try { p.seekTo(detail.time, true); } catch { /* ignore */ }
+      }
+    };
+
     window.addEventListener("verses:beat-play", onPlay);
     window.addEventListener("verses:beat-pause", onPause);
+    window.addEventListener("verses:beat-toggle", onToggle);
+    window.addEventListener("verses:beat-volume", onVolume);
+    window.addEventListener("verses:beat-loop-on", onLoopOn);
+    window.addEventListener("verses:beat-loop-off", onLoopOff);
+    window.addEventListener("verses:beat-seek", onSeek);
     return () => {
       window.removeEventListener("verses:beat-play", onPlay);
       window.removeEventListener("verses:beat-pause", onPause);
+      window.removeEventListener("verses:beat-toggle", onToggle);
+      window.removeEventListener("verses:beat-volume", onVolume);
+      window.removeEventListener("verses:beat-loop-on", onLoopOn);
+      window.removeEventListener("verses:beat-loop-off", onLoopOff);
+      window.removeEventListener("verses:beat-seek", onSeek);
     };
-  }, []);
+  }, [playing]);
 
   const onLoad = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();

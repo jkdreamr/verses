@@ -7,6 +7,7 @@ Before the demo:
 - Have a song open with a few lines typed
 - Camera and mic permissions pre-granted
 - Perform mode tested and working
+- Either a YouTube beat URL ready to paste, or Boom Bap confirmed working
 
 ---
 
@@ -21,46 +22,89 @@ So I wanted to build one focused environment where I could keep the early creati
 ## Q2: How exactly does it work?
 
 **[Show the editor]**
-"This is the writing surface. It's intentionally minimal — just a textarea with autosave, version history, and a rhyme finder. Highlight a word, the rhymes float in. Paste a YouTube link at the bottom, it plays under your writing."
+"This is the writing surface. Intentionally minimal — autosave, version history, a rhyme finder. Highlight a word, the rhymes float up. You can paste a YouTube link at the bottom and it plays under your writing while you're still on the page."
 
-**[Show vocal takes]**
-"You can record vocal ideas — audio or video — and they save directly to this song. Simple, raw, no mixing. Just a take."
+**[Show vocal takes briefly]**
+"You can record a raw vocal idea — audio or video — and it saves directly to the song. No mixing, no cloud upload. Just a take."
 
 **[Open Perform mode]**
-"This is the new part. Perform mode. I'll click Start Camera — and now MediaPipe is tracking my hands in real-time. The hand skeleton you can see is 21 landmark points being detected per hand, 30 frames per second, entirely in the browser.
+"This is the part I want to show you. Perform mode. I'll click Start Camera."
 
-My left hand controls the drums. I'll raise an open palm — and the beat starts. I'll lower it to a fist and it stops. The height of my hand controls volume. The horizontal position changes the filter — more to the right, and it opens up.
+*[Click Start Camera, wait for hand skeleton to appear]*
 
-My right hand triggers chords. I've mapped my gestures — open palm is C major, pinch is G, two fingers is A minor, fist is F. When I change my gesture, the synth crossfades to the new chord. No clicks.
+"Now MediaPipe is tracking my hands in real-time — 21 landmark points per hand, 30 frames per second, running entirely in the browser.
 
-Watch — I can perform a basic I-V-vi-IV without touching anything except raising and lowering my hands."
+For the beat, I can either use a YouTube URL I already have open — the beat from the editor carries over — or I can just pick a drum preset. I'll use Boom Bap."
 
-**[Perform briefly]**
+**[Raise left open palm, hold for ~0.4s → beat starts]**
 
-"And if I want to capture it, I hit Record, perform, then save it as a take."
+"I raise my left open palm and hold it for about half a second. The beat latches on — it's going to keep looping now even when I put my hand down."
 
-**[Show Voice to Score]**
-"The other new feature is Voice to Score. I hum a melody — maybe four or five notes — and the app detects pitch in real-time using autocorrelation. Then it shows me a piano roll of what I sang. Not perfect sheet music — it's a 'melody sketch.' But for a first pass, it's enough to remember the shape of the idea."
+*[Lower hand]*
 
-**[Demo voice to score briefly]**
+"See — hand is down. Beat is still going. That's intentional. If it only played while I held my hand up, I couldn't use both hands freely. The latch frees me up."
 
-## Q3: Potential use cases / social value?
+**[Make right fist → silence, then raise open palm to re-latch]**
 
-"The most direct use case is solo songwriters in early stages — before you're ready for a DAW, when you're still sketching. But I also think there's an interesting accessibility angle: the gesture-based instrument means someone who doesn't play piano can still explore harmony physically. Raise your hand in different positions, find a chord that feels right to the lyric.
+"Left fist stops it. Open palm again — latches back on."
 
-There's also a performance angle — you could use this as a live looping sketch tool for a beat-making session, or even a performance interface where gestures drive a live set. The technology is all here."
+**[Use right open hand in different horizontal zones]**
+
+"Now my right hand controls chords. I've got 8 chord slots mapped. With an open hand, moving left to right across the frame, I'm hitting slots 1 through 4."
+
+*[Move right hand slowly across zones, show slot grid updating]*
+
+"Watch the slot grid — it's tracking which zone my hand is in. Each zone is a different chord."
+
+**[Switch to two-finger gesture, sweep zones]**
+
+"Two fingers gets me slots 5 through 8. Same zone logic, different gesture. So I've got eight chords total across just two hand shapes."
+
+**[Make right fist]**
+
+"Fist cuts everything. Immediate silence."
+
+*[Show SILENCE label on screen]*
+
+"And pinch is a sustain toggle — holds the chord even if I change my hand shape."
+
+**[Hit Record, perform a short phrase, stop]**
+
+"I'll hit Record and do a quick pass."
+
+*[Perform 15–20 seconds: latch beat, play through a few chord slots]*
+
+"Stop. And I can save that as a Take — it lives in this song."
+
+**[Close Perform, open Voice to Score]**
+
+"The other piece is Voice to Score. Let me show you."
+
+*[Open Voice to Score, click Record, sing a 4-note melody, click Stop]*
+
+"I just sang four notes. The app ran YIN pitch detection — a proper fundamental frequency algorithm — and here's the piano roll."
+
+*[Show piano roll with note names]*
+
+"Each block is a note: name, start time, duration. If the result looks off I can hit Re-analyze and it'll reprocess the same recording — I don't have to sing again. And I can play the original audio back to compare."
+
+*[Play back original recording if result is good]*
+
+"It's not sheet music. It's a melody sketch. But that's the right thing for this stage of writing — you just want to know the shape of the idea."
+
+## Q3: What's the point of all this?
+
+"The app keeps you in control. It doesn't generate music for you. Your hands, your voice, your song. Verses just removes the friction between the idea and the capture.
+
+There's also an accessibility angle I find interesting — the gesture instrument means someone who doesn't play piano can still explore harmony physically. Move your hand, find a chord that feels right to the lyric."
 
 ## Q4: What would you add?
 
-"A few things I'd prioritize next:
+"MIDI output is the obvious next step — same gestures, but triggering any external synth or DAW via WebMIDI. That would make it genuinely useful in a production workflow, not just for sketching.
 
-First, MIDI output. Right now the chord synth only plays audio. With the WebMIDI API, you could trigger any external instrument or DAW with the same gestures. That would make it genuinely useful in a production workflow.
+Sample-based drums are something I want too. The procedural sounds work, but they lack character.
 
-Second, better pitch detection — the autocorrelation method struggles with vibrato and quiet notes. I'd try the YIN algorithm or a small ML model like SPICE.
-
-Third, sample-based drums. The procedural sounds are functional but they lack character. I'd add royalty-free sample packs as an option alongside the synthesized presets.
-
-And honestly — I'd just want more people to use it and tell me where the friction is. The core idea feels right. The execution is early."
+And honestly — I'd want more people to use it and break it. The core idea feels right. The execution is early."
 
 ---
 

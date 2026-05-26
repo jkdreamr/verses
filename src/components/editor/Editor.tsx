@@ -582,6 +582,7 @@ export function Editor({ songId }: { songId: string }) {
         onClose={() => setPerformOpen(false)}
         songId={song.id}
         onTakeSaved={() => setTakesReloadKey((k) => k + 1)}
+        youtubeSession={youtube}
       />
 
       <VoiceToScoreModal

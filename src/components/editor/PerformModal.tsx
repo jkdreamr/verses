@@ -35,14 +35,18 @@ type ChordQuality =
   | "dom7"
   | "sus2"
   | "sus4"
-  | "dim";
+  | "dim"
+  | "aug"
+  | "add9"
+  | "6"
+  | "min6";
 
-type ChordMapping = {
-  gesture: GestureId;
+type ChordSlot = {
+  slot: number; // 1-8
   root: string;
   quality: ChordQuality;
   octave: number;
-  inversion: "root" | "first" | "second";
+  inversion: 'root' | 'first' | 'second';
 };
 
 type HandState = {
@@ -78,7 +82,7 @@ const DRUM_PRESETS: DrumPreset[] = [
       hihat: [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
       perc:  [0,0,1,0,0,0,0,1,0,0,1,0,0,0,1,0],
     },
-    levels: { kick: 0.95, snare: 0.8, hihat: 0.35, perc: 0.5 },
+    levels: { kick: 0.95, snare: 0.8, hihat: 0.25, perc: 0.5 },
     description: "Hard trap, rolling hihat",
   },
   {
@@ -170,54 +174,83 @@ const INSTRUMENT_PRESETS: InstrumentPreset[] = [
   },
 ];
 
-const CHORD_MAP_PRESETS: Record<string, ChordMapping[]> = {
+const SLOT_PRESETS: Record<string, ChordSlot[]> = {
   Pop: [
-    { gesture: "open",  root: "C",  quality: "major", octave: 4, inversion: "root" },
-    { gesture: "pinch", root: "G",  quality: "major", octave: 4, inversion: "root" },
-    { gesture: "two",   root: "A",  quality: "minor", octave: 4, inversion: "root" },
-    { gesture: "fist",  root: "F",  quality: "major", octave: 4, inversion: "root" },
-    { gesture: "point", root: "E",  quality: "minor", octave: 4, inversion: "root" },
+    { slot:1, root:'C',  quality:'major', octave:4, inversion:'root' },
+    { slot:2, root:'G',  quality:'major', octave:4, inversion:'root' },
+    { slot:3, root:'A',  quality:'minor', octave:4, inversion:'root' },
+    { slot:4, root:'F',  quality:'major', octave:4, inversion:'root' },
+    { slot:5, root:'E',  quality:'minor', octave:4, inversion:'root' },
+    { slot:6, root:'D',  quality:'minor', octave:4, inversion:'root' },
+    { slot:7, root:'F',  quality:'maj7',  octave:4, inversion:'root' },
+    { slot:8, root:'G',  quality:'sus4',  octave:4, inversion:'root' },
   ],
-  "R&B": [
-    { gesture: "open",  root: "F",  quality: "maj7",  octave: 4, inversion: "root" },
-    { gesture: "pinch", root: "E",  quality: "min7",  octave: 4, inversion: "root" },
-    { gesture: "two",   root: "A",  quality: "min7",  octave: 4, inversion: "root" },
-    { gesture: "fist",  root: "G",  quality: "major", octave: 4, inversion: "root" },
-    { gesture: "point", root: "D",  quality: "minor", octave: 4, inversion: "root" },
+  'R&B': [
+    { slot:1, root:'F',  quality:'maj7',  octave:4, inversion:'root' },
+    { slot:2, root:'G',  quality:'min7',  octave:4, inversion:'root' },
+    { slot:3, root:'A',  quality:'min7',  octave:4, inversion:'root' },
+    { slot:4, root:'C',  quality:'dom7',  octave:4, inversion:'root' },
+    { slot:5, root:'D',  quality:'min7',  octave:4, inversion:'root' },
+    { slot:6, root:'E',  quality:'min7',  octave:4, inversion:'root' },
+    { slot:7, root:'Bb', quality:'maj7',  octave:4, inversion:'root' },
+    { slot:8, root:'C',  quality:'dom7',  octave:5, inversion:'root' },
   ],
   Sad: [
-    { gesture: "open",  root: "A",  quality: "minor", octave: 4, inversion: "root" },
-    { gesture: "pinch", root: "F",  quality: "major", octave: 4, inversion: "root" },
-    { gesture: "two",   root: "C",  quality: "major", octave: 4, inversion: "root" },
-    { gesture: "fist",  root: "G",  quality: "major", octave: 4, inversion: "root" },
-    { gesture: "point", root: "E",  quality: "minor", octave: 4, inversion: "root" },
+    { slot:1, root:'A',  quality:'minor', octave:4, inversion:'root' },
+    { slot:2, root:'F',  quality:'major', octave:4, inversion:'root' },
+    { slot:3, root:'C',  quality:'major', octave:4, inversion:'root' },
+    { slot:4, root:'G',  quality:'major', octave:4, inversion:'root' },
+    { slot:5, root:'D',  quality:'minor', octave:4, inversion:'root' },
+    { slot:6, root:'E',  quality:'minor', octave:4, inversion:'root' },
+    { slot:7, root:'F',  quality:'maj7',  octave:4, inversion:'root' },
+    { slot:8, root:'G',  quality:'sus4',  octave:4, inversion:'root' },
   ],
   Jazz: [
-    { gesture: "open",  root: "D",  quality: "min7",  octave: 4, inversion: "root" },
-    { gesture: "pinch", root: "G",  quality: "dom7",  octave: 4, inversion: "root" },
-    { gesture: "two",   root: "C",  quality: "maj7",  octave: 4, inversion: "root" },
-    { gesture: "fist",  root: "A",  quality: "min7",  octave: 4, inversion: "root" },
-    { gesture: "point", root: "B",  quality: "min7",  octave: 4, inversion: "root" },
+    { slot:1, root:'D',  quality:'min7',  octave:4, inversion:'root' },
+    { slot:2, root:'G',  quality:'dom7',  octave:4, inversion:'root' },
+    { slot:3, root:'C',  quality:'maj7',  octave:4, inversion:'root' },
+    { slot:4, root:'A',  quality:'min7',  octave:4, inversion:'root' },
+    { slot:5, root:'F',  quality:'maj7',  octave:4, inversion:'root' },
+    { slot:6, root:'B',  quality:'min7',  octave:4, inversion:'root' },
+    { slot:7, root:'E',  quality:'dom7',  octave:4, inversion:'root' },
+    { slot:8, root:'A',  quality:'min7',  octave:5, inversion:'root' },
+  ],
+  'Trap Dark': [
+    { slot:1, root:'C',  quality:'minor', octave:4, inversion:'root' },
+    { slot:2, root:'Ab', quality:'major', octave:4, inversion:'root' },
+    { slot:3, root:'Eb', quality:'major', octave:4, inversion:'root' },
+    { slot:4, root:'Bb', quality:'minor', octave:4, inversion:'root' },
+    { slot:5, root:'F',  quality:'minor', octave:4, inversion:'root' },
+    { slot:6, root:'G',  quality:'minor', octave:4, inversion:'root' },
+    { slot:7, root:'Db', quality:'major', octave:4, inversion:'root' },
+    { slot:8, root:'G',  quality:'dom7',  octave:4, inversion:'root' },
+  ],
+  Gospel: [
+    { slot:1, root:'C',  quality:'maj7',  octave:4, inversion:'root' },
+    { slot:2, root:'D',  quality:'min7',  octave:4, inversion:'root' },
+    { slot:3, root:'E',  quality:'min7',  octave:4, inversion:'root' },
+    { slot:4, root:'F',  quality:'maj7',  octave:4, inversion:'root' },
+    { slot:5, root:'G',  quality:'dom7',  octave:4, inversion:'root' },
+    { slot:6, root:'A',  quality:'min7',  octave:4, inversion:'root' },
+    { slot:7, root:'D',  quality:'dom7',  octave:4, inversion:'root' },
+    { slot:8, root:'G',  quality:'sus4',  octave:4, inversion:'root' },
   ],
 };
 
 const NOTE_NAMES = ["C","C#","D","Eb","E","F","F#","G","Ab","A","Bb","B"];
 const ROOTS = ["C","C#","D","Eb","E","F","F#","G","Ab","A","Bb","B"];
-const QUALITIES: ChordQuality[] = ["major","minor","maj7","min7","dom7","sus2","sus4","dim"];
+const QUALITIES: ChordQuality[] = ["major","minor","maj7","min7","dom7","sus2","sus4","dim","aug","add9","6","min6"];
 const GESTURE_LABELS: Record<GestureId, string> = {
-  open: "Open Palm",
-  pinch: "Pinch",
-  two: "Peace ✌",
-  fist: "Fist",
-  point: "Point ☞",
+  open: "OPEN",
+  pinch: "PINCH",
+  two: "TWO",
+  fist: "FIST",
+  point: "POINT",
 };
-const GESTURE_ICONS: Record<GestureId, string> = {
-  open: "🖐",
-  pinch: "🤌",
-  two: "✌️",
-  fist: "✊",
-  point: "☝️",
-};
+
+// Latch timing constants
+const LATCH_HOLD_MS = 400;
+const LATCH_COOLDOWN_MS = 800;
 
 // ─── Music Utilities ─────────────────────────────────────────────────────────
 
@@ -241,7 +274,15 @@ function chordIntervals(quality: ChordQuality): number[] {
     case "sus2":  return [0, 2, 7];
     case "sus4":  return [0, 5, 7];
     case "dim":   return [0, 3, 6];
+    case "aug":   return [0, 4, 8];
+    case "add9":  return [0, 4, 7, 14];
+    case "6":     return [0, 4, 7, 9];
+    case "min6":  return [0, 3, 7, 9];
   }
+}
+
+function safeExp(ratio: number): number {
+  return Math.max(0.0001, ratio);
 }
 
 function chordFrequencies(
@@ -276,6 +317,7 @@ function chordLabel(root: string, quality: ChordQuality): string {
   const suffixes: Record<ChordQuality, string> = {
     major: "", minor: "m", maj7: "maj7", min7: "m7",
     dom7: "7", sus2: "sus2", sus4: "sus4", dim: "°",
+    aug: "aug", add9: "add9", 6: "6", min6: "m6",
   };
   return root + suffixes[quality];
 }
@@ -351,13 +393,22 @@ function useDrumEngine(destNode: AudioNode | null) {
     filter.frequency.value = filterCutoff;
     filterRef.current = filter;
 
+    // Add dynamics compressor
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -6;
+    comp.knee.value = 10;
+    comp.ratio.value = 6;
+    comp.attack.value = 0.003;
+    comp.release.value = 0.1;
+
     drumGain.connect(filter);
     filter.connect(masterGain);
+    masterGain.connect(comp);
+    comp.connect(ctx.destination);
 
     if (destNode) {
-      masterGain.connect(destNode as AudioNode);
+      comp.connect(destNode as AudioNode);
     }
-    masterGain.connect(ctx.destination);
 
     return ctx;
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -368,8 +419,8 @@ function useDrumEngine(destNode: AudioNode | null) {
     const env = ctx.createGain();
     osc.connect(env);
     env.connect(gain);
-    osc.frequency.setValueAtTime(150, time);
-    osc.frequency.exponentialRampToValueAtTime(40, time + 0.15);
+    osc.frequency.setValueAtTime(140, time);
+    osc.frequency.exponentialRampToValueAtTime(safeExp(40), time + 0.15);
     env.gain.setValueAtTime(0.001, time);
     env.gain.linearRampToValueAtTime(level, time + 0.001);
     env.gain.exponentialRampToValueAtTime(0.001, time + 0.4);
@@ -388,7 +439,7 @@ function useDrumEngine(destNode: AudioNode | null) {
     const noiseFilter = ctx.createBiquadFilter();
     noiseFilter.type = "bandpass";
     noiseFilter.frequency.value = 1200;
-    noiseFilter.Q.value = 0.8;
+    noiseFilter.Q.value = 1.5;
     const noiseEnv = ctx.createGain();
     noise.connect(noiseFilter);
     noiseFilter.connect(noiseEnv);
@@ -424,7 +475,7 @@ function useDrumEngine(destNode: AudioNode | null) {
     noise.connect(hpf);
     hpf.connect(env);
     env.connect(gain);
-    env.gain.setValueAtTime(level * 0.6, time);
+    env.gain.setValueAtTime(level * 0.45, time);
     env.gain.exponentialRampToValueAtTime(0.001, time + 0.06);
     noise.start(time);
     noise.stop(time + 0.08);
@@ -482,404 +533,274 @@ function useDrumEngine(destNode: AudioNode | null) {
     while (nextBeatTimeRef.current < ctx.currentTime + lookahead) {
       const step = stepRef.current % 16;
       // Apply swing: odd steps are pushed forward
-      const swingOffset = (step % 2 === 1) ? stepDuration * (p.swing - 0.5) * 0.5 : 0;
-      const schedTime = Math.max(ctx.currentTime, nextBeatTimeRef.current + swingOffset);
-      scheduleStep(ctx, dGain, step, schedTime);
+      const swingOffset = (step % 2 === 1) ? stepDuration * (p.swing - 0.5) : 0;
+      const time = nextBeatTimeRef.current + swingOffset;
+      scheduleStep(ctx, dGain, step, time);
       nextBeatTimeRef.current += stepDuration;
-      stepRef.current = (stepRef.current + 1) % 16;
+      stepRef.current++;
     }
+
+    schedulerRef.current = requestAnimationFrame(runScheduler);
   }, [scheduleStep]);
 
   const play = useCallback(() => {
     const ctx = ensureCtx();
-    if (ctx.state === "suspended") ctx.resume();
+    if (playingRef.current) return;
     playingRef.current = true;
-    stepRef.current = 0;
-    nextBeatTimeRef.current = ctx.currentTime + 0.05;
-    if (schedulerRef.current !== null) clearInterval(schedulerRef.current);
-    schedulerRef.current = window.setInterval(runScheduler, 25);
     setPlaying(true);
+    stepRef.current = 0;
+    nextBeatTimeRef.current = ctx.currentTime;
+    runScheduler();
   }, [ensureCtx, runScheduler]);
 
   const stop = useCallback(() => {
     playingRef.current = false;
-    if (schedulerRef.current !== null) {
-      clearInterval(schedulerRef.current);
+    setPlaying(false);
+    if (schedulerRef.current) {
+      cancelAnimationFrame(schedulerRef.current);
       schedulerRef.current = null;
     }
-    setPlaying(false);
   }, []);
 
-  const selectPreset = useCallback((name: string) => {
+  const setPreset = useCallback((name: string) => {
     const preset = DRUM_PRESETS.find((p) => p.name === name);
     if (!preset) return;
     presetRef.current = preset;
     setPresetNameState(name);
   }, []);
 
-  const setMasterVolume = useCallback((v: number) => {
-    setMasterVolumeState(v);
-    if (masterGainRef.current) masterGainRef.current.gain.value = v;
+  const setMasterVolume = useCallback((vol: number) => {
+    setMasterVolumeState(vol);
+    if (masterGainRef.current) masterGainRef.current.gain.value = vol;
   }, []);
 
-  const setDrumVolume = useCallback((v: number) => {
-    setDrumVolumeState(v);
-    if (drumGainRef.current) drumGainRef.current.gain.value = v;
+  const setDrumVolume = useCallback((vol: number) => {
+    setDrumVolumeState(vol);
+    if (drumGainRef.current) drumGainRef.current.gain.value = vol;
   }, []);
 
-  const setFilterCutoff = useCallback((f: number) => {
-    setFilterCutoffState(f);
-    if (filterRef.current) filterRef.current.frequency.value = f;
+  const setFilterCutoff = useCallback((freq: number) => {
+    setFilterCutoffState(freq);
+    if (filterRef.current) filterRef.current.frequency.value = freq;
   }, []);
 
   const getMasterGain = useCallback(() => masterGainRef.current, []);
   const getCtx = useCallback(() => ctxRef.current, []);
 
-  const destroy = useCallback(() => {
-    stop();
-    if (ctxRef.current && ctxRef.current.state !== "closed") {
-      ctxRef.current.close().catch(() => {});
-    }
-    ctxRef.current = null;
-  }, [stop]);
-
   return {
-    playing, presetName, masterVolume, drumVolume, filterCutoff,
-    play, stop, selectPreset,
-    setMasterVolume, setDrumVolume, setFilterCutoff,
-    getMasterGain, getCtx,
-    destroy, ensureCtx,
+    playing,
+    presetName,
+    masterVolume,
+    drumVolume,
+    filterCutoff,
+    play,
+    stop,
+    setPreset,
+    setMasterVolume,
+    setDrumVolume,
+    setFilterCutoff,
+    currentPreset: presetRef.current,
+    getMasterGain,
+    getCtx,
   };
 }
 
 // ─── Chord Synth Hook ─────────────────────────────────────────────────────────
 
-function useChordSynth(destNode: AudioNode | null, drumGetCtx: () => AudioContext | null) {
-  const activeVoicesRef = useRef<{ gain: GainNode; oscs: OscillatorNode[]; stopAt: number }[]>([]);
-  const instrumentRef = useRef<InstrumentPreset>(INSTRUMENT_PRESETS[0]);
-  const masterGainRef = useRef<GainNode | null>(null);
-  const reverbRef = useRef<{ input: GainNode; output: GainNode } | null>(null);
-  const [instrumentName, setInstrumentNameState] = useState(INSTRUMENT_PRESETS[0].name);
-  const [activeChord, setActiveChord] = useState<string | null>(null);
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function useChordSynth(destNode: AudioNode | null, _getCtx?: () => AudioContext | null) {
+  const ctxRef = useRef<AudioContext | null>(null);
+  const activeNotesRef = useRef<number[]>([]);
+  const currentChordRef = useRef<string | null>(null);
+
   const [activeNotes, setActiveNotes] = useState<number[]>([]);
 
-  const getCtx = useCallback((): AudioContext | null => {
-    return drumGetCtx();
-  }, [drumGetCtx]);
-
-  const ensureGain = useCallback((ctx: AudioContext) => {
-    if (masterGainRef.current) return masterGainRef.current;
-    const mg = ctx.createGain();
-    mg.gain.value = 0.6;
-    masterGainRef.current = mg;
-
-    const { reverbWet } = instrumentRef.current;
-    const rev = createReverb(ctx, reverbWet);
-    reverbRef.current = rev;
-    mg.connect(rev.input);
-    rev.output.connect(ctx.destination);
-    if (destNode) rev.output.connect(destNode as AudioNode);
-    return mg;
-  }, [destNode]);
-
-  const stopAllVoices = useCallback((ctx: AudioContext, fadeTime = 0.05) => {
-    const now = ctx.currentTime;
-    for (const v of activeVoicesRef.current) {
-      v.gain.gain.cancelScheduledValues(now);
-      v.gain.gain.setValueAtTime(v.gain.gain.value, now);
-      v.gain.gain.linearRampToValueAtTime(0, now + fadeTime);
-      v.oscs.forEach((o) => {
-        try { o.stop(now + fadeTime + 0.01); } catch {}
-      });
-    }
-    activeVoicesRef.current = [];
+  const ensureCtx = useCallback(() => {
+    if (ctxRef.current) return ctxRef.current;
+    const ctx = new AudioContext();
+    ctxRef.current = ctx;
+    return ctx;
   }, []);
 
-  const playChord = useCallback((mapping: ChordMapping) => {
-    const ctx = getCtx();
-    if (!ctx) return;
-    if (ctx.state === "suspended") ctx.resume();
+  const playChord = useCallback((chord: { root: string; quality: ChordQuality; octave: number; inversion: "root" | "first" | "second" }) => {
+    const ctx = ensureCtx();
+    const { root, quality, octave, inversion } = chord;
+    const chordName = chordLabel(root, quality);
 
-    const mg = ensureGain(ctx);
-    const inst = instrumentRef.current;
-    stopAllVoices(ctx, 0.05);
+    // Release previous chord
+    releaseChord();
 
-    const freqs = chordFrequencies(mapping.root, mapping.octave, mapping.quality, mapping.inversion);
-    const midiNotes = chordMidiNotes(mapping.root, mapping.octave, mapping.quality);
-    setActiveNotes(midiNotes);
-    setActiveChord(chordLabel(mapping.root, mapping.quality));
+    const freqs = chordFrequencies(root, octave, quality, inversion);
+    activeNotesRef.current = chordMidiNotes(root, octave, quality);
+    setActiveNotes(activeNotesRef.current);
+    currentChordRef.current = chordName;
 
-    const lpf = ctx.createBiquadFilter();
-    lpf.type = "lowpass";
-    lpf.frequency.value = inst.filterFreq;
-    lpf.connect(mg);
+    const preset = INSTRUMENT_PRESETS[0]; // Default to Warm Keys
+    const reverb = createReverb(ctx, preset.reverbWet);
 
-    const now = ctx.currentTime;
-
-    for (const freq of freqs) {
-      for (let li = 0; li < inst.oscillatorTypes.length; li++) {
-        const osc = ctx.createOscillator();
-        const voiceGain = ctx.createGain();
-        osc.type = inst.oscillatorTypes[li];
-        osc.frequency.value = freq;
-        osc.detune.value = (li - (inst.oscillatorTypes.length - 1) / 2) * inst.detuneSpread;
-        osc.connect(voiceGain);
-        voiceGain.connect(lpf);
-
-        const peakGain = 0.18 / (freqs.length * inst.oscillatorTypes.length);
-        voiceGain.gain.setValueAtTime(0, now);
-        voiceGain.gain.linearRampToValueAtTime(peakGain, now + inst.attackTime);
-
-        osc.start(now);
-        activeVoicesRef.current.push({ gain: voiceGain, oscs: [osc], stopAt: Infinity });
+    freqs.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const oscType = preset.oscillatorTypes[i % preset.oscillatorTypes.length];
+      osc.type = oscType;
+      osc.frequency.value = freq;
+      if (preset.detuneSpread && i > 0) {
+        osc.detune.value = (Math.random() - 0.5) * preset.detuneSpread;
       }
-    }
-  }, [getCtx, ensureGain, stopAllVoices]);
+
+      const env = ctx.createGain();
+      env.gain.setValueAtTime(0, ctx.currentTime);
+      env.gain.linearRampToValueAtTime(0.3, ctx.currentTime + preset.attackTime);
+      env.connect(reverb.input);
+
+      osc.connect(env);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + preset.attackTime + preset.releaseTime + 1);
+
+      setTimeout(() => {
+        env.gain.cancelScheduledValues(ctx.currentTime);
+        env.gain.setValueAtTime(0.3, ctx.currentTime);
+        env.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + preset.releaseTime);
+      }, preset.attackTime * 1000);
+    });
+
+    reverb.output.connect(destNode || ctx.destination);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ensureCtx, destNode]);
 
   const releaseChord = useCallback(() => {
-    const ctx = getCtx();
-    if (!ctx) return;
-    const inst = instrumentRef.current;
-    stopAllVoices(ctx, inst.releaseTime);
-    setActiveChord(null);
+    activeNotesRef.current = [];
     setActiveNotes([]);
-  }, [getCtx, stopAllVoices]);
+    currentChordRef.current = null;
+  }, []);
 
-  const selectInstrument = useCallback((name: string) => {
-    const inst = INSTRUMENT_PRESETS.find((p) => p.name === name);
-    if (!inst) return;
-    instrumentRef.current = inst;
-    setInstrumentNameState(name);
-    // Rebuild reverb if needed
-    const ctx = getCtx();
-    if (ctx && masterGainRef.current && reverbRef.current) {
-      try {
-        masterGainRef.current.disconnect();
-      } catch {}
-      const rev = createReverb(ctx, inst.reverbWet);
-      reverbRef.current = rev;
-      masterGainRef.current.connect(rev.input);
-      rev.output.connect(ctx.destination);
-      if (destNode) rev.output.connect(destNode as AudioNode);
-    }
-  }, [getCtx, destNode]);
-
-  return { instrumentName, activeChord, activeNotes, playChord, releaseChord, selectInstrument };
-}
-
-// ─── Gesture Detection ───────────────────────────────────────────────────────
-
-interface Landmark { x: number; y: number; z: number }
-
-function fingerExtended(landmarks: Landmark[], tipIdx: number, pipIdx: number, mcpIdx: number): boolean {
-  // When hand is upright, tip.y < pip.y (higher up = smaller y)
-  const tip = landmarks[tipIdx];
-  const pip = landmarks[pipIdx];
-  const mcp = landmarks[mcpIdx];
-  const handDir = mcp.y - tip.y; // positive = finger pointing up
-  return handDir > 0 && (tip.y < pip.y);
-}
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function thumbExtended(landmarks: Landmark[]): boolean {
-  const tip = landmarks[4];
-  const ip  = landmarks[3];
-  const mcp = landmarks[2];
-  // Thumb extends sideways; use x-distance
-  return Math.abs(tip.x - mcp.x) > Math.abs(ip.x - mcp.x) * 1.2;
-}
-
-function detectGesture(landmarks: Landmark[]): GestureId {
-  // Pinch: thumb tip close to index tip
-  const thumbTip = landmarks[4];
-  const indexTip = landmarks[8];
-  const pinchDist = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
-  if (pinchDist < 0.07) return "pinch";
-
-  // Check extended fingers: index=8/6/5, middle=12/10/9, ring=16/14/13, pinky=20/18/17
-  const indexExt  = fingerExtended(landmarks, 8,  6,  5);
-  const middleExt = fingerExtended(landmarks, 12, 10, 9);
-  const ringExt   = fingerExtended(landmarks, 16, 14, 13);
-  const pinkyExt  = fingerExtended(landmarks, 20, 18, 17);
-
-  const extCount = [indexExt, middleExt, ringExt, pinkyExt].filter(Boolean).length;
-
-  if (extCount >= 3) return "open";
-  if (extCount === 0) return "fist";
-  if (indexExt && middleExt && !ringExt && !pinkyExt) return "two";
-  if (indexExt && !middleExt && !ringExt && !pinkyExt) return "point";
-
-  return "fist";
+  return {
+    activeNotes,
+    playChord,
+    releaseChord,
+    currentChord: currentChordRef.current,
+  };
 }
 
 // ─── Piano Keyboard Component ─────────────────────────────────────────────────
 
 function PianoKeyboard({ activeNotes }: { activeNotes: number[] }) {
-  // Render C4 (midi 60) through E5 (midi 76) — 1.5 octaves
-  const startMidi = 60;
-  const endMidi = 76;
-  const notes: number[] = [];
-  for (let m = startMidi; m <= endMidi; m++) notes.push(m);
+  const whiteKeys = ["C", "D", "E", "F", "G", "A", "B"];
+  const blackKeys = ["C#", "D#", null, "F#", "G#", "A#"];
 
-  const isBlack = (midi: number) => {
-    const n = midi % 12;
-    return [1, 3, 6, 8, 10].includes(n);
+  const isWhiteActive = (note: string) => {
+    return activeNotes.some((n) => NOTE_NAMES[n % 12] === note);
   };
 
-  // Build layout: only white keys get explicit positions
-  const whiteKeys: number[] = notes.filter((m) => !isBlack(m));
-  const keyWidth = 100 / whiteKeys.length;
+  const isBlackActive = (note: string | null) => {
+    if (!note) return false;
+    return activeNotes.some((n) => NOTE_NAMES[n % 12] === note);
+  };
 
   return (
-    <div className="relative h-16 select-none" style={{ width: "100%" }}>
-      {whiteKeys.map((midi, idx) => {
-        const active = activeNotes.includes(midi);
-        return (
+    <div className="relative h-20 w-full">
+      <div className="absolute inset-0 flex">
+        {whiteKeys.map((note) => (
           <div
-            key={midi}
-            className={`absolute bottom-0 border border-ink-line ${
-              active ? "bg-amber-gold" : "bg-ink-surface"
+            key={note}
+            className={`flex-1 border border-ink-line ${
+              isWhiteActive(note) ? "bg-indigo-400" : "bg-white"
             }`}
-            style={{
-              left: `${idx * keyWidth}%`,
-              width: `${keyWidth - 0.5}%`,
-              height: "100%",
-            }}
           />
-        );
-      })}
-      {notes.filter(isBlack).map((midi) => {
-        const active = activeNotes.includes(midi);
-        // Find position: count white keys to the left
-        const whitesBefore = notes.filter((m) => m < midi && !isBlack(m)).length - notes.filter((m) => m < startMidi && !isBlack(m)).length;
-        return (
-          <div
-            key={midi}
-            className={`absolute z-10 ${active ? "bg-amber-gold" : "bg-ink-text"}`}
-            style={{
-              left: `${(whitesBefore) * keyWidth + keyWidth * 0.65}%`,
-              width: `${keyWidth * 0.6}%`,
-              height: "58%",
-              top: 0,
-            }}
-          />
-        );
-      })}
+        ))}
+      </div>
+      <div className="absolute inset-0 flex px-3">
+        {blackKeys.map((note, i) => (
+          <div key={i} className="flex-1 relative">
+            {note && (
+              <div
+                className={`absolute left-1/2 h-12 w-8 -translate-x-1/2 border border-ink-line ${
+                  isBlackActive(note) ? "bg-indigo-600" : "bg-black"
+                }`}
+              />
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
-// ─── Landmark canvas draw ─────────────────────────────────────────────────────
-
-const HAND_CONNECTIONS = [
-  [0,1],[1,2],[2,3],[3,4],         // thumb
-  [0,5],[5,6],[6,7],[7,8],         // index
-  [5,9],[9,10],[10,11],[11,12],    // middle
-  [9,13],[13,14],[14,15],[15,16],  // ring
-  [13,17],[17,18],[18,19],[19,20], // pinky
-  [0,17],                          // palm base
-];
-
-function drawHandLandmarks(
-  ctx2d: CanvasRenderingContext2D,
-  landmarks: Landmark[],
-  width: number,
-  height: number,
-  color: string
-) {
-  ctx2d.strokeStyle = color;
-  ctx2d.lineWidth = 2;
-  for (const [a, b] of HAND_CONNECTIONS) {
-    const lA = landmarks[a], lB = landmarks[b];
-    ctx2d.beginPath();
-    ctx2d.moveTo(lA.x * width, lA.y * height);
-    ctx2d.lineTo(lB.x * width, lB.y * height);
-    ctx2d.stroke();
-  }
-  ctx2d.fillStyle = color;
-  for (const lm of landmarks) {
-    ctx2d.beginPath();
-    ctx2d.arc(lm.x * width, lm.y * height, 4, 0, Math.PI * 2);
-    ctx2d.fill();
-  }
-}
-
-// ─── PerformModal Component ────────────────────────────────────────────────────
+// ─── Main Component ───────────────────────────────────────────────────────────
 
 export function PerformModal({
   open,
   onClose,
   songId,
   onTakeSaved,
+  youtubeSession,
 }: {
   open: boolean;
   onClose: () => void;
   songId: string;
   onTakeSaved: () => void;
+  youtubeSession: {
+    youtube_url: string;
+    youtube_title: string | null;
+    loop_start?: number | null;
+    loop_end?: number | null;
+  } | null;
 }) {
-  // Recording destination
-  const recDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
-  const [recDestNode, setRecDestNode] = useState<AudioNode | null>(null);
-
-  // Drum engine
-  const drum = useDrumEngine(recDestNode);
-
-  // Chord synth
-  const chord = useChordSynth(recDestNode, drum.getCtx);
-
-  // ── Camera / MediaPipe state ──
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const handLandmarkerRef = useRef<{
-    detectForVideo: (video: HTMLVideoElement, time: number) => {
-      landmarks: Landmark[][];
-      handedness: { categoryName: string }[][];
-    };
-    close: () => void;
-  } | null>(null);
-  const camStreamRef = useRef<MediaStream | null>(null);
+  // MediaPipe refs
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handLandmarkerRef = useRef<any>(null);
   const rafRef = useRef<number | null>(null);
-  const lastFrameTime = useRef(0);
+  const lastFrameTime = useRef<number>(0);
   const frameCount = useRef(0);
   const fpsTimer = useRef(0);
+  const camStreamRef = useRef<MediaStream | null>(null);
 
-  const [camActive, setCamActive] = useState(false);
-  const [camError, setCamError] = useState<string | null>(null);
-  const [mediaPipeLoading, setMediaPipeLoading] = useState(false);
-  const [fps, setFps] = useState(0);
-
-  // ── Hand state ──
-  const [leftHand, setLeftHand] = useState<HandState>({ gesture: null, wristX: 0.5, wristY: 0.5, present: false });
-  const [rightHand, setRightHand] = useState<HandState>({ gesture: null, wristX: 0.5, wristY: 0.5, present: false });
-  const prevLeftGesture = useRef<GestureId | null>(null);
+  // Hand tracking refs
   const prevRightGesture = useRef<GestureId | null>(null);
-  const drumMuted = useRef(false);
 
-  // ── Chord mappings ──
-  const [chordMappings, setChordMappings] = useState<ChordMapping[]>(CHORD_MAP_PRESETS["Pop"]);
-  const [chordMapPreset, setChordMapPreset] = useState("Pop");
-  const [mappingTab, setMappingTab] = useState<"mappings" | "presets">("mappings");
+  // Latched transport refs
+  const beatLatchRef = useRef<'stopped' | 'playing' | 'muted'>('stopped');
+  const leftGestureTimerRef = useRef<{ gesture: GestureId | null; startMs: number }>({ gesture: null, startMs: 0 });
+  const leftLatchCooldownRef = useRef<number>(0);
+  const lastLeftVolumeRef = useRef<number>(0.7);
+  const lastLeftFilterRef = useRef<number>(4000);
 
-  // ── Recording ──
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+  // Chord slot refs
+  const prevSlotRef = useRef<number | null>(null);
+  const sustainRef = useRef(false);
+
+  // Recording refs
+  const recDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recChunksRef = useRef<Blob[]>([]);
+  const recStartTimeRef = useRef<number>(0);
+
+  // State
+  const [camActive, setCamActive] = useState(false);
+  const [mediaPipeLoading, setMediaPipeLoading] = useState(false);
+  const [camError, setCamError] = useState<string | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [_fps, setFps] = useState(0);
   const [recording, setRecording] = useState(false);
   const [recElapsed, setRecElapsed] = useState(0);
-  const recStartRef = useRef(0);
-  const recTickRef = useRef<number | null>(null);
-  const [savedBlob, setSavedBlob] = useState<Blob | null>(null);
-  const [takeCount, setTakeCount] = useState(1);
+  const [recDestNode, setRecDestNode] = useState<AudioNode | null>(null);
+  const [beatSource, setBeatSource] = useState<'drums' | 'youtube'>('drums');
+  const [chordSlots, setChordSlots] = useState<ChordSlot[]>(SLOT_PRESETS['Pop']);
+  const [activeSlot, setActiveSlot] = useState<number | null>(null);
+  const [isSilenced, setIsSilenced] = useState(false);
+  const [chordVolume, setChordVolumeState] = useState(0.7);
+  const [rightZone, setRightZone] = useState(0);
+  const [activeTab, setActiveTab] = useState<'sound' | 'chords' | 'guide'>('sound');
+  const [leftHand, setLeftHand] = useState<HandState>({ gesture: null, wristX: 0.5, wristY: 0.5, present: false });
+  const [rightHand, setRightHand] = useState<HandState>({ gesture: null, wristX: 0.5, wristY: 0.5, present: false });
 
-  // ── UI state ──
-  const [activeRightChord, setActiveRightChord] = useState<string | null>(null);
+  // Hooks
+  const drum = useDrumEngine(recDestNode);
+  const chord = useChordSynth(recDestNode, drum.getCtx);
 
-  // Sync activeChord display
+  // ── Setup recording destination ──
   useEffect(() => {
-    setActiveRightChord(chord.activeChord);
-  }, [chord.activeChord]);
-
-  // ── Setup recording destination once AudioContext is live ──
-  const setupRecDest = useCallback(() => {
     const ctx = drum.getCtx();
     if (!ctx || recDestRef.current) return;
     try {
@@ -889,18 +810,67 @@ export function PerformModal({
       const mg = drum.getMasterGain();
       if (mg) mg.connect(dest);
     } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drum]);
 
-  // ── Load MediaPipe ──
+  // ── Gesture detection ──
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const detectGesture = useCallback((landmarks: any[]): GestureId | null => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const thumbExtended = () => {
+      const tip = landmarks[4], ip = landmarks[3], mcp = landmarks[2];
+      return tip.y < ip.y && tip.y < mcp.y;
+    };
+    const indexExtended  = () => landmarks[8].y  < landmarks[6].y;
+    const middleExtended = () => landmarks[12].y < landmarks[10].y;
+    const ringExtended   = () => landmarks[16].y < landmarks[14].y;
+    const pinkyExtended  = () => landmarks[20].y < landmarks[18].y;
+    const extCount = [indexExtended(), middleExtended(), ringExtended(), pinkyExtended()].filter(Boolean).length;
+    const thumbTip = landmarks[4], indexTip = landmarks[8];
+    const pinchDist = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
+    if (pinchDist < 0.05) return "pinch";
+    if (extCount === 0) return "fist";
+    if (extCount === 1 && indexExtended()) return "point";
+    if (extCount === 2 && indexExtended() && middleExtended()) return "two";
+    if (extCount >= 4) return "open";
+    return null;
+  }, []);
+
+  // ── Draw hand landmarks on canvas ──
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const drawHandLandmarks = useCallback((ctx2d: CanvasRenderingContext2D, lms: any[], w: number, h: number, color: string) => {
+    const CONNECTIONS: [number,number][] = [
+      [0,1],[1,2],[2,3],[3,4],
+      [0,5],[5,6],[6,7],[7,8],
+      [5,9],[9,10],[10,11],[11,12],
+      [9,13],[13,14],[14,15],[15,16],
+      [13,17],[17,18],[18,19],[19,20],
+      [0,17],
+    ];
+    ctx2d.strokeStyle = color;
+    ctx2d.lineWidth = 1.5;
+    for (const [a, b] of CONNECTIONS) {
+      ctx2d.beginPath();
+      ctx2d.moveTo(lms[a].x * w, lms[a].y * h);
+      ctx2d.lineTo(lms[b].x * w, lms[b].y * h);
+      ctx2d.stroke();
+    }
+    ctx2d.fillStyle = color;
+    for (const lm of lms) {
+      ctx2d.beginPath();
+      ctx2d.arc(lm.x * w, lm.y * h, 3, 0, 2 * Math.PI);
+      ctx2d.fill();
+    }
+  }, []);
+
+  // ── Load MediaPipe (tasks-vision) ──
   const loadMediaPipe = useCallback(async () => {
     if (handLandmarkerRef.current) return;
     setMediaPipeLoading(true);
     try {
-      // Dynamic import to avoid SSR crash
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const vision = await import("@mediapipe/tasks-vision" as any);
       const { HandLandmarker, FilesetResolver } = vision;
-
       const filesetResolver = await FilesetResolver.forVisionTasks(
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
       );
@@ -922,7 +892,200 @@ export function PerformModal({
     }
   }, []);
 
-  // ── Start camera ──
+  // ── Process gestures with latched transport and zone-based chords ──
+  const processGestures = useCallback((
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    landmarks: any[][],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    handedness: any[][]
+  ) => {
+    let newLeft: HandState  = { gesture: null, wristX: 0.5, wristY: 0.5, present: false };
+    let newRight: HandState = { gesture: null, wristX: 0.5, wristY: 0.5, present: false };
+
+    for (let i = 0; i < landmarks.length; i++) {
+      const lms  = landmarks[i];
+      const side = handedness[i]?.[0]?.categoryName ?? "Right";
+      const gesture = detectGesture(lms);
+      const wrist = lms[0];
+      const state: HandState = { gesture, wristX: wrist.x, wristY: wrist.y, present: true };
+      // MediaPipe mirrors: "Left" in camera = user's right hand
+      if (side === "Left") newRight = state;
+      else newLeft = state;
+    }
+
+    setLeftHand(newLeft);
+    setRightHand(newRight);
+
+    const left  = newLeft;
+    const right = newRight;
+
+    // LEFT HAND - Latched transport
+    if (left.present && left.gesture) {
+      const gesture = left.gesture;
+      
+      // Update volume/filter continuously while hand is visible
+      const vol = 1 - left.wristY; // high hand = loud
+      lastLeftVolumeRef.current = vol;
+      lastLeftFilterRef.current = 200 + left.wristX * 7800;
+      
+      // Apply volume (respecting mute)
+      if (beatLatchRef.current !== 'muted') {
+        drum.setDrumVolume(vol);
+        if (beatSource === 'youtube') {
+          window.dispatchEvent(new CustomEvent('verses:beat-volume', { detail: { volume: vol * 100 } }));
+        }
+      }
+      drum.setFilterCutoff(lastLeftFilterRef.current);
+      
+      // Latch logic: track how long gesture has been held
+      if (gesture === leftGestureTimerRef.current.gesture) {
+        const held = Date.now() - leftGestureTimerRef.current.startMs;
+        const cooldownOk = Date.now() - leftLatchCooldownRef.current > LATCH_COOLDOWN_MS;
+        
+        if (held >= LATCH_HOLD_MS && cooldownOk) {
+          // LATCH TRIGGER
+          if (gesture === 'open' && beatLatchRef.current !== 'playing') {
+            // Start beat
+            if (beatSource === 'drums') drum.play();
+            else window.dispatchEvent(new CustomEvent('verses:beat-play'));
+            beatLatchRef.current = 'playing';
+            leftLatchCooldownRef.current = Date.now();
+            leftGestureTimerRef.current = { gesture: null, startMs: 0 }; // reset timer
+          } else if (gesture === 'fist' && beatLatchRef.current === 'playing') {
+            // Stop beat
+            if (beatSource === 'drums') drum.stop();
+            else window.dispatchEvent(new CustomEvent('verses:beat-pause'));
+            beatLatchRef.current = 'stopped';
+            leftLatchCooldownRef.current = Date.now();
+            leftGestureTimerRef.current = { gesture: null, startMs: 0 };
+          } else if (gesture === 'pinch') {
+            // Toggle mute
+            if (beatLatchRef.current === 'muted') {
+              beatLatchRef.current = 'playing';
+              drum.setDrumVolume(lastLeftVolumeRef.current);
+            } else if (beatLatchRef.current === 'playing') {
+              beatLatchRef.current = 'muted';
+              drum.setDrumVolume(0);
+            }
+            leftLatchCooldownRef.current = Date.now();
+            leftGestureTimerRef.current = { gesture: null, startMs: 0 };
+          }
+        }
+      } else {
+        // Gesture changed, reset timer
+        leftGestureTimerRef.current = { gesture, startMs: Date.now() };
+      }
+    } else {
+      // Hand absent: KEEP beat state, just stop updating volume/filter
+      leftGestureTimerRef.current = { gesture: null, startMs: 0 };
+    }
+
+    // RIGHT HAND - Zone-based chord system
+    if (right.present && right.gesture) {
+      const g = right.gesture;
+      const zone = Math.min(3, Math.floor(right.wristX * 4)); // 0,1,2,3
+      setRightZone(zone);
+      
+      if (g === 'fist') {
+        // SILENCE: release all chords immediately
+        chord.releaseChord(); // fast fade
+        setActiveSlot(null);
+        setIsSilenced(true);
+        prevSlotRef.current = null;
+      } else if (g === 'pinch') {
+        // Sustain toggle OR retrigger
+        sustainRef.current = !sustainRef.current;
+        if (!sustainRef.current && activeSlot !== null) {
+          // Re-trigger current slot
+          const slot = chordSlots.find(s => s.slot === activeSlot);
+          if (slot) chord.playChord(slot);
+        }
+      } else {
+        setIsSilenced(false);
+        let targetSlot: number;
+        if (g === 'open') targetSlot = zone + 1; // 1,2,3,4
+        else if (g === 'two') targetSlot = zone + 5; // 5,6,7,8
+        else if (g === 'point') targetSlot = zone + 1; // also 1-4 for point
+        else targetSlot = prevSlotRef.current ?? 1;
+        
+        if (targetSlot !== prevSlotRef.current) {
+          // New slot — trigger chord
+          const slot = chordSlots.find(s => s.slot === targetSlot);
+          if (slot) {
+            chord.playChord(slot);
+            setActiveSlot(targetSlot);
+            prevSlotRef.current = targetSlot;
+          }
+        }
+      }
+    } else {
+      // Hand absent: if not sustaining, don't release (let chord ring)
+      // This is intentional — sustain by default when hand leaves
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [beatSource, chord, chordSlots, activeSlot, drum]);
+
+  // Camera controls
+  // ── Detection loop (RAF-based) ──
+  const detectionLoop = useCallback(() => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas || video.readyState < 2) {
+      rafRef.current = requestAnimationFrame(detectionLoop);
+      return;
+    }
+    const ctx2d = canvas.getContext("2d");
+    if (!ctx2d) { rafRef.current = requestAnimationFrame(detectionLoop); return; }
+
+    canvas.width  = video.videoWidth  || 640;
+    canvas.height = video.videoHeight || 480;
+    ctx2d.clearRect(0, 0, canvas.width, canvas.height);
+
+    const now = performance.now();
+    frameCount.current++;
+    if (now - fpsTimer.current > 1000) {
+      setFps(Math.round((frameCount.current * 1000) / (now - fpsTimer.current)));
+      frameCount.current = 0;
+      fpsTimer.current = now;
+    }
+
+    if (handLandmarkerRef.current && now - lastFrameTime.current > 33) {
+      lastFrameTime.current = now;
+      try {
+        const result = handLandmarkerRef.current.detectForVideo(video, now);
+        if (result.landmarks?.length) {
+          processGestures(result.landmarks, result.handedness);
+          result.landmarks.forEach((lms: { x: number; y: number; z: number }[], i: number) => {
+            const side = result.handedness[i]?.[0]?.categoryName;
+            const color = side === "Left" ? "#f59e0b" : "#6366f1";
+            drawHandLandmarks(ctx2d, lms, canvas.width, canvas.height, color);
+          });
+        } else {
+          if (prevRightGesture.current !== null) {
+            chord.releaseChord();
+            prevRightGesture.current = null;
+          }
+          setLeftHand({ gesture: null, wristX: 0.5, wristY: 0.5, present: false });
+          setRightHand({ gesture: null, wristX: 0.5, wristY: 0.5, present: false });
+        }
+      } catch {}
+    }
+    rafRef.current = requestAnimationFrame(detectionLoop);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [processGestures, drawHandLandmarks, chord]);
+
+  // Start/stop detection loop with camera
+  useEffect(() => {
+    if (camActive) {
+      fpsTimer.current = performance.now();
+      rafRef.current = requestAnimationFrame(detectionLoop);
+    }
+    return () => {
+      if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+    };
+  }, [camActive, detectionLoop]);
+
+  // ── Camera controls ──
   const startCamera = useCallback(async () => {
     setCamError(null);
     try {
@@ -942,12 +1105,8 @@ export function PerformModal({
     }
   }, [loadMediaPipe]);
 
-  // ── Stop camera ──
   const stopCamera = useCallback(() => {
-    if (rafRef.current !== null) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-    }
+    if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
     if (camStreamRef.current) {
       camStreamRef.current.getTracks().forEach((t) => t.stop());
       camStreamRef.current = null;
@@ -958,253 +1117,67 @@ export function PerformModal({
     setRightHand({ gesture: null, wristX: 0.5, wristY: 0.5, present: false });
   }, []);
 
-  // ── Process gesture results ──
-  const processGestures = useCallback((
-    landmarks: Landmark[][],
-    handedness: { categoryName: string }[][]
-  ) => {
-    let newLeft: HandState = { gesture: null, wristX: 0.5, wristY: 0.5, present: false };
-    let newRight: HandState = { gesture: null, wristX: 0.5, wristY: 0.5, present: false };
-
-    for (let i = 0; i < landmarks.length; i++) {
-      const lms = landmarks[i];
-      const side = handedness[i]?.[0]?.categoryName ?? "Right";
-      const gesture = detectGesture(lms);
-      const wrist = lms[0];
-      const state: HandState = { gesture, wristX: wrist.x, wristY: wrist.y, present: true };
-
-      // MediaPipe mirrors: "Left" in camera = user's right hand
-      if (side === "Left") {
-        newRight = state;
-      } else {
-        newLeft = state;
-      }
-    }
-
-    setLeftHand(newLeft);
-    setRightHand(newRight);
-
-    // ── Left hand → drum controls ──
-    if (newLeft.present && newLeft.gesture) {
-      const g = newLeft.gesture;
-      if (g !== prevLeftGesture.current) {
-        if (g === "open" && !drumMuted.current) {
-          if (!drum.playing) drum.play();
-        } else if (g === "fist") {
-          if (drum.playing) drum.stop();
-        } else if (g === "pinch") {
-          drumMuted.current = !drumMuted.current;
-          drum.setDrumVolume(drumMuted.current ? 0 : 0.7);
-        }
-        prevLeftGesture.current = g;
-      }
-      // Wrist Y → drum volume (inverted: higher hand = louder)
-      const vol = Math.max(0, Math.min(1, 1 - newLeft.wristY));
-      drum.setDrumVolume(drumMuted.current ? 0 : vol);
-      // Wrist X → filter cutoff
-      const cutoff = 200 + newLeft.wristX * 7800;
-      drum.setFilterCutoff(cutoff);
-    } else {
-      prevLeftGesture.current = null;
-    }
-
-    // ── Right hand → chord controls ──
-    if (newRight.present && newRight.gesture) {
-      const g = newRight.gesture;
-      if (g !== prevRightGesture.current) {
-        const mapping = chordMappings.find((m) => m.gesture === g);
-        if (mapping) {
-          chord.playChord(mapping);
-        }
-        prevRightGesture.current = g;
-      }
-    } else {
-      if (prevRightGesture.current !== null) {
-        chord.releaseChord();
-        prevRightGesture.current = null;
-      }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chordMappings, drum, chord]);
-
-  // ── Detection loop ──
-  const detectionLoop = useCallback(() => {
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    if (!video || !canvas || video.readyState < 2) {
-      rafRef.current = requestAnimationFrame(detectionLoop);
-      return;
-    }
-
-    const ctx2d = canvas.getContext("2d");
-    if (!ctx2d) {
-      rafRef.current = requestAnimationFrame(detectionLoop);
-      return;
-    }
-
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
-    ctx2d.clearRect(0, 0, canvas.width, canvas.height);
-
-    const now = performance.now();
-    // FPS counter
-    frameCount.current++;
-    if (now - fpsTimer.current > 1000) {
-      setFps(Math.round((frameCount.current * 1000) / (now - fpsTimer.current)));
-      frameCount.current = 0;
-      fpsTimer.current = now;
-    }
-
-    if (handLandmarkerRef.current && now - lastFrameTime.current > 33) {
-      lastFrameTime.current = now;
-      try {
-        const result = handLandmarkerRef.current.detectForVideo(video, now);
-        if (result.landmarks?.length) {
-          processGestures(result.landmarks, result.handedness);
-          result.landmarks.forEach((lms, i) => {
-            const side = result.handedness[i]?.[0]?.categoryName;
-            const color = side === "Left" ? "#f59e0b" : "#6366f1";
-            drawHandLandmarks(ctx2d, lms, canvas.width, canvas.height, color);
-          });
-        } else {
-          // No hands: release chord
-          if (prevRightGesture.current !== null) {
-            chord.releaseChord();
-            prevRightGesture.current = null;
-          }
-          setLeftHand({ gesture: null, wristX: 0.5, wristY: 0.5, present: false });
-          setRightHand({ gesture: null, wristX: 0.5, wristY: 0.5, present: false });
-        }
-      } catch {}
-    }
-
-    rafRef.current = requestAnimationFrame(detectionLoop);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [processGestures, chord]);
-
-  // Start detection loop when camera is active
-  useEffect(() => {
-    if (camActive) {
-      fpsTimer.current = performance.now();
-      rafRef.current = requestAnimationFrame(detectionLoop);
-    }
-    return () => {
-      if (rafRef.current !== null) {
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = null;
-      }
-    };
-  }, [camActive, detectionLoop]);
-
-  // ── Recording logic ──
+  // ── Recording controls ──
   const startRecording = useCallback(() => {
-    setupRecDest();
     const dest = recDestRef.current;
-    if (!dest) {
-      // Try to init audio first
-      drum.ensureCtx();
-      return;
-    }
-    try {
-      const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : MediaRecorder.isTypeSupported("audio/webm")
-        ? "audio/webm"
-        : "audio/ogg";
-      const mr = new MediaRecorder(dest.stream, { mimeType: mime, audioBitsPerSecond: 192_000 });
-      chunksRef.current = [];
-      mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-      mr.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: mime });
-        setSavedBlob(blob);
+    if (!dest) return;
+    const audioStream = dest.stream;
+    
+    const recorder = new MediaRecorder(audioStream, { mimeType: "audio/webm" });
+    recChunksRef.current = [];
+    recStartTimeRef.current = Date.now();
+    
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) recChunksRef.current.push(e.data);
+    };
+    
+    recorder.onstop = async () => {
+      const blob = new Blob(recChunksRef.current, { type: "audio/webm" });
+      const durationSec = (Date.now() - recStartTimeRef.current) / 1000;
+      const take: Take = {
+        id: newTakeId(),
+        song_id: songId,
+        label: "",
+        mime: "audio/webm",
+        duration: durationSec,
+        size: blob.size,
+        has_video: false,
+        created_at: new Date().toISOString(),
+        blob,
       };
-      mr.start(100);
-      recorderRef.current = mr;
-      recStartRef.current = Date.now();
-      setRecording(true);
-      if (recTickRef.current !== null) clearInterval(recTickRef.current);
-      recTickRef.current = window.setInterval(() => {
-        setRecElapsed(Math.floor((Date.now() - recStartRef.current) / 1000));
-      }, 500);
-    } catch (err) {
-      console.error("Recording failed:", err);
-    }
-  }, [drum, setupRecDest]);
+      await takesStore.put(take);
+      onTakeSaved();
+    };
+    
+    recorder.start();
+    mediaRecorderRef.current = recorder;
+    setRecording(true);
+  }, [songId, onTakeSaved]);
 
   const stopRecording = useCallback(() => {
-    if (recorderRef.current && recorderRef.current.state !== "inactive") {
-      recorderRef.current.stop();
+    if (mediaRecorderRef.current && recording) {
+      mediaRecorderRef.current.stop();
+      setRecording(false);
     }
-    recorderRef.current = null;
-    if (recTickRef.current !== null) {
-      clearInterval(recTickRef.current);
-      recTickRef.current = null;
-    }
-    setRecording(false);
-  }, []);
+  }, [recording]);
 
-  const saveTake = useCallback(async () => {
-    if (!savedBlob) return;
-    const id = newTakeId();
-    const duration = recElapsed;
-    const mime = savedBlob.type;
-    const take: Take = {
-      id,
-      song_id: songId,
-      label: `gesture take ${takeCount}`,
-      mime,
-      duration,
-      size: savedBlob.size,
-      has_video: false,
-      created_at: new Date().toISOString(),
-      blob: savedBlob,
-    };
-    await takesStore.put(take);
-    setTakeCount((c) => c + 1);
-    setSavedBlob(null);
-    setRecElapsed(0);
-    onTakeSaved();
-  }, [savedBlob, recElapsed, songId, takeCount, onTakeSaved]);
-
-  // ── Cleanup on close / unmount ──
-  const fullCleanup = useCallback(() => {
-    stopCamera();
-    drum.stop();
-    drum.destroy();
-    stopRecording();
-    if (handLandmarkerRef.current) {
-      try { handLandmarkerRef.current.close(); } catch {}
-      handLandmarkerRef.current = null;
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
+  // Update recording timer
   useEffect(() => {
-    if (!open) {
+    if (!recording) return;
+    const interval = setInterval(() => {
+      setRecElapsed(Math.floor((Date.now() - recStartTimeRef.current) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [recording]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
       stopCamera();
       drum.stop();
-      stopRecording();
-    }
+      chord.releaseChord();
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
-  useEffect(() => {
-    return () => { fullCleanup(); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // ── Mapping editor helpers ──
-  const updateMapping = useCallback((gesture: GestureId, patch: Partial<Omit<ChordMapping, "gesture">>) => {
-    setChordMappings((prev) =>
-      prev.map((m) => (m.gesture === gesture ? { ...m, ...patch } : m))
-    );
-  }, []);
-
-  const applyMapPreset = useCallback((name: string) => {
-    const preset = CHORD_MAP_PRESETS[name];
-    if (!preset) return;
-    setChordMappings(preset);
-    setChordMapPreset(name);
   }, []);
 
   const fmtTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -1219,9 +1192,8 @@ export function PerformModal({
       <div className="flex items-center justify-between border-b border-ink-line px-5 py-3">
         <div className="flex items-center gap-3">
           <span className="font-mono text-xs uppercase tracking-widest text-amber-gold">
-            Perform Mode
+            VERSES / PERFORM
           </span>
-          <span className="font-mono text-xs text-ink-mute">/ Gesture Instrument</span>
         </div>
         <div className="flex items-center gap-3">
           {recording && (
@@ -1234,7 +1206,7 @@ export function PerformModal({
             onClick={onClose}
             className="border border-ink-line px-3 py-1 font-mono text-xs uppercase tracking-wider text-ink-mute transition-colors hover:border-ink-text hover:text-ink-text"
           >
-            ✕ Close
+            × CLOSE
           </button>
         </div>
       </div>
@@ -1292,33 +1264,36 @@ export function PerformModal({
               Gesture Guide
             </div>
             <div className="space-y-1.5">
-              <div className="font-mono text-[10px] text-amber-gold">LEFT HAND — DRUMS</div>
+              <div className="font-mono text-[10px] text-amber-gold">LEFT HAND — RHYTHM</div>
               {[
-                { g: "🖐 Open", desc: "Play drums" },
-                { g: "✊ Fist", desc: "Pause drums" },
-                { g: "🤌 Pinch", desc: "Toggle mute" },
-                { g: "↕ Wrist Y", desc: "Drum volume" },
-                { g: "↔ Wrist X", desc: "Filter cutoff" },
+                { g: "OPEN (hold 0.4s)", desc: "Beat starts, latches" },
+                { g: "FIST (hold 0.4s)", desc: "Beat stops" },
+                { g: "PINCH", desc: "Mute / unmute" },
+                { g: "Height", desc: "Volume" },
+                { g: "X position", desc: "Tone filter" },
               ].map((item) => (
                 <div key={item.g} className="flex justify-between gap-2">
                   <span className="font-mono text-[10px] text-ink-mute">{item.g}</span>
                   <span className="font-mono text-[10px] text-ink-text">{item.desc}</span>
                 </div>
               ))}
-              <div className="mt-2 font-mono text-[10px] text-indigo-400">RIGHT HAND — CHORDS</div>
-              {(["open","pinch","two","fist","point"] as GestureId[]).map((g) => {
-                const m = chordMappings.find((x) => x.gesture === g);
-                return (
-                  <div key={g} className="flex justify-between gap-2">
-                    <span className="font-mono text-[10px] text-ink-mute">
-                      {GESTURE_ICONS[g]} {GESTURE_LABELS[g]}
-                    </span>
-                    <span className="font-mono text-[10px] text-ink-text">
-                      {m ? chordLabel(m.root, m.quality) : "—"}
-                    </span>
-                  </div>
-                );
-              })}
+              <div className="mt-2 font-mono text-[10px] text-indigo-400">RIGHT HAND — HARMONY</div>
+              {[
+                { g: "OPEN + zone 1–4", desc: "Chord slots 1–4" },
+                { g: "TWO + zone 1–4", desc: "Chord slots 5–8" },
+                { g: "FIST", desc: "Silence" },
+                { g: "PINCH", desc: "Sustain toggle" },
+              ].map((item) => (
+                <div key={item.g} className="flex justify-between gap-2">
+                  <span className="font-mono text-[10px] text-ink-mute">{item.g}</span>
+                  <span className="font-mono text-[10px] text-ink-text">{item.desc}</span>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 pt-2 border-t border-ink-line">
+              <div className="font-mono text-[9px] text-ink-mute">
+                Camera stays on this device. Tracking runs locally.
+              </div>
             </div>
           </div>
         </div>
@@ -1330,371 +1305,524 @@ export function PerformModal({
           </div>
           <div className="scrollbar-thin flex flex-1 flex-col gap-4 overflow-y-auto p-5">
 
+            {/* Beat source selector */}
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  if (beatSource === 'youtube') {
+                    window.dispatchEvent(new CustomEvent('verses:beat-pause'));
+                  }
+                  setBeatSource('drums');
+                  beatLatchRef.current = 'stopped';
+                }}
+                className={`flex-1 border px-3 py-2 font-mono text-xs transition-colors ${
+                  beatSource === 'drums'
+                    ? 'border-amber-gold bg-amber-gold/20 text-amber-gold'
+                    : 'border-ink-line text-ink-mute hover:border-ink-text hover:text-ink-text'
+                }`}
+              >
+                DRUM PRESET
+              </button>
+              <button
+                onClick={() => {
+                  drum.stop();
+                  setBeatSource('youtube');
+                  beatLatchRef.current = 'stopped';
+                }}
+                disabled={!youtubeSession}
+                className={`flex-1 border px-3 py-2 font-mono text-xs transition-colors ${
+                  beatSource === 'youtube'
+                    ? 'border-amber-gold bg-amber-gold/20 text-amber-gold'
+                    : youtubeSession
+                    ? 'border-ink-line text-ink-mute hover:border-ink-text hover:text-ink-text'
+                    : 'border-ink-line/40 text-ink-mute/40 cursor-not-allowed'
+                }`}
+              >
+                YOUTUBE BEAT
+              </button>
+            </div>
+
+            {beatSource === 'youtube' && !youtubeSession && (
+              <div className="text-center font-mono text-xs text-ink-mute/40">
+                Load a YouTube beat in the editor first.
+              </div>
+            )}
+
+            {beatSource === 'youtube' && youtubeSession && (
+              <div className="text-center font-mono text-xs text-ink-mute">
+                {youtubeSession.youtube_title}
+              </div>
+            )}
+
+            {/* Beat status */}
+            <div className={`text-center font-mono text-2xl font-bold ${
+              beatLatchRef.current === 'playing' ? 'text-amber-gold animate-pulse' :
+              beatLatchRef.current === 'muted' ? 'text-amber-gold/50' :
+              'text-ink-mute'
+            }`}>
+              {beatLatchRef.current === 'playing' ? (
+                <>● LOOPING — {currentPreset.name} · {currentPreset.bpm} BPM</>
+              ) : beatLatchRef.current === 'muted' ? (
+                <>○ MUTED — {currentPreset.name}</>
+              ) : (
+                <>○ STOPPED</>
+              )}
+            </div>
+
+            {/* Practice copy */}
+            {beatLatchRef.current === 'stopped' && !activeSlot && (
+              <div className="text-center font-mono text-sm text-ink-mute italic">
+                Open left palm to start the loop. It keeps playing until you stop it. Use right hand zones for chords. Make a fist to silence.
+              </div>
+            )}
+
             {/* Chord display */}
             <div className="border border-ink-line bg-ink-surface p-4">
               <div className="mb-1 font-mono text-[10px] uppercase tracking-widest text-ink-mute">Current Chord</div>
-              <div className="font-mono text-4xl font-bold tracking-tight text-ink-text">
-                {activeRightChord ?? <span className="text-ink-mute text-3xl">—</span>}
+              <div className="font-serif text-6xl font-bold tracking-tight text-ink-text">
+                {isSilenced ? (
+                  <span className="text-ink-mute">SILENCE</span>
+                ) : activeSlot ? (
+                  (() => {
+                    const slot = chordSlots.find(s => s.slot === activeSlot);
+                    return slot ? chordLabel(slot.root, slot.quality) : <span className="text-ink-mute">—</span>;
+                  })()
+                ) : (
+                  <span className="text-ink-mute">—</span>
+                )}
               </div>
               <div className="mt-3">
                 <PianoKeyboard activeNotes={chord.activeNotes} />
               </div>
             </div>
 
-            {/* Hand states */}
+            {/* Slot grid */}
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-[10px] text-ink-mute">OPEN HAND</span>
+                <div className="flex gap-1 flex-1">
+                  {[1, 2, 3, 4].map(slot => {
+                    const slotData = chordSlots.find(s => s.slot === slot);
+                    return (
+                      <button
+                        key={slot}
+                        className={`flex-1 border px-2 py-1 font-mono text-xs transition-colors ${
+                          activeSlot === slot
+                            ? 'border-amber-gold bg-amber-gold/20 text-amber-gold'
+                            : 'border-ink-line text-ink-mute hover:border-ink-text hover:text-ink-text'
+                        }`}
+                      >
+                        {slot} {slotData ? chordLabel(slotData.root, slotData.quality) : ''}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-[10px] text-ink-mute">TWO FINGERS</span>
+                <div className="flex gap-1 flex-1">
+                  {[5, 6, 7, 8].map(slot => {
+                    const slotData = chordSlots.find(s => s.slot === slot);
+                    return (
+                      <button
+                        key={slot}
+                        className={`flex-1 border px-2 py-1 font-mono text-xs transition-colors ${
+                          activeSlot === slot
+                            ? 'border-amber-gold bg-amber-gold/20 text-amber-gold'
+                            : 'border-ink-line text-ink-mute hover:border-ink-text hover:text-ink-text'
+                        }`}
+                      >
+                        {slot} {slotData ? chordLabel(slotData.root, slotData.quality) : ''}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* Zone indicator */}
+            <div className="flex gap-1">
+              {[0, 1, 2, 3].map(zone => (
+                <div
+                  key={zone}
+                  className={`flex-1 h-8 border font-mono text-xs flex items-center justify-center transition-colors ${
+                    rightZone === zone
+                      ? 'border-amber-gold bg-amber-gold/20 text-amber-gold'
+                      : 'border-ink-line text-ink-mute'
+                  }`}
+                >
+                  zone {zone + 1}
+                </div>
+              ))}
+            </div>
+
+            {/* Hand status cards */}
             <div className="grid grid-cols-2 gap-3">
               <div className="border border-ink-line bg-ink-surface p-3">
-                <div className="mb-1 font-mono text-[10px] uppercase tracking-widest text-amber-gold">Left Hand</div>
-                <div className="font-mono text-2xl">
-                  {leftHand.present && leftHand.gesture ? GESTURE_ICONS[leftHand.gesture] : "—"}
+                <div className="mb-1 font-mono text-[10px] uppercase tracking-widest text-amber-gold">LEFT</div>
+                <div className="font-mono text-lg">
+                  {leftHand.present && leftHand.gesture ? 
+                    GESTURE_LABELS[leftHand.gesture as GestureId] : "—"}
                 </div>
                 <div className="mt-1 font-mono text-xs text-ink-mute">
-                  {leftHand.present && leftHand.gesture ? GESTURE_LABELS[leftHand.gesture] : "Not detected"}
+                  {beatLatchRef.current === 'playing' ? 'LOOPING' :
+                   beatLatchRef.current === 'muted' ? 'MUTED' : 'STOPPED'}
                 </div>
-                {leftHand.present && (
-                  <div className="mt-2 space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="w-14 font-mono text-[10px] text-ink-mute">VOL</span>
-                      <div className="h-1.5 flex-1 bg-ink-line">
-                        <div
-                          className="h-full bg-amber-gold transition-all"
-                          style={{ width: `${(1 - leftHand.wristY) * 100}%` }}
-                        />
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="w-14 font-mono text-[10px] text-ink-mute">FILTER</span>
-                      <div className="h-1.5 flex-1 bg-ink-line">
-                        <div
-                          className="h-full bg-amber-gold/60 transition-all"
-                          style={{ width: `${leftHand.wristX * 100}%` }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
               </div>
               <div className="border border-ink-line bg-ink-surface p-3">
-                <div className="mb-1 font-mono text-[10px] uppercase tracking-widest text-indigo-400">Right Hand</div>
-                <div className="font-mono text-2xl">
-                  {rightHand.present && rightHand.gesture ? GESTURE_ICONS[rightHand.gesture] : "—"}
+                <div className="mb-1 font-mono text-[10px] uppercase tracking-widest text-indigo-400">RIGHT</div>
+                <div className="font-mono text-lg">
+                  {rightHand.present && rightHand.gesture ? 
+                    GESTURE_LABELS[rightHand.gesture as GestureId] : "—"}
                 </div>
                 <div className="mt-1 font-mono text-xs text-ink-mute">
-                  {rightHand.present && rightHand.gesture ? GESTURE_LABELS[rightHand.gesture] : "Not detected"}
+                  {activeSlot ? `Slot ${activeSlot}` : 'None'}
                 </div>
-                {rightHand.present && rightHand.gesture && (
-                  <div className="mt-2">
-                    <span className="font-mono text-xs text-ink-text">
-                      → {chordMappings.find((m) => m.gesture === rightHand.gesture)
-                          ? chordLabel(
-                              chordMappings.find((m) => m.gesture === rightHand.gesture)!.root,
-                              chordMappings.find((m) => m.gesture === rightHand.gesture)!.quality
-                            )
-                          : "—"}
-                    </span>
-                  </div>
-                )}
               </div>
             </div>
 
-            {/* Drum status */}
-            <div className="border border-ink-line bg-ink-surface p-3">
-              <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute">Drum Engine</div>
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <div className="font-mono text-[10px] text-ink-mute">PRESET</div>
-                  <div className="font-mono text-sm text-ink-text">{drum.presetName}</div>
+            {beatSource === 'youtube' && (
+              <div className="border border-amber-gold/40 bg-amber-gold/10 p-3">
+                <div className="font-mono text-xs text-amber-gold">
+                  Note: YouTube audio cannot be captured in recordings due to browser security restrictions.
                 </div>
-                <div>
-                  <div className="font-mono text-[10px] text-ink-mute">BPM</div>
-                  <div className="font-mono text-sm text-ink-text">{currentPreset.bpm}</div>
-                </div>
-                <div>
-                  <div className="font-mono text-[10px] text-ink-mute">STATUS</div>
-                  <div className={`font-mono text-sm ${drum.playing ? "text-amber-gold" : "text-ink-mute"}`}>
-                    {drum.playing ? "● PLAYING" : "○ STOPPED"}
-                  </div>
-                </div>
-              </div>
-              {/* Step sequencer visual */}
-              <div className="mt-3 space-y-1.5">
-                {(["kick","snare","hihat","perc"] as const).map((part) => (
-                  <div key={part} className="flex items-center gap-2">
-                    <span className="w-10 font-mono text-[9px] uppercase text-ink-mute">{part}</span>
-                    <div className="flex gap-0.5">
-                      {currentPreset.pattern[part].map((on, i) => (
-                        <div
-                          key={i}
-                          className={`h-3 w-3 border ${
-                            on
-                              ? "border-amber-gold bg-amber-gold/70"
-                              : "border-ink-line bg-transparent"
-                          } ${i % 4 === 0 ? "ml-1 first:ml-0" : ""}`}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* FPS indicator */}
-            {camActive && (
-              <div className="font-mono text-[10px] text-ink-mute">
-                CAM {fps} fps · HAND TRACKING {handLandmarkerRef.current ? "ON" : "OFF"}
               </div>
             )}
 
-            {/* Privacy notice */}
-            <div className="mt-auto border border-ink-line/50 p-2">
-              <span className="font-mono text-[10px] text-ink-mute">
-                🔒 Camera and mic stay on this device. Hand tracking runs locally in your browser.
-              </span>
-            </div>
           </div>
         </div>
 
-        {/* ── Right: Chord mappings ── */}
-        <div className="flex w-72 flex-shrink-0 flex-col border-l border-ink-line">
-          <div className="flex items-center border-b border-ink-line">
-            {(["mappings", "presets"] as const).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setMappingTab(tab)}
-                className={`flex-1 border-b-2 py-2 font-mono text-[10px] uppercase tracking-wider transition-colors ${
-                  mappingTab === tab
-                    ? "border-amber-gold text-amber-gold"
-                    : "border-transparent text-ink-mute hover:text-ink-text"
-                }`}
-              >
-                {tab}
-              </button>
-            ))}
+        {/* ── Right: Controls ── */}
+        <div className="w-72 flex-shrink-0 border-l border-ink-line">
+          <div className="border-b border-ink-line">
+            <div className="flex">
+              {(['sound', 'chords', 'guide'] as const).map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`flex-1 px-3 py-2 font-mono text-xs uppercase tracking-wider transition-colors ${
+                    activeTab === tab
+                      ? 'border-b-2 border-amber-gold text-amber-gold'
+                      : 'text-ink-mute hover:text-ink-text'
+                  }`}
+                >
+                  {tab.toUpperCase()}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <div className="scrollbar-thin flex-1 overflow-y-auto p-3">
-            {mappingTab === "presets" ? (
-              <div className="space-y-2">
-                <div className="font-mono text-[10px] uppercase tracking-widest text-ink-mute">Chord Map Presets</div>
-                {Object.keys(CHORD_MAP_PRESETS).map((name) => (
-                  <button
-                    key={name}
-                    onClick={() => applyMapPreset(name)}
-                    className={`w-full border px-3 py-2 text-left font-mono text-xs uppercase tracking-wider transition-colors ${
-                      chordMapPreset === name
-                        ? "border-amber-gold text-amber-gold"
-                        : "border-ink-line text-ink-mute hover:border-ink-text hover:text-ink-text"
-                    }`}
-                  >
-                    {name}
-                  </button>
-                ))}
-                <div className="mt-4 border-t border-ink-line pt-3">
+          <div className="scrollbar-thin h-full overflow-y-auto p-4">
+            {activeTab === 'sound' && (
+              <div className="space-y-4">
+                <div>
+                  <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute">Drum Preset</div>
+                  <div className="space-y-1">
+                    {DRUM_PRESETS.map(preset => (
+                      <button
+                        key={preset.name}
+                        onClick={() => drum.setPreset(preset.name)}
+                        className={`w-full border px-2 py-1 font-mono text-xs text-left transition-colors ${
+                          drum.presetName === preset.name
+                            ? 'border-amber-gold bg-amber-gold/20 text-amber-gold'
+                            : 'border-ink-line text-ink-mute hover:border-ink-text hover:text-ink-text'
+                        }`}
+                      >
+                        {preset.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
                   <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute">Instrument</div>
-                  {INSTRUMENT_PRESETS.map((ip) => (
-                    <button
-                      key={ip.name}
-                      onClick={() => chord.selectInstrument(ip.name)}
-                      className={`mb-1.5 w-full border px-3 py-1.5 text-left font-mono text-xs uppercase tracking-wider transition-colors ${
-                        chord.instrumentName === ip.name
-                          ? "border-amber-gold text-amber-gold"
-                          : "border-ink-line text-ink-mute hover:border-ink-text hover:text-ink-text"
-                      }`}
-                    >
-                      {ip.name}
-                    </button>
-                  ))}
+                  <div className="space-y-1">
+                    {INSTRUMENT_PRESETS.map(preset => (
+                      <button
+                        key={preset.name}
+                        className="w-full border border-ink-line px-2 py-1 font-mono text-xs text-left text-ink-mute transition-colors hover:border-ink-text hover:text-ink-text"
+                      >
+                        {preset.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute">
+                    Master Volume: {Math.round(drum.masterVolume * 100)}%
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={drum.masterVolume}
+                    onChange={(e) => drum.setMasterVolume(parseFloat(e.target.value))}
+                    className="w-full"
+                  />
+                </div>
+
+                <div>
+                  <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute">
+                    Chord Volume: {Math.round(chordVolume * 100)}%
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={chordVolume}
+                    onChange={(e) => setChordVolumeState(parseFloat(e.target.value))}
+                    className="w-full"
+                  />
+                </div>
+
+                <div>
+                  <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute">Step Sequencer</div>
+                  <div className="space-y-1">
+                    {['kick', 'snare', 'hihat', 'perc'].map(drum => (
+                      <div key={drum} className="flex gap-1">
+                        {currentPreset.pattern[drum as keyof typeof currentPreset.pattern].map((step, i) => (
+                          <div
+                            key={i}
+                            className={`h-4 w-4 border ${
+                              step ? 'bg-amber-gold border-amber-gold' : 'border-ink-line'
+                            }`}
+                          />
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="font-mono text-xs text-ink-mute">
+                  BPM: {currentPreset.bpm}
                 </div>
               </div>
-            ) : (
-              <div className="space-y-3">
-                {(["open","pinch","two","fist","point"] as GestureId[]).map((gesture) => {
-                  const m = chordMappings.find((x) => x.gesture === gesture)!;
-                  return (
-                    <div key={gesture} className="border border-ink-line p-2.5">
-                      <div className="mb-2 flex items-center justify-between">
-                        <span className="font-mono text-[10px] uppercase tracking-wider text-amber-gold">
-                          {GESTURE_ICONS[gesture]} {GESTURE_LABELS[gesture]}
-                        </span>
+            )}
+
+            {activeTab === 'chords' && (
+              <div className="space-y-4">
+                <div>
+                  <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute">Slot Preset</div>
+                  <div className="space-y-1">
+                    {Object.keys(SLOT_PRESETS).map(preset => (
+                      <button
+                        key={preset}
+                        onClick={() => setChordSlots(SLOT_PRESETS[preset])}
+                        className={`w-full border px-2 py-1 font-mono text-xs text-left transition-colors ${
+                          chordSlots === SLOT_PRESETS[preset]
+                            ? 'border-amber-gold bg-amber-gold/20 text-amber-gold'
+                            : 'border-ink-line text-ink-mute hover:border-ink-text hover:text-ink-text'
+                        }`}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute">Slot Editor</div>
+                  <div className="space-y-2">
+                    {chordSlots.map(slot => (
+                      <div key={slot.slot} className="border border-ink-line p-2">
+                        <div className="mb-1 font-mono text-xs text-ink-mute">Slot {slot.slot}</div>
+                        <div className="grid grid-cols-2 gap-1">
+                          <select
+                            value={slot.root}
+                            onChange={(e) => {
+                              const newSlots = [...chordSlots];
+                              const idx = newSlots.findIndex(s => s.slot === slot.slot);
+                              if (idx !== -1) {
+                                newSlots[idx] = { ...newSlots[idx], root: e.target.value };
+                                setChordSlots(newSlots);
+                              }
+                            }}
+                            className="border border-ink-line bg-ink px-1 py-0.5 font-mono text-xs text-ink-text"
+                          >
+                            {ROOTS.map(root => (
+                              <option key={root} value={root}>{root}</option>
+                            ))}
+                          </select>
+                          <select
+                            value={slot.quality}
+                            onChange={(e) => {
+                              const newSlots = [...chordSlots];
+                              const idx = newSlots.findIndex(s => s.slot === slot.slot);
+                              if (idx !== -1) {
+                                newSlots[idx] = { ...newSlots[idx], quality: e.target.value as ChordQuality };
+                                setChordSlots(newSlots);
+                              }
+                            }}
+                            className="border border-ink-line bg-ink px-1 py-0.5 font-mono text-xs text-ink-text"
+                          >
+                            {QUALITIES.map(quality => (
+                              <option key={quality} value={quality}>{quality}</option>
+                            ))}
+                          </select>
+                          <select
+                            value={slot.octave}
+                            onChange={(e) => {
+                              const newSlots = [...chordSlots];
+                              const idx = newSlots.findIndex(s => s.slot === slot.slot);
+                              if (idx !== -1) {
+                                newSlots[idx] = { ...newSlots[idx], octave: parseInt(e.target.value) };
+                                setChordSlots(newSlots);
+                              }
+                            }}
+                            className="border border-ink-line bg-ink px-1 py-0.5 font-mono text-xs text-ink-text"
+                          >
+                            {[1, 2, 3, 4, 5].map(oct => (
+                              <option key={oct} value={oct}>Oct {oct}</option>
+                            ))}
+                          </select>
+                          <select
+                            value={slot.inversion}
+                            onChange={(e) => {
+                              const newSlots = [...chordSlots];
+                              const idx = newSlots.findIndex(s => s.slot === slot.slot);
+                              if (idx !== -1) {
+                                newSlots[idx] = { ...newSlots[idx], inversion: e.target.value as 'root' | 'first' | 'second' };
+                                setChordSlots(newSlots);
+                              }
+                            }}
+                            className="border border-ink-line bg-ink px-1 py-0.5 font-mono text-xs text-ink-text"
+                          >
+                            <option value="root">Root</option>
+                            <option value="first">1st</option>
+                            <option value="second">2nd</option>
+                          </select>
+                        </div>
                         <button
-                          onClick={() => chord.playChord(m)}
-                          className="border border-ink-line px-2 py-0.5 font-mono text-[9px] uppercase text-ink-mute hover:border-ink-text hover:text-ink-text"
+                          onClick={() => chord.playChord(slot)}
+                          className="mt-1 w-full border border-ink-line px-1 py-0.5 font-mono text-xs text-ink-mute transition-colors hover:border-ink-text hover:text-ink-text"
                         >
-                          ▶
+                          Preview
                         </button>
                       </div>
-                      <div className="flex gap-1.5">
-                        {/* Root picker */}
-                        <select
-                          value={m.root}
-                          onChange={(e) => updateMapping(gesture, { root: e.target.value })}
-                          className="flex-1 border border-ink-line bg-ink px-1 py-0.5 font-mono text-[10px] text-ink-text"
-                        >
-                          {ROOTS.map((r) => <option key={r} value={r}>{r}</option>)}
-                        </select>
-                        {/* Quality picker */}
-                        <select
-                          value={m.quality}
-                          onChange={(e) => updateMapping(gesture, { quality: e.target.value as ChordQuality })}
-                          className="flex-1 border border-ink-line bg-ink px-1 py-0.5 font-mono text-[10px] text-ink-text"
-                        >
-                          {QUALITIES.map((q) => <option key={q} value={q}>{q}</option>)}
-                        </select>
-                        {/* Octave picker */}
-                        <select
-                          value={m.octave}
-                          onChange={(e) => updateMapping(gesture, { octave: parseInt(e.target.value) })}
-                          className="w-12 border border-ink-line bg-ink px-1 py-0.5 font-mono text-[10px] text-ink-text"
-                        >
-                          {[2,3,4,5].map((o) => <option key={o} value={o}>{o}</option>)}
-                        </select>
-                      </div>
-                      <div className="mt-1.5">
-                        <select
-                          value={m.inversion}
-                          onChange={(e) => updateMapping(gesture, { inversion: e.target.value as "root" | "first" | "second" })}
-                          className="w-full border border-ink-line bg-ink px-1 py-0.5 font-mono text-[10px] text-ink-text"
-                        >
-                          <option value="root">Root position</option>
-                          <option value="first">1st inversion</option>
-                          <option value="second">2nd inversion</option>
-                        </select>
-                      </div>
-                      <div className="mt-1 font-mono text-[10px] text-ink-mute">
-                        → {chordLabel(m.root, m.quality)} oct {m.octave}
-                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'guide' && (
+              <div className="space-y-4 font-mono text-xs text-ink-mute">
+                <div>
+                  <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute">Gesture Reference</div>
+                  <div className="space-y-2">
+                    <div>
+                      <div className="text-amber-gold">LEFT HAND</div>
+                      <div>OPEN: Hold 0.4s to start beat (latches)</div>
+                      <div>FIST: Hold 0.4s to stop beat</div>
+                      <div>PINCH: Toggle mute/unmute</div>
+                      <div>HEIGHT: Control volume</div>
+                      <div>X POSITION: Control filter</div>
                     </div>
-                  );
-                })}
+                    <div>
+                      <div className="text-indigo-400">RIGHT HAND</div>
+                      <div>OPEN + ZONE: Slots 1-4</div>
+                      <div>TWO + ZONE: Slots 5-8</div>
+                      <div>FIST: Silence all chords</div>
+                      <div>PINCH: Toggle sustain</div>
+                      <div>POINT: Same as OPEN (slots 1-4)</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute">Beat Source</div>
+                  <div>DRUM PRESET: Built-in drum machine</div>
+                  <div>YOUTUBE BEAT: External audio from editor</div>
+                  <div>Note: YouTube audio cannot be recorded</div>
+                </div>
+
+                <div>
+                  <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute">Recording</div>
+                  <div>Audio is captured from drum engine</div>
+                  <div>and chord synthesizer only.</div>
+                  <div>YouTube beats are excluded due to</div>
+                  <div>browser security restrictions.</div>
+                </div>
               </div>
             )}
           </div>
         </div>
       </div>
 
-      {/* ── Bottom transport ── */}
-      <div className="border-t border-ink-line bg-ink-surface px-5 py-3">
-        <div className="flex flex-wrap items-center gap-2">
-
-          {/* Camera toggle */}
+      {/* ── Transport strip ── */}
+      <div className="flex items-center justify-between border-t border-ink-line px-5 py-3">
+        <div className="flex items-center gap-2">
           <button
             onClick={camActive ? stopCamera : startCamera}
-            className={`border px-3 py-1.5 font-mono text-xs uppercase tracking-wider transition-colors ${
+            className={`border px-3 py-1 font-mono text-xs uppercase tracking-wider transition-colors ${
               camActive
-                ? "border-amber-gold text-amber-gold hover:bg-amber-gold/10"
-                : "border-ink-line text-ink-mute hover:border-ink-text hover:text-ink-text"
+                ? 'border-red-500 text-red-500 hover:bg-red-500/10'
+                : 'border-amber-gold text-amber-gold hover:bg-amber-gold/10'
             }`}
           >
-            {camActive ? "◼ Stop Cam" : "⬤ Start Cam"}
+            {camActive ? 'STOP CAMERA' : 'START CAMERA'}
           </button>
 
-          {/* Drums play/stop */}
-          <button
-            onClick={() => {
-              if (drum.playing) {
-                drum.stop();
-              } else {
-                drum.ensureCtx();
-                drum.play();
-                setupRecDest();
-              }
-            }}
-            className={`border px-3 py-1.5 font-mono text-xs uppercase tracking-wider transition-colors ${
-              drum.playing
-                ? "border-amber-gold text-amber-gold hover:bg-amber-gold/10"
-                : "border-ink-line text-ink-mute hover:border-ink-text hover:text-ink-text"
-            }`}
-          >
-            {drum.playing ? "◼ Stop Drums" : "▶ Play Drums"}
-          </button>
+          {beatSource === 'drums' && (
+            <button
+              onClick={drum.playing ? drum.stop : drum.play}
+              className={`border px-3 py-1 font-mono text-xs uppercase tracking-wider transition-colors ${
+                drum.playing
+                  ? 'border-red-500 text-red-500 hover:bg-red-500/10'
+                  : 'border-amber-gold text-amber-gold hover:bg-amber-gold/10'
+              }`}
+            >
+              {drum.playing ? 'STOP' : 'PLAY DRUMS'}
+            </button>
+          )}
 
-          {/* Separator */}
-          <div className="h-5 w-px bg-ink-line" />
-
-          {/* Drum preset */}
           <select
             value={drum.presetName}
-            onChange={(e) => drum.selectPreset(e.target.value)}
-            className="border border-ink-line bg-ink-surface px-2 py-1.5 font-mono text-xs text-ink-text"
+            onChange={(e) => drum.setPreset(e.target.value)}
+            className="border border-ink-line bg-ink px-2 py-1 font-mono text-xs text-ink-text"
           >
-            {DRUM_PRESETS.map((p) => (
-              <option key={p.name} value={p.name}>{p.name} — {p.bpm} BPM</option>
+            {DRUM_PRESETS.map(preset => (
+              <option key={preset.name} value={preset.name}>{preset.name}</option>
             ))}
           </select>
 
-          {/* Instrument */}
           <select
-            value={chord.instrumentName}
-            onChange={(e) => chord.selectInstrument(e.target.value)}
-            className="border border-ink-line bg-ink-surface px-2 py-1.5 font-mono text-xs text-ink-text"
+            className="border border-ink-line bg-ink px-2 py-1 font-mono text-xs text-ink-text"
           >
-            {INSTRUMENT_PRESETS.map((p) => (
-              <option key={p.name} value={p.name}>{p.name}</option>
+            {INSTRUMENT_PRESETS.map(preset => (
+              <option key={preset.name} value={preset.name}>{preset.name}</option>
             ))}
           </select>
-
-          {/* Chord map preset */}
-          <select
-            value={chordMapPreset}
-            onChange={(e) => applyMapPreset(e.target.value)}
-            className="border border-ink-line bg-ink-surface px-2 py-1.5 font-mono text-xs text-ink-text"
-          >
-            {Object.keys(CHORD_MAP_PRESETS).map((name) => (
-              <option key={name} value={name}>Map: {name}</option>
-            ))}
-          </select>
-
-          {/* BPM display */}
-          <span className="font-mono text-xs text-ink-mute">
-            BPM: <span className="text-ink-text">{currentPreset.bpm}</span>
-          </span>
-
-          {/* Separator */}
-          <div className="ml-auto h-5 w-px bg-ink-line" />
-
-          {/* Master volume */}
-          <div className="flex items-center gap-1.5">
-            <span className="font-mono text-[10px] uppercase text-ink-mute">Vol</span>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.01}
-              value={drum.masterVolume}
-              onChange={(e) => drum.setMasterVolume(parseFloat(e.target.value))}
-              className="w-20 accent-amber-gold"
-            />
-          </div>
-
-          {/* Record button */}
-          <button
-            onClick={recording ? stopRecording : startRecording}
-            className={`border px-3 py-1.5 font-mono text-xs uppercase tracking-wider transition-colors ${
-              recording
-                ? "border-red-500 text-red-400 hover:bg-red-500/10"
-                : "border-ink-line text-ink-mute hover:border-red-500 hover:text-red-400"
-            }`}
-          >
-            {recording ? `◼ Stop ${fmtTime(recElapsed)}` : "● Record"}
-          </button>
-
-          {/* Save take */}
-          <button
-            onClick={saveTake}
-            disabled={!savedBlob}
-            className={`border px-3 py-1.5 font-mono text-xs uppercase tracking-wider transition-colors ${
-              savedBlob
-                ? "border-amber-gold text-amber-gold hover:bg-amber-gold/10"
-                : "cursor-not-allowed border-ink-line text-ink-line"
-            }`}
-          >
-            ↓ Save Take
-          </button>
         </div>
 
-        {/* Preset description */}
-        <div className="mt-1.5 font-mono text-[10px] text-ink-mute">
-          {currentPreset.description} · {currentPreset.bpm} BPM · swing {Math.round(currentPreset.swing * 100)}%
+        <div className="flex items-center gap-2">
+          <button
+            onClick={recording ? stopRecording : startRecording}
+            disabled={!camActive}
+            className={`border px-3 py-1 font-mono text-xs uppercase tracking-wider transition-colors ${
+              recording
+                ? 'border-red-500 text-red-500 hover:bg-red-500/10'
+                : camActive
+                ? 'border-amber-gold text-amber-gold hover:bg-amber-gold/10'
+                : 'border-ink-line/40 text-ink-mute/40 cursor-not-allowed'
+            }`}
+          >
+            {recording ? '■ STOP' : '● RECORD'}
+          </button>
+
+          <button
+            onClick={onClose}
+            className="border border-ink-line px-3 py-1 font-mono text-xs uppercase tracking-wider text-ink-mute transition-colors hover:border-ink-text hover:text-ink-text"
+          >
+            SAVE TAKE
+          </button>
+
+          <div className="border border-ink-line px-3 py-1 font-mono text-xs text-ink-mute">
+            BPM: {currentPreset.bpm}
+          </div>
         </div>
       </div>
     </div>

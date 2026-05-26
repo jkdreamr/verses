@@ -39,18 +39,18 @@ The core idea: **your body is the instrument.** Not "AI writes your song." The a
 
 ### Perform Mode (Gesture Instrument)
 - Webcam hand tracking via MediaPipe Hand Landmarker (runs in browser, no server)
-- Left hand controls drums: open palm plays, fist pauses; height = volume; horizontal = filter
-- Right hand triggers mapped chords on a synthesizer
-- Map 5 gestures to any chord (root, quality, octave, inversion)
-- Drum presets: Boom Bap, Trap, R&B, House, Minimal
-- Instrument presets: Warm Keys, Soft Pad, Glass Synth, Bass, Brass-ish
+- Beat source is either **DRUMS** (procedural synthesis, 5 presets) or **YOUTUBE** (a loaded beat from the editor's YouTube bar)
+- Left hand transport is **latched**: raise an open palm and hold for ~0.4s → beat starts and keeps looping even when your hand comes down; make a fist to stop it
+- Right hand controls 8 chord slots across two gestures and four horizontal zones
 - Record the performance as a Take
 
 ### Voice to Score
 - Record a short sung melody (up to 15 seconds)
-- Pitch detection via autocorrelation (runs in browser)
+- Pitch detection via the **YIN algorithm** (more accurate than basic autocorrelation, handles slight vibrato)
 - Results displayed as a piano roll canvas
 - Note events: name (C4, D#4...), start time, duration, confidence
+- Re-analyze button to reprocess the same recording with adjusted parameters
+- Playback of the original recorded audio for comparison
 - Export as JSON or copy note sequence as text
 
 ---
@@ -82,25 +82,32 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your_key
 1. Open any song in the editor
 2. Click **perform** in the toolbar
 3. Click **Start Camera** — grant webcam permission when prompted
-4. Select a drum preset (e.g. Boom Bap)
-5. Raise your left hand, **open palm** → drums start
-6. Lower your left hand height → volume drops
-7. Open the chord map and assign chords to right-hand gestures
-8. Raise your right hand with different gestures → chords play
+4. Choose your beat source: select a drum preset (e.g. Boom Bap) **or** load a YouTube beat in the editor bar first
+5. Raise your left hand, **open palm**, and hold for ~0.4s → beat starts and keeps looping
+6. Lower your hand — the beat continues (it is latched on)
+7. Make a **left fist** to stop the beat
+8. Use your right hand to trigger chords (see gesture map below)
 9. Click **Record** to capture the session as a Take
 
-**Left hand gestures:**
-- Open palm → play drums
-- Fist → pause drums
+**Left hand (transport — latched):**
+- Open palm, hold ~0.4s → beat starts and loops until stopped
+- Fist → beat stops (stays stopped until you re-trigger)
 - Height → volume (high = loud)
 - Horizontal position → filter cutoff
 
-**Right hand gestures (default Pop mapping):**
-- Open palm → C major
-- Pinch → G major
-- Two fingers → A minor
-- Fist → F major
-- Point → E minor
+**Right hand (chords — 8 slots):**
+
+| Gesture | Zone 1 (far left) | Zone 2 | Zone 3 | Zone 4 (far right) |
+|---------|-------------------|--------|--------|-------------------|
+| Open palm | Slot 1 | Slot 2 | Slot 3 | Slot 4 |
+| Two fingers | Slot 5 | Slot 6 | Slot 7 | Slot 8 |
+| Fist | Silence (all chords off) | | | |
+| Pinch | Sustain toggle | | | |
+
+Assign any chord (root, quality, octave, inversion) to each of the 8 slots in the chord map panel.
+
+**Drum presets:** Boom Bap, Trap, R&B, House, Minimal  
+**Instrument presets:** Warm Keys, Soft Pad, Glass Synth, Bass, Brass-ish
 
 ---
 
@@ -110,9 +117,11 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your_key
 2. Click **Record** — grant mic permission
 3. Sing a short melody (4-8 notes, up to 15 seconds)
 4. Click **Stop**
-5. Wait ~1 second for analysis
+5. Wait ~1 second for YIN pitch analysis
 6. View the piano roll + note list
-7. Export JSON or copy note sequence
+7. Use **Re-analyze** to reprocess the same recording if the result looks off
+8. Play back the original recording to compare against the piano roll
+9. Export JSON or copy note sequence
 
 Works best with: one clear voice, no background music, notes held for at least 0.2 seconds.
 
@@ -151,8 +160,9 @@ Camera and microphone stay on your device.
 - Perform mode works best in Chrome on desktop
 - Camera/mic features require HTTPS or localhost
 - Hand tracking latency: ~50-100ms depending on device
-- Pitch detection works best with clean, monophonic vocals (no vibrato, minimal noise)
+- Pitch detection works best with clean, monophonic vocals; heavy vibrato or significant background noise will reduce accuracy
 - Drum sounds are procedural (synthesized) — not sample-based
+- **YouTube audio cannot be captured in recordings.** When the beat source is YouTube, browser cross-origin restrictions prevent the YouTube audio stream from being routed into the MediaRecorder. Only the synthesized chord/drum audio is captured in Takes. This is a known browser limitation, not a bug.
 - Performance sessions are not persisted between page loads
 - Mobile support: editor works; Perform mode is not optimized for mobile
 
