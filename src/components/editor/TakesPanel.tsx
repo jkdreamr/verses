@@ -161,13 +161,13 @@ export function TakesPanel({
         <div className="flex items-center gap-2">
           <button
             onClick={onNewTake}
-            className="rounded border border-amber-gold/50 bg-amber-gold/10 px-3 py-1 text-[11px] text-amber-gold hover:bg-amber-gold/20"
+            className="btn-primary text-[12px]"
           >
             ● new take
           </button>
           <button
             onClick={onClose}
-            className="rounded p-1 text-ink-mute transition-colors duration-150 hover:bg-ink-line hover:text-ink-text"
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-ink-mute transition-colors duration-150 hover:bg-surface-2 hover:text-ink-text"
             aria-label="Close takes panel"
           >
             ✕
@@ -256,19 +256,19 @@ export function TakesPanel({
                       onClick={() =>
                         setActiveId(isActive ? null : t.id)
                       }
-                      className="rounded border border-ink-line px-2 py-0.5 text-[11px] text-ink-mute hover:border-amber-gold/40 hover:text-amber-gold"
+                      className="rounded-lg border border-line px-2.5 py-1 text-[11px] text-ink-mute hover:border-amber-gold/40 hover:text-amber-gold"
                     >
                       {isActive ? "hide" : "▶ play"}
                     </button>
                     <button
                       onClick={() => startRename(t)}
-                      className="rounded border border-ink-line px-2 py-0.5 text-[11px] text-ink-mute hover:text-ink-text"
+                      className="rounded-lg border border-line px-2.5 py-1 text-[11px] text-ink-mute hover:text-ink-text"
                     >
                       rename
                     </button>
                     <button
                       onClick={() => downloadTake(t)}
-                      className="rounded border border-ink-line px-2 py-0.5 text-[11px] text-ink-mute hover:text-ink-text"
+                      className="rounded-lg border border-line px-2.5 py-1 text-[11px] text-ink-mute hover:text-ink-text"
                     >
                       ⬇ download
                     </button>
@@ -290,7 +290,7 @@ export function TakesPanel({
                         </button>
                         <button
                           onClick={cancelDelete}
-                          className="rounded border border-ink-line px-2 py-0.5 text-[11px] text-ink-mute hover:text-ink-text"
+                          className="rounded-lg border border-line px-2.5 py-1 text-[11px] text-ink-mute hover:text-ink-text"
                         >
                           cancel
                         </button>
@@ -298,7 +298,7 @@ export function TakesPanel({
                     ) : (
                       <button
                         onClick={() => askDelete(t.id)}
-                        className="ml-auto rounded border border-ink-line px-2 py-0.5 text-[11px] text-ink-mute hover:border-red-400/60 hover:text-red-300"
+                        className="ml-auto rounded-lg border border-line px-2.5 py-1 text-[11px] text-ink-mute hover:border-red-400/60 hover:text-red-300"
                       >
                         delete
                       </button>

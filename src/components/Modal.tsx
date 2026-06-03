@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useId, useRef } from "react";
 
 export function Modal({
   open,
@@ -16,29 +16,44 @@ export function Modal({
   /** Optional max-width override (default 640px). Use e.g. "900px". */
   width?: string;
 }) {
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const titleId = useId();
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Move focus into the dialog for keyboard + screen-reader users; restore on close.
+    const prevFocus = document.activeElement as HTMLElement | null;
+    panelRef.current?.focus();
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      prevFocus?.focus?.();
+    };
   }, [open, onClose]);
 
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center print:hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 print:hidden">
       <div
-        className="absolute inset-0 bg-black/70 transition-opacity duration-150"
+        className="animate-backdrop-in absolute inset-0 bg-black/70 backdrop-blur-[2px]"
         onClick={onClose}
+        aria-hidden
       />
       <div
-        className="relative z-10 max-h-[calc(100vh-3rem)] overflow-y-auto rounded-md border border-ink-line bg-ink-surface p-5"
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={title ? titleId : undefined}
+        tabIndex={-1}
+        className="animate-modal-in surface-card relative z-10 max-h-[calc(100vh-2rem)] overflow-y-auto p-5 shadow-elevate-lg outline-none scrollbar-thin"
         style={{ width: `min(${width ?? "640px"}, calc(100vw - 2rem))` }}
       >
         {title ? (
-          <div className="mb-3 font-sans text-sm uppercase tracking-wider text-ink-mute">
+          <div id={titleId} className="mb-3 font-sans text-sm uppercase tracking-wider text-ink-mute">
             {title}
           </div>
         ) : null}

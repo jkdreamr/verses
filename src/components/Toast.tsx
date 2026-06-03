@@ -34,16 +34,20 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <Ctx.Provider value={{ toast }}>
       {children}
-      <div className="pointer-events-none fixed bottom-6 left-1/2 z-[80] flex -translate-x-1/2 flex-col items-center gap-2 print:hidden">
+      <div
+        role="status"
+        aria-live="polite"
+        className="pointer-events-none fixed bottom-6 left-1/2 z-[80] flex -translate-x-1/2 flex-col items-center gap-2 print:hidden"
+      >
         {toasts.map((t) => (
           <div
             key={t.id}
-            className={`pointer-events-auto rounded-md border px-3 py-2 text-sm shadow-sm transition-opacity duration-150 ${
+            className={`animate-modal-in pointer-events-auto rounded-lg border px-3.5 py-2 text-sm shadow-elevate ${
               t.tone === "error"
-                ? "border-red-500/40 bg-red-500/10 text-red-200"
+                ? "border-danger/40 bg-danger/10 text-danger"
                 : t.tone === "ok"
-                  ? "border-amber-gold/40 bg-amber-gold/10 text-amber-gold"
-                  : "border-ink-line bg-ink-surface text-ink-text"
+                  ? "border-accent/40 bg-accent/10 text-accent"
+                  : "border-line bg-surface text-ink-text"
             }`}
           >
             {t.message}

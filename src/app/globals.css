@@ -132,13 +132,29 @@ input[type="range"]::-moz-range-thumb {
   cursor: pointer;
 }
 
-/* Focus states */
-button:focus-visible,
-a:focus-visible,
-input:focus-visible,
-select:focus-visible {
-  outline: 1px solid rgb(var(--accent) / 0.5);
+/* Focus states — visible 2px accent ring on keyboard-focusable elements only
+   (excludes tabindex="-1" programmatic focus like dialog containers). */
+:where(button, a, input, select, textarea, [tabindex]:not([tabindex^="-"]), [role="button"]):focus-visible {
+  outline: 2px solid rgb(var(--accent) / 0.7);
   outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Snappier taps on touch devices; pointer cursor on real buttons */
+button,
+[role="button"] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+
+/* Tabular figures for timers, levels and data so they don't jitter */
+.font-mono,
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }
 
 /* Select styling */
@@ -192,6 +208,48 @@ input[type="range"].slider-premium:disabled {
 }
 .glow-accent-sm {
   box-shadow: 0 0 12px rgb(var(--accent) / 0.32);
+}
+
+/* ── Motion: modal / sheet entrance (from source, fast, spring-ish) ── */
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-modal-in {
+  animation: modal-in 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.animate-backdrop-in {
+  animation: backdrop-in 160ms ease-out;
+}
+
+/* ── Reusable component recipes (interaction states baked in) ── */
+@layer components {
+  .btn {
+    @apply inline-flex select-none items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-[13px] font-medium transition-all duration-150;
+    @apply active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-accent/15 text-accent hover:bg-accent/25;
+  }
+  .btn-ghost {
+    @apply btn text-ink-mute hover:bg-surface-2 hover:text-ink-text;
+  }
+  .btn-danger {
+    @apply btn bg-danger/15 text-danger hover:bg-danger/25;
+  }
+  .chip {
+    @apply inline-flex select-none items-center rounded-lg bg-surface-2 px-2.5 py-1.5 text-[12px] text-ink-mute transition-colors duration-150 hover:text-ink-text;
+  }
+  .chip-active {
+    @apply bg-accent/15 text-accent ring-1 ring-accent/40;
+  }
+  .surface-card {
+    @apply rounded-xl border border-line bg-surface shadow-elevate;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
