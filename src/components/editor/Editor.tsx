@@ -8,7 +8,6 @@ import { localStore } from "@/lib/storage";
 import type { Song, SongVersion, YoutubeSession } from "@/lib/types";
 import { useToast } from "@/components/Toast";
 import { useShortcut } from "@/hooks/useShortcut";
-import { useIsMobile } from "@/hooks/useIsMobile";
 import { RhymePanel } from "./RhymePanel";
 import { RhymeLens, buildCharHighlights, FAMILY_COLORS, FAMILY_BORDER_COLORS, type CharHighlight } from "./RhymeLens";
 import type { RhymeLensResult } from "@/lib/rhymeLens";
@@ -32,7 +31,6 @@ const VERSION_INTERVAL_MS = 60_000; // create a version snapshot at most once a 
 export function Editor({ songId }: { songId: string }) {
   const searchParams = useSearchParams();
   const { toast } = useToast();
-  const isMobile = useIsMobile();
   const configured = isSupabaseConfigured();
   const [guestMode, setGuestMode] = useState(searchParams.get("guest") === "1");
 
@@ -558,15 +556,8 @@ export function Editor({ songId }: { songId: string }) {
         onTags={() => openModal("tags")}
         onToggleFont={() => setSerif((v) => !v)}
         serif={serif}
-        onPerform={() => {
-          if (isMobile) {
-            toast("Perform is desktop-only. Use desktop for hand gestures, chords, and live instruments.", "info");
-            return;
-          }
-          openModal("perform");
-        }}
+        onPerform={() => openModal("perform")}
         onVoiceScore={() => openModal("voiceScore")}
-        isMobile={isMobile}
       />
 
       {/* Bottom YouTube bar */}
@@ -652,7 +643,7 @@ export function Editor({ songId }: { songId: string }) {
         }}
       />
 
-      {!isMobile && (
+      {performOpen && (
         <PerformModal
           open={performOpen}
           onClose={closeModal}

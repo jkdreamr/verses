@@ -12,7 +12,6 @@ export function Toolbar({
   onPerform,
   onVoiceScore,
   serif,
-  isMobile,
 }: {
   onInsertStructure: () => void;
   onScan: () => void;
@@ -25,7 +24,6 @@ export function Toolbar({
   onPerform: () => void;
   onVoiceScore: () => void;
   serif: boolean;
-  isMobile: boolean;
 }) {
   return (
     <div className="fade-idle pointer-events-none fixed left-1/2 top-3 z-20 -translate-x-1/2 max-w-[calc(100vw-2rem)] print:hidden">
@@ -46,18 +44,14 @@ export function Toolbar({
         <ToolBtn onClick={onTakes} title="Recorded takes — audio, video, performance">
           takes
         </ToolBtn>
-        {!isMobile && (
-          <>
-            <Sep />
-            <button
-              onClick={onPerform}
-              title="New take — with gesture/trumpet/lyric follow options"
-              className="px-2.5 py-1 transition-colors duration-150 text-amber-gold hover:bg-amber-gold/10"
-            >
-              perform
-            </button>
-          </>
-        )}
+        <Sep />
+        <button
+          onClick={onPerform}
+          title="Perform — play music with your hands or touch"
+          className="px-2.5 py-1 text-amber-gold transition-colors duration-150 hover:bg-amber-gold/10"
+        >
+          perform
+        </button>
         <Sep />
         <ToolBtn onClick={onVoiceScore} title="Voice to Score — hum a melody">
           voice score

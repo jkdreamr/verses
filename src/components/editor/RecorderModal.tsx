@@ -256,9 +256,8 @@ export function RecorderModal({
   // ── Drum + chord engines ──
   const audioBus = usePerformAudioBus();
   const bus = audioBus.bus;
-  const getBusCtx = useCallback(() => audioBus.bus?.ctx ?? null, [audioBus.bus]);
   const drum = useDrumEngine(bus?.drumGain ?? recDestNode);
-  const chord = useChordSynth(bus?.chordGain ?? recDestNode, getBusCtx);
+  const chord = useChordSynth();
   const ensureAudioBus = audioBus.ensureBus;
   const resumeAudioBus = audioBus.resume;
   const destroyAudioBus = audioBus.destroy;
