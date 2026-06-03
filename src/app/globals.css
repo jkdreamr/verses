@@ -6,10 +6,14 @@
   /* dark theme (default) — near-black, editorial */
   --bg: 10 10 10;
   --surface: 20 20 20;
-  --line: 32 32 32;
+  --surface-2: 28 28 30;
+  --line: 38 38 40;
   --text: 230 230 228;
-  --mute: 100 100 100;
+  --mute: 120 120 122;
   --accent: 201 168 76;
+  --accent-soft: 122 102 46;
+  --success: 110 196 140;
+  --danger: 226 110 104;
   --ink-text: 230 230 228;
   color-scheme: dark;
 }
@@ -17,11 +21,15 @@
 :root.light {
   --bg: 252 251 248;
   --surface: 255 255 255;
-  --line: 232 228 218;
-  --text: 22 22 22;
-  --mute: 110 110 110;
-  --accent: 172 134 40;
-  --ink-text: 22 22 22;
+  --surface-2: 246 243 236;
+  --line: 226 221 210;
+  --text: 26 24 20;
+  --mute: 116 112 104;
+  --accent: 168 128 34;
+  --accent-soft: 214 196 150;
+  --success: 56 142 92;
+  --danger: 192 64 58;
+  --ink-text: 26 24 20;
   color-scheme: light;
 }
 
@@ -139,6 +147,62 @@ select {
   border: 1px solid rgb(var(--line) / 0.4);
   color: rgb(var(--text));
   border-radius: 2px;
+}
+
+/* Premium slider — custom track fill (set inline) + large, tactile thumb */
+input[type="range"].slider-premium {
+  height: 6px;
+  border-radius: 999px;
+  background: rgb(var(--line));
+}
+input[type="range"].slider-premium::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgb(var(--surface));
+  border: 2px solid rgb(var(--accent));
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.35);
+  cursor: pointer;
+  transition: transform 120ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 120ms;
+}
+input[type="range"].slider-premium::-webkit-slider-thumb:hover {
+  transform: scale(1.12);
+}
+input[type="range"].slider-premium:active::-webkit-slider-thumb {
+  transform: scale(1.18);
+  box-shadow: 0 0 0 6px rgb(var(--accent) / 0.16);
+}
+input[type="range"].slider-premium::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgb(var(--surface));
+  border: 2px solid rgb(var(--accent));
+  cursor: pointer;
+}
+input[type="range"].slider-premium:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Accent glow used by interactive instrument surfaces */
+.glow-accent {
+  box-shadow: 0 0 22px rgb(var(--accent) / 0.42);
+}
+.glow-accent-sm {
+  box-shadow: 0 0 12px rgb(var(--accent) / 0.32);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 @media print {
