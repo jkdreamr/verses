@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import { Modal } from "@/components/Modal";
 import { useToast } from "@/components/Toast";
@@ -21,6 +22,7 @@ import {
 import type { ChordSlot } from "@/hooks/perform/useChordSynth";
 import { useLiveTrumpet, TRUMPET_PRESETS } from "@/hooks/perform/useLiveTrumpet";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { createLyricAligner, type LyricToken } from "@/lib/music/lyricAlign";
 
 // ─── Recording state ──────────────────────────────────────────────────────────
 
@@ -90,8 +92,6 @@ const splitLyricLines = (lyrics: string): string[] =>
     .map((l) => l.trim())
     .filter(Boolean);
 
-const normalizeLine = (s: string): string =>
-  s.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
 
 // ─── Local types ──────────────────────────────────────────────────────────────
 
@@ -192,21 +192,21 @@ export function RecorderModal({
   const [activeSlot, setActiveSlot] = useState<number | null>(null);
 
   // ── Trumpet layer setup ──
-  const [trumpetPresetName, setTrumpetPresetName] = useState("Trumpet Sketch");
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [rawVoiceInTake, setRawVoiceInTake] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [monitorRawVoice, setMonitorRawVoice] = useState(false);
+  const [trumpetPresetName, setTrumpetPresetName] = useState("Trumpet");
 
   // ── Lyric follow ──
   const [lyricFollowMode, setLyricFollowMode] = useState<LyricFollowMode>("smart");
   const [secondsPerLine, setSecondsPerLine] = useState<number>(3);
   const [manualLineOffset, setManualLineOffset] = useState<number>(0);
   const [smartLineIndex, setSmartLineIndex] = useState(0);
+  const [activeTokenIndex, setActiveTokenIndex] = useState(0);
   const [smartStatus, setSmartStatus] = useState<"listening" | "low" | "fallback" | "unavailable">("unavailable");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const speechRecognitionRef = useRef<any>(null);
   const lastMatchTimeRef = useRef<number>(0);
+  const alignerRef = useRef<ReturnType<typeof createLyricAligner> | null>(null);
+  const recRestartRef = useRef(true);
+  const lyricTokens = useMemo<LyricToken[]>(() => createLyricAligner(lyrics).tokens, [lyrics]);
 
   // ── MediaStream refs ──
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -270,7 +270,6 @@ export function RecorderModal({
     (performLayer === "trumpet" || performLayer === "both") && state === "recording";
   const trumpet = useLiveTrumpet({
     micStream: capturedMicStreamRef.current,
-    destNode: bus?.trumpetGain ?? null,
     enabled: trumpetEnabled,
   });
   const trumpetState = {
@@ -615,7 +614,10 @@ export function RecorderModal({
     };
   }, [camActive, gestureDetectionLoop]);
 
-  // ─── Smart lyric follow ───────────────────────────────────────────────────
+  // ─── Smart lyric follow (forced alignment) ────────────────────────────────
+  // We know the written lyrics, so we align the recogniser's drifting tail
+  // against a forward window of upcoming tokens (fuzzy: Levenshtein + Soundex),
+  // advance a word-level pointer, and auto-restart when the API stops on silence.
   const initSmartFollow = useCallback(() => {
     const SpeechRecognitionCtor =
       typeof window !== "undefined"
@@ -629,6 +631,11 @@ export function RecorderModal({
       return;
     }
 
+    const aligner = createLyricAligner(lyrics);
+    alignerRef.current = aligner;
+    setSmartLineIndex(0);
+    setActiveTokenIndex(0);
+
     try {
       const rec = new SpeechRecognitionCtor();
       rec.continuous = true;
@@ -636,46 +643,40 @@ export function RecorderModal({
       rec.lang = "en-US";
       speechRecognitionRef.current = rec;
       lastMatchTimeRef.current = Date.now();
+      recRestartRef.current = true;
       setSmartStatus("listening");
-
-      let lineIdx = 0;
-      setSmartLineIndex(0);
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       rec.onresult = (evt: any) => {
         let transcript = "";
         for (let i = evt.resultIndex; i < evt.results.length; i++) {
-          transcript += evt.results[i][0].transcript;
+          transcript += evt.results[i][0].transcript + " ";
         }
-        const confidence = evt.results[evt.results.length - 1]?.[0]?.confidence ?? 0;
-        setSmartStatus(confidence > 0.5 ? "listening" : "low");
-
-        const norm = normalizeLine(transcript);
-        const words = norm.split(" ").filter(Boolean);
-        if (words.length < 2) return;
-
-        // Try to match against current + next 3 lines
-        for (let offset = 0; offset <= 3; offset++) {
-          const targetIdx = lineIdx + offset;
-          if (targetIdx >= lyricLines.length) break;
-          const lineNorm = normalizeLine(lyricLines[targetIdx]);
-          const lineWords = lineNorm.split(" ").filter(Boolean);
-          if (lineWords.length === 0) continue;
-
-          const matched = words.filter((w) => lineWords.includes(w)).length;
-          const ratio = matched / lineWords.length;
-
-          if (ratio >= 0.5) {
-            lineIdx = targetIdx;
-            setSmartLineIndex(lineIdx);
-            lastMatchTimeRef.current = Date.now();
-            break;
-          }
+        const res = aligner.process(transcript);
+        if (res.matched) {
+          setSmartLineIndex(res.lineIndex);
+          setActiveTokenIndex(res.tokenIndex);
+          lastMatchTimeRef.current = Date.now();
+          setSmartStatus(res.confidence >= 0.5 ? "listening" : "low");
+        } else {
+          setSmartStatus("low");
         }
       };
 
-      rec.onerror = () => {
-        setSmartStatus("fallback");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      rec.onerror = (e: any) => {
+        if (e?.error === "not-allowed" || e?.error === "service-not-allowed") {
+          recRestartRef.current = false;
+          setSmartStatus("fallback");
+        }
+        // 'no-speech' / 'aborted' are benign — onend will restart.
+      };
+
+      // The Web Speech API stops on silence; transparently restart it.
+      rec.onend = () => {
+        if (recRestartRef.current && speechRecognitionRef.current === rec) {
+          try { rec.start(); } catch { /* already starting */ }
+        }
       };
 
       rec.start();
@@ -683,13 +684,18 @@ export function RecorderModal({
       setSmartStatus("unavailable");
       setLyricFollowMode("pace");
     }
-  }, [lyricLines]);
+  }, [lyrics]);
 
   const stopSmartFollow = useCallback(() => {
+    recRestartRef.current = false;
     if (speechRecognitionRef.current) {
-      try { speechRecognitionRef.current.stop(); } catch {}
+      try {
+        speechRecognitionRef.current.onend = null;
+        speechRecognitionRef.current.stop();
+      } catch { /* ignore */ }
       speechRecognitionRef.current = null;
     }
+    alignerRef.current = null;
   }, []);
 
   // Smart follow fallback watchdog
@@ -868,8 +874,11 @@ export function RecorderModal({
     let camStream: MediaStream | null = null;
 
     try {
+      // RAW capture — no browser DSP. Noise suppression / AGC muffle vocals and
+      // wreck pitch detection; echo-cancellation strips the beat the mic is
+      // meant to hear (Photo-Booth style). We want exactly what was sung.
       micStream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
       });
       sourceStreamsRef.current.push(micStream);
       capturedMicStreamRef.current = micStream;
@@ -936,20 +945,40 @@ export function RecorderModal({
       };
       recorder.onstop = () => {
         const finalDuration = (Date.now() - startedAtRef.current) / 1000;
-        const blob = new Blob(chunksRef.current, { type: mime });
+        // Build with the recorder's *actual* mime, accumulate from chunks.
+        const blobType = recorder.mimeType || mime;
+        const blob = new Blob(chunksRef.current, { type: blobType });
         chunksRef.current = [];
         stopDrums();
         releaseChord();
         window.dispatchEvent(new CustomEvent("verses:beat-pause"));
         teardownStreams();
+        stopSmartFollow();
+
+        // Self-test 1: a non-empty blob actually exists.
+        if (!blob || blob.size < 256) {
+          setError("Recording came back empty — no audio was captured. Check microphone permissions and try again.");
+          setState("idle");
+          return;
+        }
         const url = URL.createObjectURL(blob);
+        // Self-test 2: the blob loads as playable media (metadata resolves).
+        const probe = document.createElement("audio");
+        probe.preload = "metadata";
+        probe.onloadedmetadata = () => {
+          if (probe.duration === 0) {
+            console.warn("[recorder] captured blob reports zero duration");
+          }
+        };
+        probe.onerror = () => console.warn("[recorder] captured blob failed to load as audio");
+        probe.src = url;
+
         setReviewBlob(blob);
         setReviewUrl(url);
-        setReviewMime(mime);
+        setReviewMime(blobType);
         setReviewDuration(finalDuration);
         setLabel(defaultLabelForLayer(performLayer));
         setState("review");
-        stopSmartFollow();
       };
       recorderRef.current = recorder;
       recorder.start(250);
@@ -1399,28 +1428,38 @@ export function RecorderModal({
                   {(performLayer === "trumpet" || performLayer === "both") ? (
                     <div className="rounded border border-ink-line/60 bg-ink-surface/30 p-3">
                       <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-amber-gold">
-                        Live Trumpet
+                        Sampled Trumpet
+                      </div>
+
+                      {/* Mode */}
+                      <div className="mb-3">
+                        <div className="mb-1 font-mono text-[10px] uppercase tracking-wider text-ink-mute">Mode</div>
+                        <div className="flex gap-1">
+                          {([["live", "Live Monitor"], ["convert", "Sing → Convert"]] as const).map(([m, label]) => (
+                            <button key={m} type="button" disabled={isRecording || isPaused}
+                              onClick={() => trumpet.setMode(m)}
+                              className={`rounded border px-2 py-0.5 font-mono text-[11px] transition-colors ${
+                                trumpet.mode === m ? "border-amber-gold bg-amber-gold/10 text-amber-gold" : "border-ink-line text-ink-mute hover:text-ink-text disabled:opacity-40"}`}>
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="mt-1 font-mono text-[10px] text-ink-mute/70">
+                          {trumpet.mode === "live"
+                            ? "Plays as you sing. ~30–100 ms latency is inherent and can't be fully removed."
+                            : "Records dry, then plays a perfectly-tracked trumpet line — cleaner, no latency."}
+                        </div>
                       </div>
 
                       {/* Preset selector */}
                       <div className="mb-3">
-                        <div className="mb-1 font-mono text-[10px] text-ink-mute uppercase tracking-wider">Preset</div>
+                        <div className="mb-1 font-mono text-[10px] uppercase tracking-wider text-ink-mute">Voice</div>
                         <div className="flex flex-wrap gap-1">
                           {TRUMPET_PRESETS.map((p) => (
-                            <button
-                              key={p.name}
-                              type="button"
-                              disabled={isRecording || isPaused}
-                              onClick={() => {
-                                setTrumpetPresetName(p.name);
-                                trumpet.applyPreset(p);
-                              }}
+                            <button key={p.name} type="button" title={p.blurb}
+                              onClick={() => { setTrumpetPresetName(p.name); trumpet.applyPreset(p); }}
                               className={`rounded border px-2 py-0.5 font-mono text-[11px] transition-colors ${
-                                trumpetPresetName === p.name
-                                  ? "border-amber-gold bg-amber-gold/10 text-amber-gold"
-                                  : "border-ink-line text-ink-mute hover:text-ink-text disabled:opacity-40"
-                              }`}
-                            >
+                                trumpetPresetName === p.name ? "border-amber-gold bg-amber-gold/10 text-amber-gold" : "border-ink-line text-ink-mute hover:text-ink-text"}`}>
                               {p.name}
                             </button>
                           ))}
@@ -1431,47 +1470,79 @@ export function RecorderModal({
                       <div className="grid grid-cols-3 gap-3">
                         <label className="flex flex-col gap-1">
                           <span className="font-mono text-[10px] text-ink-mute">Brightness {Math.round(trumpet.brightness * 100)}%</span>
-                          <input type="range" min="0" max="1" step="0.01"
-                            value={trumpet.brightness}
-                            onChange={(e) => trumpet.setBrightness(parseFloat(e.target.value))}
-                            className="w-full accent-amber-gold"
-                          />
+                          <input type="range" min="0" max="1" step="0.01" value={trumpet.brightness}
+                            onChange={(e) => trumpet.setBrightness(parseFloat(e.target.value))} className="w-full accent-amber-gold" />
                         </label>
                         <label className="flex flex-col gap-1">
-                          <span className="font-mono text-[10px] text-ink-mute">Vibrato {Math.round(trumpet.vibratoAmount * 100)}%</span>
-                          <input type="range" min="0" max="1" step="0.01"
-                            value={trumpet.vibratoAmount}
-                            onChange={(e) => trumpet.setVibratoAmount(parseFloat(e.target.value))}
-                            className="w-full accent-amber-gold"
-                          />
+                          <span className="font-mono text-[10px] text-ink-mute">Glide {Math.round(trumpet.portamento * 100)}%</span>
+                          <input type="range" min="0" max="1" step="0.01" value={trumpet.portamento}
+                            onChange={(e) => trumpet.setPortamento(parseFloat(e.target.value))} className="w-full accent-amber-gold" />
                         </label>
                         <label className="flex flex-col gap-1">
                           <span className="font-mono text-[10px] text-ink-mute">Output {Math.round(trumpet.outputGain * 100)}%</span>
-                          <input type="range" min="0" max="1" step="0.01"
-                            value={trumpet.outputGain}
-                            onChange={(e) => trumpet.setOutputGain(parseFloat(e.target.value))}
-                            className="w-full accent-amber-gold"
-                          />
+                          <input type="range" min="0" max="1" step="0.01" value={trumpet.outputGain}
+                            onChange={(e) => trumpet.setOutputGain(parseFloat(e.target.value))} className="w-full accent-amber-gold" />
                         </label>
                       </div>
 
                       {/* Options */}
-                      <div className="mt-2 flex flex-wrap gap-3">
+                      <div className="mt-2 flex flex-wrap items-center gap-3">
                         <label className="flex cursor-pointer items-center gap-1.5 font-mono text-[11px] text-ink-mute">
-                          <input type="checkbox" checked={rawVoiceInTake}
-                            onChange={(e) => setRawVoiceInTake(e.target.checked)}
-                            className="accent-amber-gold"
-                          />
-                          Include raw vocal in recording
+                          <input type="checkbox" checked={trumpet.snapEnabled}
+                            onChange={(e) => trumpet.setSnapEnabled(e.target.checked)} className="accent-amber-gold" />
+                          Snap to key
                         </label>
+                        {trumpet.snapEnabled && (
+                          <>
+                            <select value={trumpet.snapKey} onChange={(e) => trumpet.setSnapKey(e.target.value)}
+                              className="rounded border border-ink-line bg-ink/40 px-1 py-0.5 font-mono text-[11px] text-ink-text">
+                              {["C","C#","D","Eb","E","F","F#","G","Ab","A","Bb","B"].map((k) => <option key={k} value={k}>{k}</option>)}
+                            </select>
+                            <select value={trumpet.snapScale} onChange={(e) => trumpet.setSnapScale(e.target.value as typeof trumpet.snapScale)}
+                              className="rounded border border-ink-line bg-ink/40 px-1 py-0.5 font-mono text-[11px] text-ink-text">
+                              {["major","minor","majorPentatonic","minorPentatonic","dorian","mixolydian","blues"].map((s) => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                          </>
+                        )}
                         <label className="flex cursor-pointer items-center gap-1.5 font-mono text-[11px] text-ink-mute">
-                          <input type="checkbox" checked={monitorRawVoice}
-                            onChange={(e) => setMonitorRawVoice(e.target.checked)}
-                            className="accent-amber-gold"
-                          />
-                          Monitor raw voice (low)
+                          <input type="checkbox" checked={trumpet.rawVoiceMonitor}
+                            onChange={(e) => trumpet.setRawVoiceMonitor(e.target.checked)} className="accent-amber-gold" />
+                          Monitor raw voice
                         </label>
                       </div>
+
+                      {/* Sing-then-Convert controls */}
+                      {trumpet.mode === "convert" && (
+                        <div className="mt-3 rounded border border-ink-line/60 bg-ink/20 p-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            {trumpet.captureState === "idle" && (
+                              <button type="button" onClick={trumpet.startCapture}
+                                className="rounded border border-amber-gold/50 bg-amber-gold/10 px-2 py-0.5 font-mono text-[11px] text-amber-gold">● Sing a phrase</button>
+                            )}
+                            {trumpet.captureState === "capturing" && (
+                              <button type="button" onClick={trumpet.finishCapture}
+                                className="rounded border border-red-400/60 bg-red-500/10 px-2 py-0.5 font-mono text-[11px] text-red-200">■ Stop &amp; convert</button>
+                            )}
+                            {trumpet.captureState === "converting" && (
+                              <span className="font-mono text-[11px] text-ink-mute">converting…</span>
+                            )}
+                            {trumpet.captureState === "ready" && (
+                              <>
+                                <button type="button" onClick={() => void trumpet.playConverted()}
+                                  className="rounded border border-amber-gold/50 bg-amber-gold/10 px-2 py-0.5 font-mono text-[11px] text-amber-gold">▶ Play trumpet</button>
+                                <button type="button" onClick={trumpet.clearConvert}
+                                  className="rounded border border-ink-line px-2 py-0.5 font-mono text-[11px] text-ink-mute">clear</button>
+                                <span className="font-mono text-[10px] text-ink-mute">{trumpet.convertNoteCount} notes</span>
+                              </>
+                            )}
+                          </div>
+                          <div className="mt-1 font-mono text-[10px] text-ink-mute/70">
+                            Tip: while a take is recording, press Play to capture the clean trumpet into it.
+                          </div>
+                        </div>
+                      )}
+
+                      {trumpet.error && <div className="mt-2 font-mono text-[10px] text-red-400">{trumpet.error}</div>}
                       <div className="mt-2 font-mono text-[10px] text-amber-gold/70">
                         Headphones recommended to prevent feedback.
                       </div>
@@ -1581,6 +1652,9 @@ export function RecorderModal({
                     hasLyrics={hasLyrics}
                     isRecording={isRecording}
                     currentLineIndex={currentLineIndex}
+                    tokens={lyricTokens}
+                    activeTokenIndex={activeTokenIndex}
+                    smartActive={lyricFollowMode === "smart" && (smartStatus === "listening" || smartStatus === "low")}
                     lyricFollowMode={lyricFollowMode}
                     smartStatus={smartStatus}
                     secondsPerLine={secondsPerLine}
@@ -1668,6 +1742,9 @@ export function RecorderModal({
                   hasLyrics={hasLyrics}
                   isRecording={isRecording}
                   currentLineIndex={currentLineIndex}
+                  tokens={lyricTokens}
+                  activeTokenIndex={activeTokenIndex}
+                  smartActive={lyricFollowMode === "smart" && (smartStatus === "listening" || smartStatus === "low")}
                   lyricFollowMode={lyricFollowMode}
                   smartStatus={smartStatus}
                   secondsPerLine={secondsPerLine}
@@ -1760,11 +1837,39 @@ export function RecorderModal({
 
 // ─── SmartTeleprompter component ──────────────────────────────────────────────
 
+// Render a lyric line word-by-word, highlighting the word currently being sung
+// (and gently dimming the words already passed).
+function renderWordHighlighted(line: string, ordinal: number) {
+  const parts: ReactNode[] = [];
+  const re = /[A-Za-z0-9']+/g;
+  let last = 0;
+  let idx = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(line)) !== null) {
+    if (m.index > last) parts.push(line.slice(last, m.index));
+    const word = m[0];
+    if (idx === ordinal) {
+      parts.push(<span key={m.index} className="rounded bg-amber-gold/25 px-0.5 text-amber-gold">{word}</span>);
+    } else if (idx < ordinal) {
+      parts.push(<span key={m.index} className="text-amber-gold/50">{word}</span>);
+    } else {
+      parts.push(<span key={m.index}>{word}</span>);
+    }
+    last = m.index + word.length;
+    idx++;
+  }
+  if (last < line.length) parts.push(line.slice(last));
+  return parts;
+}
+
 function SmartTeleprompter({
   lines,
   hasLyrics,
   isRecording,
   currentLineIndex,
+  tokens = [],
+  activeTokenIndex = 0,
+  smartActive = false,
   lyricFollowMode,
   smartStatus,
   secondsPerLine,
@@ -1776,6 +1881,9 @@ function SmartTeleprompter({
   hasLyrics: boolean;
   isRecording: boolean;
   currentLineIndex: number;
+  tokens?: LyricToken[];
+  activeTokenIndex?: number;
+  smartActive?: boolean;
   lyricFollowMode: LyricFollowMode;
   smartStatus: "listening" | "low" | "fallback" | "unavailable";
   secondsPerLine: number;
@@ -1785,6 +1893,14 @@ function SmartTeleprompter({
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+  // Active word position for word-by-word highlighting (Smart mode only).
+  const activeTok = tokens[activeTokenIndex];
+  const activeLine = smartActive && activeTok ? activeTok.line : -1;
+  const activeWordOrdinal =
+    smartActive && activeTok
+      ? tokens.filter((t) => t.line === activeTok.line && t.index <= activeTokenIndex).length - 1
+      : -1;
 
   useEffect(() => {
     const el = lineRefs.current[currentLineIndex];
@@ -1896,6 +2012,7 @@ function SmartTeleprompter({
               const isCur = i === currentLineIndex;
               const dist = Math.abs(i - currentLineIndex);
               const opacity = isCur ? 1 : Math.max(0.25, 1 - dist * 0.2);
+              const wordHighlight = i === activeLine && activeWordOrdinal >= 0;
               return (
                 <div
                   key={i}
@@ -1903,7 +2020,7 @@ function SmartTeleprompter({
                   className={isCur ? "text-xl font-medium text-amber-gold" : "text-base text-ink-text"}
                   style={{ opacity }}
                 >
-                  {ln}
+                  {wordHighlight ? renderWordHighlighted(ln, activeWordOrdinal) : ln}
                 </div>
               );
             })}

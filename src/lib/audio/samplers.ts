@@ -187,7 +187,10 @@ export type TrumpetInstrument = {
   noteOn: (freqHz: number, velocity?: number, portamentoSec?: number) => void;
   noteOff: () => void;
   setVolumeDb: (db: number) => void;
-  /** For offline Sing-then-Convert: schedule a note at an absolute time. */
+  /** Brightness = lowpass cutoff in Hz. */
+  setBrightnessHz: (hz: number) => void;
+  /** Schedule a note at an absolute context time (Sing-then-Convert). */
+  scheduleNote: (freqHz: number, startTime: number, duration: number, velocity?: number) => void;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   sampler: any;
   dispose: () => void;
@@ -260,6 +263,15 @@ export async function createTrumpetInstrument(
     },
     setVolumeDb(db) {
       volume.volume.rampTo(db, 0.05);
+    },
+    setBrightnessHz(hz) {
+      filter.frequency.rampTo(Math.max(400, Math.min(12000, hz)), 0.06);
+    },
+    scheduleNote(freqHz, startTime, duration, velocity = 0.85) {
+      if (!loaded || freqHz <= 0) return;
+      try {
+        sampler.triggerAttackRelease(freqHz, duration, startTime, velocity);
+      } catch { /* */ }
     },
     dispose() {
       try { sampler.dispose(); } catch { /* */ }
