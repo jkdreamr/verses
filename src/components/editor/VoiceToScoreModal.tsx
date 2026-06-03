@@ -3,6 +3,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useToast } from "@/components/Toast";
 import { detectPitchYIN, freqToMidi, midiToNoteName } from "@/lib/pitchDetection";
+import { StaffView } from "./score/StaffView";
+import {
+  transcribeNeural,
+  monophonicReduce,
+  quantizeNotes,
+  inferKey,
+  inferChords,
+  buildMusicXML,
+  estimateBpm,
+  type QuantGrid,
+  type KeyInfo,
+  type ChordHit,
+} from "@/lib/music/voiceScore";
+import { ensureEngine, resumeEngine } from "@/lib/audio/engine";
+import { createChordInstrument, CHORD_INSTRUMENTS, type SampledInstrument } from "@/lib/audio/samplers";
+
+type ScoreEngine = "neural" | "fast";
+const gridFromQuantize = (q: QuantizeMode): QuantGrid =>
+  q === "raw" ? "none" : q === "light" ? "16" : "8";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -463,6 +482,19 @@ export function VoiceToScoreModal({
   const [qualityMode, setQualityMode] = useState<QualityMode>("balanced");
   const [quantizeMode, setQuantizeMode] = useState<QuantizeMode>("light");
   const [viewMode, setViewMode] = useState<ViewMode>("piano");
+  const [engine, setEngine] = useState<ScoreEngine>("neural");
+  const [bpm, setBpm] = useState(0); // 0 = auto-estimate
+  const [detectedBpm, setDetectedBpm] = useState(100);
+  const [keyInfo, setKeyInfo] = useState<KeyInfo | null>(null);
+  const [chords, setChords] = useState<ChordHit[]>([]);
+  const [neuralProgress, setNeuralProgress] = useState(0);
+  const bpmRef = useRef(0);
+  const quantizeModeRef = useRef<QuantizeMode>("light");
+  const engineRef = useRef<ScoreEngine>("neural");
+  const recordedBlobRef = useRef<Blob | null>(null);
+  useEffect(() => { bpmRef.current = bpm; }, [bpm]);
+  useEffect(() => { quantizeModeRef.current = quantizeMode; }, [quantizeMode]);
+  useEffect(() => { engineRef.current = engine; }, [engine]);
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [inputWarnings, setInputWarnings] = useState<InputWarning[]>([]);
   const [, setPeakLevel] = useState(0);
@@ -483,6 +515,7 @@ export function VoiceToScoreModal({
   const playbackSourcesRef = useRef<OscillatorNode[]>([]);
   const playbackCtxRef = useRef<AudioContext | null>(null);
   const playbackAudioRef = useRef<HTMLAudioElement | null>(null);
+  const pianoRef = useRef<SampledInstrument | null>(null);
   const playheadRafRef = useRef<number | null>(null);
 
   // Canvas
@@ -534,6 +567,7 @@ export function VoiceToScoreModal({
       } catch {}
     }
     playbackSourcesRef.current = [];
+    try { pianoRef.current?.releaseAll(); } catch { /* */ }
     if (playbackCtxRef.current) {
       playbackCtxRef.current.close().catch(() => {});
       playbackCtxRef.current = null;
@@ -741,56 +775,80 @@ export function VoiceToScoreModal({
   // Stable ref so timer callback can call stopRecording without stale closure
   const stopRecordingRef = useRef<() => void>(() => {});
 
+  // ── Inference pipeline: (quantize) → key → chords → results ───────────────
+  const runInference = useCallback(async (rawNotes: NoteEvent[], doQuantize: boolean) => {
+    const bpmVal = bpmRef.current > 0 ? bpmRef.current : estimateBpm(rawNotes);
+    setDetectedBpm(bpmVal);
+    const finalNotes = doQuantize
+      ? quantizeNotes(rawNotes, gridFromQuantize(quantizeModeRef.current), bpmVal)
+      : rawNotes;
+    const k = inferKey(finalNotes);
+    let ch: ChordHit[] = [];
+    try { ch = await inferChords(finalNotes, bpmVal, 2, k.accidental); } catch { ch = []; }
+    setNotes(finalNotes);
+    setKeyInfo(finalNotes.length ? k : null);
+    setChords(ch);
+    setSelectedNoteId(null);
+    setRecState("results");
+  }, []);
+
+  // Engine-aware analysis. Neural (basic-pitch) is primary; YIN is the fallback.
+  const analyze = useCallback(async (blob: Blob | null) => {
+    if (engineRef.current === "neural" && blob && blob.size > 1024) {
+      try {
+        const ac = new AudioContext();
+        const buf = await ac.decodeAudioData(await blob.arrayBuffer());
+        await ac.close();
+        let nn = await transcribeNeural(buf, (p) => setNeuralProgress(p));
+        nn = monophonicReduce(nn);
+        setNeuralProgress(0);
+        if (nn.length > 0) { await runInference(nn, true); return; }
+        toast("Neural model found no clear notes — used fast detection", "info");
+      } catch (err) {
+        console.warn("[VoiceScore] neural transcription failed:", err);
+        toast("Neural model unavailable — used fast detection", "info");
+        setNeuralProgress(0);
+      }
+    }
+    // YIN fallback (samplesToNotes already quantizes internally)
+    await runInference(samplesToNotes(rawSamplesRef.current, qualityMode, quantizeMode), false);
+  }, [qualityMode, quantizeMode, runInference, toast]);
+
   const stopRecording = useCallback(() => {
     if (recState !== "recording") return;
-
     const duration = (performance.now() - recordingStartRef.current) / 1000;
     setTotalDuration(duration);
     setRecState("analyzing");
     setLevel(0);
 
-    // Capture blob before stopping pipeline
     const mr = mediaRecorderRef.current;
     if (mr && mr.state !== "inactive") {
       mr.onstop = () => {
-        const blob = new Blob(recordedChunksRef.current, { type: "audio/webm" });
-        const url = URL.createObjectURL(blob);
+        const blob = new Blob(recordedChunksRef.current, { type: mr.mimeType || "audio/webm" });
+        recordedBlobRef.current = blob;
         setRawAudioBlob(blob);
-        setRawAudioUrl(url);
+        setRawAudioUrl(URL.createObjectURL(blob));
+        stopMicPipeline();
+        void analyze(blob);
       };
-      try {
-        mr.stop();
-      } catch {}
+      try { mr.stop(); } catch { stopMicPipeline(); void analyze(null); }
+    } else {
+      stopMicPipeline();
+      void analyze(recordedBlobRef.current);
     }
-
-    stopMicPipeline();
-
-    setTimeout(() => {
-      const samples = rawSamplesRef.current;
-      const detected = samplesToNotes(samples, qualityMode, quantizeMode);
-      setNotes(detected);
-      setSelectedNoteId(null);
-      setRecState("results");
-    }, 80);
-  }, [recState, stopMicPipeline, qualityMode, quantizeMode]);
+  }, [recState, analyze, stopMicPipeline]);
 
   useEffect(() => {
     stopRecordingRef.current = stopRecording;
   }, [stopRecording]);
 
-  // ── Re-analyze ────────────────────────────────────────────────────────────
-
+  // ── Re-analyze (respects the current engine / quality / quantize) ─────────
   const reAnalyze = useCallback(() => {
-    if (rawSamplesRef.current.length === 0) return;
+    if (rawSamplesRef.current.length === 0 && !recordedBlobRef.current) return;
     setRecState("analyzing");
     stopPlayback();
-    setTimeout(() => {
-      const detected = samplesToNotes(rawSamplesRef.current, qualityMode, quantizeMode);
-      setNotes(detected);
-      setSelectedNoteId(null);
-      setRecState("results");
-    }, 80);
-  }, [stopPlayback, qualityMode, quantizeMode]);
+    void analyze(recordedBlobRef.current);
+  }, [analyze, stopPlayback]);
 
   // ── Playback ──────────────────────────────────────────────────────────────
 
@@ -831,55 +889,42 @@ export function VoiceToScoreModal({
       return;
     }
 
-    // Detected melody via oscillators
+    // Detected melody via a real sampled piano (Tone.Sampler on the shared engine)
     if (notes.length === 0) return;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const Ctx = window.AudioContext || (window as any).webkitAudioContext;
-    const ctx = new Ctx() as AudioContext;
-    playbackCtxRef.current = ctx;
-
     setIsPlaying(true);
     setPlayheadTime(0);
-
-    const oscs: OscillatorNode[] = [];
-    const startTime = ctx.currentTime;
-
-    for (const note of notes) {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "sine";
-      const freq = 440 * Math.pow(2, (note.midi - 69) / 12);
-      osc.frequency.setValueAtTime(freq, startTime + note.startTime);
-      gain.gain.setValueAtTime(0, ctx.currentTime);
-      gain.gain.setValueAtTime(0.28, startTime + note.startTime);
-      gain.gain.exponentialRampToValueAtTime(
-        0.001,
-        startTime + note.startTime + Math.max(0.04, note.duration - 0.04),
-      );
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(startTime + note.startTime);
-      osc.stop(startTime + note.startTime + note.duration + 0.06);
-      oscs.push(osc);
-    }
-
-    playbackSourcesRef.current = oscs;
-
-    const endTime = notes.reduce((max, n) => Math.max(max, n.startTime + n.duration), 0);
-
-    const rafFn = () => {
-      const t = ctx.currentTime - startTime;
-      if (t >= endTime) {
-        setPlayheadTime(null);
-        setIsPlaying(false);
-        playbackCtxRef.current = null;
-        void ctx.close().catch(() => {});
-        return;
+    void (async () => {
+      const engine = ensureEngine();
+      await resumeEngine();
+      if (!pianoRef.current) {
+        pianoRef.current = await createChordInstrument(engine, CHORD_INSTRUMENTS[0]); // Grand Piano
       }
-      setPlayheadTime(t);
+      const piano = pianoRef.current;
+      const startTime = engine.ctx.currentTime + 0.1;
+      for (const note of notes) {
+        const freq = 440 * Math.pow(2, (note.midi - 69) / 12);
+        try {
+          piano.sampler.triggerAttackRelease(
+            freq,
+            Math.max(0.12, note.duration),
+            startTime + note.startTime,
+            Math.min(1, note.confidence + 0.25),
+          );
+        } catch { /* sampler not ready */ }
+      }
+      const endTime = notes.reduce((max, n) => Math.max(max, n.startTime + n.duration), 0);
+      const rafFn = () => {
+        const t = engine.ctx.currentTime - startTime;
+        if (t >= endTime) {
+          setPlayheadTime(null);
+          setIsPlaying(false);
+          return;
+        }
+        setPlayheadTime(Math.max(0, t));
+        playheadRafRef.current = requestAnimationFrame(rafFn);
+      };
       playheadRafRef.current = requestAnimationFrame(rafFn);
-    };
-    playheadRafRef.current = requestAnimationFrame(rafFn);
+    })();
   }, [notes, isPlaying, playMode, rawAudioUrl, totalDuration]);
 
   // ── Export ────────────────────────────────────────────────────────────────
@@ -1038,6 +1083,46 @@ export function VoiceToScoreModal({
     toast("Exported MIDI", "ok");
   }, [notes, songId, toast]);
 
+  // ── MusicXML + printable lead sheet ──────────────────────────────────────────
+
+  const exportMusicXml = useCallback(() => {
+    if (notes.length === 0 || !keyInfo) return;
+    const xml = buildMusicXML(notes, keyInfo, chords, detectedBpm);
+    const blob = new Blob([xml], { type: "application/vnd.recordare.musicxml+xml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `lead-sheet-${songId}-${Date.now()}.musicxml`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast("Exported MusicXML", "ok");
+  }, [notes, keyInfo, chords, detectedBpm, songId, toast]);
+
+  const printLeadSheet = useCallback(() => {
+    const w = window.open("", "_blank");
+    if (!w) { toast("Allow pop-ups to print the lead sheet", "error"); return; }
+    const chordLine = chords.map((c) => `${c.symbol} (${c.startTime.toFixed(1)}s)`).join("   ");
+    const noteLine = notes.map((n) => n.name).join("  ");
+    w.document.write(`<!doctype html><html><head><title>Lead sheet</title>
+      <style>
+        body{font-family:Georgia,serif;color:#1a1a1a;max-width:720px;margin:40px auto;padding:0 24px;line-height:1.6}
+        h1{font-size:22px;margin:0 0 4px} .meta{color:#666;font-size:13px;margin-bottom:24px}
+        .chords{font-family:ui-monospace,monospace;font-size:14px;background:#f5f3ef;padding:12px 14px;border-radius:6px;margin-bottom:18px}
+        .notes{font-family:ui-monospace,monospace;font-size:13px;color:#444;word-spacing:2px}
+        h2{font-size:13px;text-transform:uppercase;letter-spacing:.1em;color:#888;margin:20px 0 6px}
+        @media print{body{margin:0}}
+      </style></head><body>
+      <h1>Lead Sheet</h1>
+      <div class="meta">Key ${keyInfo?.name ?? "—"} · ${detectedBpm} BPM · ${notes.length} notes</div>
+      <h2>Chords</h2><div class="chords">${chordLine || "—"}</div>
+      <h2>Melody</h2><div class="notes">${noteLine}</div>
+      <script>window.onload=function(){setTimeout(function(){window.print()},250)}</script>
+      </body></html>`);
+    w.document.close();
+  }, [notes, chords, keyInfo, detectedBpm, toast]);
+
   // ── Note editing ────────────────────────────────────────────────────────────
 
   const editNotePitch = useCallback((noteId: string, direction: 1 | -1) => {
@@ -1176,9 +1261,38 @@ export function VoiceToScoreModal({
             <span className="text-ink-text/80">Best for one clear vocal melody.</span>{" "}
             Pitch detection runs entirely in your browser.
           </p>
-          <div className="flex items-center gap-3">
-            {/* Quality mode */}
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Engine */}
             <div className="flex items-center gap-1.5">
+              <span className="text-[9px] uppercase tracking-wider text-ink-mute/40">Engine</span>
+              <div className="flex rounded border border-ink-line/30">
+                {([["neural", "Neural"], ["fast", "Fast"]] as const).map(([m, label]) => (
+                  <button
+                    key={m}
+                    onClick={() => setEngine(m)}
+                    title={m === "neural" ? "Spotify basic-pitch (most accurate)" : "YIN — fast, monophonic"}
+                    className={`px-2 py-0.5 text-[10px] transition-colors ${
+                      engine === m ? "bg-amber-gold/10 text-amber-gold" : "text-ink-mute/50 hover:text-ink-text"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* Tempo */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[9px] uppercase tracking-wider text-ink-mute/40">BPM</span>
+              <input
+                type="number" min={40} max={240}
+                value={bpm > 0 ? bpm : ""}
+                placeholder={String(detectedBpm)}
+                onChange={(e) => setBpm(e.target.value ? Math.max(40, Math.min(240, parseInt(e.target.value) || 0)) : 0)}
+                className="w-14 rounded border border-ink-line/40 bg-ink/40 px-1.5 py-0.5 text-center text-[11px] text-ink-text outline-none"
+              />
+            </div>
+            {/* Quality mode (YIN/Fast path) */}
+            <div className={`flex items-center gap-1.5 ${engine === "neural" ? "opacity-40" : ""}`}>
               <span className="text-[9px] uppercase tracking-wider text-ink-mute/40">Quality</span>
               <div className="flex rounded border border-ink-line/30">
                 {(["strict", "balanced", "sensitive"] as const).map(m => (
@@ -1424,7 +1538,24 @@ export function VoiceToScoreModal({
         {recState === "analyzing" && (
           <div className="mb-6 flex items-center gap-2 font-mono text-xs text-ink-mute">
             <Spinner />
-            Running YIN pitch analysis…
+            {engine === "neural"
+              ? `Transcribing with the neural model…${neuralProgress > 0 ? ` ${Math.round(neuralProgress * 100)}%` : ""}`
+              : "Running YIN pitch analysis…"}
+          </div>
+        )}
+
+        {/* ── Key + chord summary ───────────────────────────────────────── */}
+        {hasResults && notes.length > 0 && keyInfo && (
+          <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg bg-ink-surface/40 px-3 py-2">
+            <span className="text-[10px] uppercase tracking-wider text-ink-mute/50">Key</span>
+            <span className="font-serif text-base text-amber-gold">{keyInfo.name}</span>
+            <span className="text-ink-mute/30">·</span>
+            <span className="text-[10px] uppercase tracking-wider text-ink-mute/50">Chords</span>
+            <span className="flex flex-wrap gap-1.5 font-mono text-[11px] text-ink-text/80">
+              {chords.length > 0
+                ? chords.slice(0, 12).map((c, i) => <span key={i} className="rounded bg-ink/40 px-1.5 py-0.5">{c.symbol}</span>)
+                : <span className="text-ink-mute/40">—</span>}
+            </span>
           </div>
         )}
 
@@ -1569,46 +1700,12 @@ export function VoiceToScoreModal({
         {/* ── Staff view (simple notation) ──────────────────────────────── */}
         {hasResults && notes.length > 0 && viewMode === "staff" && (
           <div className="mb-6">
-            <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-mute/60">
-              Staff (simplified)
+            <div className="mb-2 flex items-center gap-3 font-mono text-[10px] uppercase tracking-widest text-ink-mute/60">
+              <span>Staff</span>
+              {keyInfo && <span className="text-amber-gold/70">Key {keyInfo.name}</span>}
+              <span className="text-ink-mute/50">{detectedBpm} BPM</span>
             </div>
-            <div className="overflow-x-auto border border-ink-line/30 bg-[#141414] p-4" style={{ minHeight: 120 }}>
-              <svg viewBox={`0 0 ${Math.max(400, notes.length * 40 + 60)} 100`} className="h-24 w-full" style={{ minWidth: notes.length * 40 + 60 }}>
-                {/* Staff lines */}
-                {[30, 40, 50, 60, 70].map(y => (
-                  <line key={y} x1="0" y1={y} x2="100%" y2={y} stroke="rgba(255,255,255,0.08)" strokeWidth="0.5" />
-                ))}
-                {/* Clef label */}
-                <text x="8" y="54" fill="rgba(201,168,76,0.5)" fontSize="14" fontFamily="serif">&#119070;</text>
-                {/* Notes */}
-                {notes.map((note, i) => {
-                  const x = 50 + i * 40;
-                  // Map MIDI to staff position: C4=60 is on middle (ledger) line
-                  const staffPos = (note.midi - 60) * 2.5;
-                  const y = 70 - staffPos;
-                  const clampedY = Math.max(10, Math.min(90, y));
-                  const isSelected = selectedNoteId === note.id;
-                  const conf = note.confidence;
-                  return (
-                    <g key={note.id} onClick={() => setSelectedNoteId(isSelected ? null : note.id)} style={{ cursor: "pointer" }}>
-                      {/* Ledger lines if needed */}
-                      {clampedY > 70 && <line x1={x - 6} y1={80} x2={x + 6} y2={80} stroke="rgba(255,255,255,0.1)" strokeWidth="0.5" />}
-                      {clampedY < 30 && <line x1={x - 6} y1={20} x2={x + 6} y2={20} stroke="rgba(255,255,255,0.1)" strokeWidth="0.5" />}
-                      {/* Note head */}
-                      <ellipse
-                        cx={x} cy={clampedY} rx="4.5" ry="3.5"
-                        fill={isSelected ? "rgba(201,168,76,1)" : conf >= 0.7 ? "rgba(201,168,76,0.85)" : conf >= 0.4 ? "rgba(201,168,76,0.5)" : "rgba(120,120,120,0.6)"}
-                        transform={`rotate(-15,${x},${clampedY})`}
-                      />
-                      {/* Stem */}
-                      <line x1={x + 4} y1={clampedY} x2={x + 4} y2={clampedY - 20} stroke={conf >= 0.4 ? "rgba(201,168,76,0.5)" : "rgba(120,120,120,0.3)"} strokeWidth="0.8" />
-                      {/* Note name below */}
-                      <text x={x} y={95} textAnchor="middle" fill="rgba(255,255,255,0.25)" fontSize="7" fontFamily="monospace">{note.name}</text>
-                    </g>
-                  );
-                })}
-              </svg>
-            </div>
+            <StaffView notes={notes} keyInfo={keyInfo} chords={chords} bpm={detectedBpm} />
           </div>
         )}
 
@@ -1726,6 +1823,18 @@ export function VoiceToScoreModal({
               className="border border-amber-gold/30 px-3 py-1.5 font-mono text-xs uppercase tracking-wider text-amber-gold/80 transition-colors hover:border-amber-gold hover:text-amber-gold"
             >
               Export MIDI
+            </button>
+            <button
+              onClick={exportMusicXml}
+              className="border border-amber-gold/30 px-3 py-1.5 font-mono text-xs uppercase tracking-wider text-amber-gold/80 transition-colors hover:border-amber-gold hover:text-amber-gold"
+            >
+              MusicXML
+            </button>
+            <button
+              onClick={printLeadSheet}
+              className="border border-ink-line/40 px-3 py-1.5 font-mono text-xs uppercase tracking-wider text-ink-mute transition-colors hover:border-amber-gold/50 hover:text-amber-gold"
+            >
+              Print Lead Sheet
             </button>
             <button
               onClick={exportJson}
