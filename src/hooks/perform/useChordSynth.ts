@@ -235,6 +235,43 @@ export function createReverb(ctx: AudioContext, wet: number): { input: GainNode;
  * Routing is internal (connects to the shared engine's chord bus), so the hook
  * takes no arguments.
  */
+// ─── Voice-leading ─────────────────────────────────────────────────────────────
+
+const centerOf = (a: number[]) => a.reduce((s, x) => s + x, 0) / Math.max(1, a.length);
+
+/** Cost of a voicing in isolation: how centred + in-range it is. */
+function registerCost(c: number[]): number {
+  return Math.abs(centerOf(c) - 62) + (Math.min(...c) < 47 ? 18 : 0) + (Math.max(...c) > 84 ? 18 : 0);
+}
+
+/** Voice-leading cost from a previous voicing (sorted nearest-neighbour sum). */
+function voiceLeadCost(prev: number[], c: number[]): number {
+  const a = [...prev].sort((x, y) => x - y);
+  const b = [...c].sort((x, y) => x - y);
+  let cost = 0;
+  const n = Math.max(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    cost += Math.abs(a[Math.min(i, a.length - 1)] - b[Math.min(i, b.length - 1)]);
+  }
+  return cost + (Math.min(...c) < 45 ? 12 : 0) + (Math.max(...c) > 86 ? 12 : 0);
+}
+
+/** Generate inversions × ±octave, then pick the voicing that moves least. */
+function bestVoicing(root: string, octave: number, quality: ChordQuality, prev: number[]): number[] {
+  const base = chordMidiNotes(root, octave, quality);
+  const cands: number[][] = [];
+  for (const oct of [-1, 0, 1]) {
+    const sh = base.map((n) => n + oct * 12);
+    cands.push(sh);
+    if (sh.length > 1) cands.push([...sh.slice(1), sh[0] + 12]);
+    if (sh.length > 2) cands.push([...sh.slice(2), sh[0] + 12, sh[1] + 12]);
+  }
+  if (prev.length === 0) {
+    return cands.reduce((best, c) => (registerCost(c) < registerCost(best) ? c : best));
+  }
+  return cands.reduce((best, c) => (voiceLeadCost(prev, c) < voiceLeadCost(prev, best) ? c : best));
+}
+
 export function useChordSynth() {
   const instrumentRef = useRef<SampledInstrument | null>(null);
   const instrumentIdRef = useRef<ChordInstrumentId>("grandPiano");
@@ -285,25 +322,26 @@ export function useChordSynth() {
 
   const playChord = useCallback(
     (chord: { root: string; quality: ChordQuality; octave: number; inversion: "root" | "first" | "second" }) => {
-      const { root, quality, octave, inversion } = chord;
-      const voiced = voicedMidiNotes(root, octave, quality, inversion);
+      const { root, quality, octave } = chord;
       const display = chordMidiNotes(root, octave, quality);
       setActiveNotes(display);
       setCurrentChord(chordLabel(root, quality));
 
-      const inst = instrumentRef.current;
-      if (inst) {
-        inst.releaseAll();
-        inst.attack(voiced, 0.85);
+      // Voice-leading: choose the voicing nearest the sounding chord, then only
+      // release departing notes and attack new ones (common tones keep ringing).
+      const prev = heldRef.current;
+      const voiced = bestVoicing(root, octave, quality, prev);
+      const apply = (inst: SampledInstrument | null) => {
+        if (!inst) return;
+        const toRelease = prev.filter((n) => !voiced.includes(n));
+        const toAttack = voiced.filter((n) => !prev.includes(n));
+        if (toRelease.length) inst.release(toRelease);
+        if (toAttack.length) inst.attack(toAttack, 0.7);
         heldRef.current = voiced;
-      } else {
-        // Build on demand, then play once ready.
-        void ensureInstrument().then((built) => {
-          built?.releaseAll();
-          built?.attack(voiced, 0.85);
-          heldRef.current = voiced;
-        });
-      }
+      };
+      const inst = instrumentRef.current;
+      if (inst) apply(inst);
+      else void ensureInstrument().then(apply);
     },
     [ensureInstrument],
   );

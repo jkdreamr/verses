@@ -1,4 +1,12 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ensureEngine } from "@/lib/audio/engine";
+import {
+  DRUM_KITS,
+  DRUM_VOICES,
+  STEPS,
+  type DrumKit,
+  type DrumVoice,
+} from "@/lib/audio/drumKits";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -11,13 +19,22 @@ export type DrumPreset = {
   description: string;
 };
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+export type DrumGrid = Record<DrumVoice, boolean[]>;
+
+export type SavedPattern = {
+  id: string;
+  name: string;
+  kitId: string;
+  bpm: number;
+  swing: number;
+  grid: DrumGrid;
+};
+
+// ─── Presets (now editable starting points) ─────────────────────────────────────
 
 export const DRUM_PRESETS: DrumPreset[] = [
   {
-    name: "Boom Bap",
-    bpm: 88,
-    swing: 0.55,
+    name: "Boom Bap", bpm: 88, swing: 0.55,
     pattern: {
       kick:  [1,0,0,0,0,0,1,0,0,1,0,0,0,0,0,0],
       snare: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],
@@ -28,9 +45,7 @@ export const DRUM_PRESETS: DrumPreset[] = [
     description: "Hip-hop groove w/ swing",
   },
   {
-    name: "Trap",
-    bpm: 140,
-    swing: 0.1,
+    name: "Trap", bpm: 140, swing: 0.1,
     pattern: {
       kick:  [1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
       snare: [0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
@@ -41,9 +56,7 @@ export const DRUM_PRESETS: DrumPreset[] = [
     description: "Hard trap, rolling hihat",
   },
   {
-    name: "R&B",
-    bpm: 72,
-    swing: 0.4,
+    name: "R&B", bpm: 72, swing: 0.4,
     pattern: {
       kick:  [1,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0],
       snare: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],
@@ -54,9 +67,7 @@ export const DRUM_PRESETS: DrumPreset[] = [
     description: "Smooth R&B pocket",
   },
   {
-    name: "House",
-    bpm: 120,
-    swing: 0,
+    name: "House", bpm: 120, swing: 0,
     pattern: {
       kick:  [1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0],
       snare: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],
@@ -67,9 +78,7 @@ export const DRUM_PRESETS: DrumPreset[] = [
     description: "Four-on-floor house",
   },
   {
-    name: "Minimal",
-    bpm: 100,
-    swing: 0,
+    name: "Minimal", bpm: 100, swing: 0,
     pattern: {
       kick:  [1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
       snare: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],
@@ -81,307 +90,297 @@ export const DRUM_PRESETS: DrumPreset[] = [
   },
 ];
 
-// ─── Internal helpers ─────────────────────────────────────────────────────────
+export { DRUM_KITS };
+export type { DrumKit, DrumVoice };
 
-function safeExp(ratio: number): number {
-  return Math.max(0.0001, ratio);
-}
+// ─── Helpers ────────────────────────────────────────────────────────────────────
+
+const emptyGrid = (): DrumGrid => ({
+  kick: new Array(STEPS).fill(false),
+  snare: new Array(STEPS).fill(false),
+  hihat: new Array(STEPS).fill(false),
+  perc: new Array(STEPS).fill(false),
+});
+
+const presetToGrid = (p: DrumPreset): DrumGrid => ({
+  kick: p.pattern.kick.map(Boolean),
+  snare: p.pattern.snare.map(Boolean),
+  hihat: p.pattern.hihat.map(Boolean),
+  perc: p.pattern.perc.map(Boolean),
+});
+
+const SAVE_KEY = "verses:drumPatterns";
+const loadSaved = (): SavedPattern[] => {
+  if (typeof window === "undefined") return [];
+  try { return JSON.parse(localStorage.getItem(SAVE_KEY) || "[]"); } catch { return []; }
+};
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
+/**
+ * Step-sequencer drum engine. Holds an editable 4×16 grid, plays it on the shared
+ * Tone.Transport with sampled kits, and exposes a moving playhead. Backward-compatible
+ * with the old transport API (play/stop/setPreset/setBpm/…) used by RecorderModal.
+ */
 export function useDrumEngine(destNode: AudioNode | null) {
-  const ctxRef         = useRef<AudioContext | null>(null);
-  const masterGainRef  = useRef<GainNode | null>(null);
-  const drumGainRef    = useRef<GainNode | null>(null);
-  const filterRef      = useRef<BiquadFilterNode | null>(null);
-  const schedulerRef   = useRef<number | null>(null);
-  const stepRef        = useRef(0);
-  const nextBeatTimeRef = useRef(0);
-  const playingRef     = useRef(false);
-  const presetRef      = useRef<DrumPreset>(DRUM_PRESETS[0]);
-  const bpmRef         = useRef<number>(DRUM_PRESETS[0].bpm);
+  // ── React state ──
+  const [grid, setGrid] = useState<DrumGrid>(() => presetToGrid(DRUM_PRESETS[0]));
+  const [playing, setPlaying] = useState(false);
+  const [currentStep, setCurrentStep] = useState(-1);
+  const [presetName, setPresetName] = useState(DRUM_PRESETS[0].name);
+  const [currentBpm, setCurrentBpm] = useState(DRUM_PRESETS[0].bpm);
+  const [swing, setSwingState] = useState(DRUM_PRESETS[0].swing);
+  const [kitId, setKitId] = useState(DRUM_KITS[0].id);
+  const [kitLoading, setKitLoading] = useState(false);
+  const [levels, setLevels] = useState<Record<DrumVoice, number>>(DRUM_PRESETS[0].levels);
+  const [mutes, setMutes] = useState<Record<DrumVoice, boolean>>({ kick: false, snare: false, hihat: false, perc: false });
+  const [solos, setSolos] = useState<Record<DrumVoice, boolean>>({ kick: false, snare: false, hihat: false, perc: false });
+  const [filterCutoff, setFilterCutoffState] = useState(8000);
+  const [savedPatterns, setSavedPatterns] = useState<SavedPattern[]>([]);
 
-  const [playing, setPlaying]              = useState(false);
-  const [presetName, setPresetNameState]   = useState(DRUM_PRESETS[0].name);
-  const [masterVolume, setMasterVolumeState] = useState(0.75);
-  const [drumVolume, setDrumVolumeState]   = useState(0.6);
-  const [filterCutoff, setFilterCutoffState] = useState(4000);
-  const [currentBpm, setCurrentBpmState]   = useState(DRUM_PRESETS[0].bpm);
+  // ── Audio refs ──
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const playersRef = useRef<Record<DrumVoice, any>>({} as Record<DrumVoice, any>);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const voiceGainsRef = useRef<Record<DrumVoice, any>>({} as Record<DrumVoice, any>);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const filterRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const masterRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const seqRef = useRef<any>(null);
+  const builtRef = useRef(false);
+  const buildingRef = useRef<Promise<void> | null>(null);
 
-  // ── Lazy AudioContext creation ──────────────────────────────────────────────
-  const ensureCtx = useCallback(() => {
-    if (ctxRef.current) {
-      // Resume if suspended (browser requires user gesture)
-      if (ctxRef.current.state === "suspended") ctxRef.current.resume();
-      return ctxRef.current;
-    }
-    // Use shared bus context when destNode is provided (avoids cross-context issues)
-    const sharedCtx = destNode?.context && "currentTime" in destNode.context
-      ? (destNode.context as AudioContext)
-      : null;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const Ctx = window.AudioContext || (window as any).webkitAudioContext;
-    const ctx = (sharedCtx ?? new Ctx()) as AudioContext;
-    ctxRef.current = ctx;
+  // ── Mirrors for the audio-thread sequence callback ──
+  const gridRef = useRef(grid);
+  const mutesRef = useRef(mutes);
+  const solosRef = useRef(solos);
+  useEffect(() => { gridRef.current = grid; }, [grid]);
+  useEffect(() => { mutesRef.current = mutes; }, [mutes]);
+  useEffect(() => { solosRef.current = solos; }, [solos]);
+  useEffect(() => { setSavedPatterns(loadSaved()); }, []);
 
-    const masterGain = ctx.createGain();
-    masterGain.gain.value = masterVolume;
-    masterGainRef.current = masterGain;
+  // ── Build the Tone chain (lazy) ──
+  const ensureBuilt = useCallback(async () => {
+    if (builtRef.current) return;
+    if (buildingRef.current) return buildingRef.current;
+    buildingRef.current = (async () => {
+      const engine = ensureEngine();
+      const Tone = await engine.loadTone();
+      const kit = DRUM_KITS.find((k) => k.id === kitId) ?? DRUM_KITS[0];
 
-    const drumGain = ctx.createGain();
-    drumGain.gain.value = drumVolume;
-    drumGainRef.current = drumGain;
+      const filter = new Tone.Filter({ type: "lowpass", frequency: filterCutoff, Q: 0.4 });
+      const master = new Tone.Gain(1);
+      filter.connect(master);
+      master.connect(destNode ?? engine.drumBus);
+      filterRef.current = filter;
+      masterRef.current = master;
 
-    const filter = ctx.createBiquadFilter();
-    filter.type = "lowpass";
-    filter.frequency.value = 4000;
-    filterRef.current = filter;
+      setKitLoading(true);
+      let loaded = 0;
+      await new Promise<void>((resolve) => {
+        DRUM_VOICES.forEach((v) => {
+          const gain = new Tone.Gain(levels[v]);
+          gain.connect(filter);
+          voiceGainsRef.current[v] = gain;
+          const player = new Tone.Player({
+            url: kit.baseUrl + kit.urls[v],
+            onload: () => { if (++loaded >= DRUM_VOICES.length) resolve(); },
+          });
+          player.connect(gain);
+          playersRef.current[v] = player;
+        });
+      });
+      setKitLoading(false);
 
-    // Route: drumGain → filter → masterGain → destNode (or ctx.destination)
-    // No local compressor — shared bus already has compressor+limiter
-    drumGain.connect(filter);
-    filter.connect(masterGain);
-    if (destNode) {
-      masterGain.connect(destNode);
-    } else {
-      masterGain.connect(ctx.destination);
-    }
+      // Sequence on the transport clock — precise, swing-aware.
+      const seq = new Tone.Sequence(
+        (time: number, step: number) => {
+          const anySolo = DRUM_VOICES.some((v) => solosRef.current[v]);
+          for (const v of DRUM_VOICES) {
+            if (!gridRef.current[v][step]) continue;
+            if (mutesRef.current[v]) continue;
+            if (anySolo && !solosRef.current[v]) continue;
+            try { playersRef.current[v].start(time); } catch { /* retrigger race */ }
+          }
+          Tone.getDraw().schedule(() => setCurrentStep(step), time);
+        },
+        Array.from({ length: STEPS }, (_, i) => i),
+        "16n",
+      );
+      seqRef.current = seq;
+      builtRef.current = true;
+    })();
+    return buildingRef.current;
+  }, [destNode, filterCutoff, kitId, levels]);
 
-    return ctx;
-  // destNode is intentionally captured once at creation time
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [destNode]);
-
-  // ── Drum synthesis ─────────────────────────────────────────────────────────
-
-  const scheduleKick = useCallback((ctx: AudioContext, gain: GainNode, time: number, level: number) => {
-    const osc = ctx.createOscillator();
-    const env = ctx.createGain();
-    osc.connect(env);
-    env.connect(gain);
-    osc.frequency.setValueAtTime(140, time);
-    osc.frequency.exponentialRampToValueAtTime(safeExp(40), time + 0.15);
-    env.gain.setValueAtTime(0.001, time);
-    env.gain.linearRampToValueAtTime(level * 0.82, time + 0.004);
-    env.gain.exponentialRampToValueAtTime(0.001, time + 0.4);
-    osc.start(time);
-    osc.stop(time + 0.45);
-  }, []);
-
-  const scheduleSnare = useCallback((ctx: AudioContext, gain: GainNode, time: number, level: number) => {
-    // White-noise layer
-    const bufLen = ctx.sampleRate * 0.2;
-    const buf    = ctx.createBuffer(1, bufLen, ctx.sampleRate);
-    const data   = buf.getChannelData(0);
-    for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
-    const noise = ctx.createBufferSource();
-    noise.buffer = buf;
-
-    const noiseFilter = ctx.createBiquadFilter();
-    noiseFilter.type            = "bandpass";
-    noiseFilter.frequency.value = 1200;
-    noiseFilter.Q.value         = 1.5;
-
-    const noiseEnv = ctx.createGain();
-    noise.connect(noiseFilter);
-    noiseFilter.connect(noiseEnv);
-    noiseEnv.connect(gain);
-    noiseEnv.gain.setValueAtTime(level * 0.48, time);
-    noiseEnv.gain.exponentialRampToValueAtTime(0.001, time + 0.18);
-    noise.start(time);
-    noise.stop(time + 0.2);
-
-    // Sine-tone body
-    const osc    = ctx.createOscillator();
-    const oscEnv = ctx.createGain();
-    osc.connect(oscEnv);
-    oscEnv.connect(gain);
-    osc.frequency.value = 200;
-    oscEnv.gain.setValueAtTime(level * 0.32, time);
-    oscEnv.gain.exponentialRampToValueAtTime(0.001, time + 0.1);
-    osc.start(time);
-    osc.stop(time + 0.12);
-  }, []);
-
-  const scheduleHihat = useCallback((ctx: AudioContext, gain: GainNode, time: number, level: number) => {
-    const bufLen = ctx.sampleRate * 0.1;
-    const buf    = ctx.createBuffer(1, bufLen, ctx.sampleRate);
-    const data   = buf.getChannelData(0);
-    for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
-    const noise = ctx.createBufferSource();
-    noise.buffer = buf;
-
-    const hpf = ctx.createBiquadFilter();
-    hpf.type            = "highpass";
-    hpf.frequency.value = 7000;
-
-    const env = ctx.createGain();
-    noise.connect(hpf);
-    hpf.connect(env);
-    env.connect(gain);
-    env.gain.setValueAtTime(level * 0.24, time);
-    env.gain.exponentialRampToValueAtTime(0.001, time + 0.06);
-    noise.start(time);
-    noise.stop(time + 0.08);
-  }, []);
-
-  const schedulePerc = useCallback((ctx: AudioContext, gain: GainNode, time: number, level: number) => {
-    const bufLen = ctx.sampleRate * 0.12;
-    const buf    = ctx.createBuffer(1, bufLen, ctx.sampleRate);
-    const data   = buf.getChannelData(0);
-    for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
-    const noise = ctx.createBufferSource();
-    noise.buffer = buf;
-
-    const bpf = ctx.createBiquadFilter();
-    bpf.type            = "bandpass";
-    bpf.frequency.value = 600;
-    bpf.Q.value         = 2;
-
-    // Tonal transient
-    const osc    = ctx.createOscillator();
-    osc.frequency.value = 600;
-    const oscEnv = ctx.createGain();
-    osc.connect(oscEnv);
-    oscEnv.gain.setValueAtTime(level * 0.24, time);
-    oscEnv.gain.exponentialRampToValueAtTime(0.001, time + 0.07);
-    osc.start(time);
-    osc.stop(time + 0.08);
-    oscEnv.connect(gain);
-
-    // Noise layer
-    const env = ctx.createGain();
-    noise.connect(bpf);
-    bpf.connect(env);
-    env.connect(gain);
-    env.gain.setValueAtTime(level * 0.18, time);
-    env.gain.exponentialRampToValueAtTime(0.001, time + 0.06);
-    noise.start(time);
-    noise.stop(time + 0.08);
-  }, []);
-
-  const scheduleStep = useCallback((ctx: AudioContext, drumGain: GainNode, step: number, time: number) => {
-    const p = presetRef.current;
-    if (p.pattern.kick[step]  && drumGainRef.current) scheduleKick(ctx, drumGain, time, p.levels.kick);
-    if (p.pattern.snare[step] && drumGainRef.current) scheduleSnare(ctx, drumGain, time, p.levels.snare);
-    if (p.pattern.hihat[step] && drumGainRef.current) scheduleHihat(ctx, drumGain, time, p.levels.hihat);
-    if (p.pattern.perc[step]  && drumGainRef.current) schedulePerc(ctx, drumGain, time, p.levels.perc);
-  }, [scheduleKick, scheduleSnare, scheduleHihat, schedulePerc]);
-
-  // ── Scheduler loop (RAF-based look-ahead) ──────────────────────────────────
-
-  const runScheduler = useCallback(() => {
-    const ctx   = ctxRef.current;
-    const dGain = drumGainRef.current;
-    if (!ctx || !dGain || !playingRef.current) return;
-
-    const lookahead    = 0.1; // seconds
-    const p            = presetRef.current;
-    const stepDuration = 60 / bpmRef.current / 4; // 16th-note duration
-
-    while (nextBeatTimeRef.current < ctx.currentTime + lookahead) {
-      const step = stepRef.current % 16;
-      // Apply swing: odd steps are pushed slightly forward in time
-      const swingOffset = (step % 2 === 1) ? stepDuration * (p.swing - 0.5) : 0;
-      const time        = nextBeatTimeRef.current + swingOffset;
-      scheduleStep(ctx, dGain, step, time);
-      nextBeatTimeRef.current += stepDuration;
-      stepRef.current++;
-    }
-
-    schedulerRef.current = requestAnimationFrame(runScheduler);
-  }, [scheduleStep]);
-
-  // ── Transport ──────────────────────────────────────────────────────────────
-
-  const play = useCallback(() => {
-    const ctx = ensureCtx();
-    if (playingRef.current) return;
-    playingRef.current       = true;
-    stepRef.current          = 0;
-    nextBeatTimeRef.current  = ctx.currentTime;
+  // ── Transport ──
+  const play = useCallback(async () => {
+    await ensureBuilt();
+    const engine = ensureEngine();
+    const Tone = await engine.loadTone();
+    if (engine.ctx.state === "suspended") await engine.ctx.resume();
+    await Tone.start();
+    const t = Tone.getTransport();
+    t.bpm.value = currentBpm;
+    t.swing = swing;
+    t.swingSubdivision = "16n";
+    seqRef.current?.start(0);
+    t.start();
     setPlaying(true);
-    runScheduler();
-  }, [ensureCtx, runScheduler]);
+  }, [currentBpm, ensureBuilt, swing]);
 
   const stop = useCallback(() => {
-    playingRef.current = false;
+    try {
+      const e = ensureEngine();
+      if (e.tone) {
+        seqRef.current?.stop();
+        e.tone.getTransport().stop();
+      }
+    } catch { /* */ }
     setPlaying(false);
-    if (schedulerRef.current !== null) {
-      cancelAnimationFrame(schedulerRef.current);
-      schedulerRef.current = null;
-    }
-    stepRef.current = 0;
+    setCurrentStep(-1);
   }, []);
 
-  // ── Parameter setters ──────────────────────────────────────────────────────
+  // ── Grid editing ──
+  const toggleStep = useCallback((voice: DrumVoice, step: number) => {
+    setGrid((g) => {
+      const row = g[voice].slice();
+      row[step] = !row[step];
+      return { ...g, [voice]: row };
+    });
+  }, []);
+  const setStep = useCallback((voice: DrumVoice, step: number, on: boolean) => {
+    setGrid((g) => {
+      if (g[voice][step] === on) return g;
+      const row = g[voice].slice();
+      row[step] = on;
+      return { ...g, [voice]: row };
+    });
+  }, []);
+  const clearPattern = useCallback(() => setGrid(emptyGrid()), []);
 
-  const setPreset = useCallback((name: string) => {
-    const preset = DRUM_PRESETS.find((p) => p.name === name);
-    if (!preset) return;
-    presetRef.current = preset;
-    bpmRef.current = preset.bpm;
-    setPresetNameState(name);
-    setCurrentBpmState(preset.bpm);
+  const loadPreset = useCallback((name: string) => {
+    const p = DRUM_PRESETS.find((x) => x.name === name);
+    if (!p) return;
+    setGrid(presetToGrid(p));
+    setPresetName(name);
+    setCurrentBpm(p.bpm);
+    setSwingState(p.swing);
+    setLevels(p.levels);
+    try {
+      const e = ensureEngine();
+      if (e.tone) { e.tone.getTransport().bpm.value = p.bpm; e.tone.getTransport().swing = p.swing; }
+    } catch { /* */ }
   }, []);
 
+  // ── Params ──
   const setBpm = useCallback((bpm: number) => {
-    const clamped = Math.max(50, Math.min(200, bpm));
-    bpmRef.current = clamped;
-    setCurrentBpmState(clamped);
+    const v = Math.max(50, Math.min(220, Math.round(bpm)));
+    setCurrentBpm(v);
+    try { const e = ensureEngine(); if (e.tone) e.tone.getTransport().bpm.value = v; } catch { /* */ }
   }, []);
-
-  const setMasterVolume = useCallback((vol: number) => {
-    const clamped = Math.max(0, Math.min(1, vol));
-    setMasterVolumeState(clamped);
-    const ctx = ctxRef.current;
-    if (masterGainRef.current && ctx) {
-      masterGainRef.current.gain.setTargetAtTime(clamped, ctx.currentTime, 0.02);
-    }
+  const setSwing = useCallback((s: number) => {
+    const v = Math.max(0, Math.min(0.7, s));
+    setSwingState(v);
+    try { const e = ensureEngine(); if (e.tone) e.tone.getTransport().swing = v; } catch { /* */ }
   }, []);
-
-  const setDrumVolume = useCallback((vol: number) => {
-    const clamped = Math.max(0, Math.min(1, vol));
-    setDrumVolumeState(clamped);
-    const ctx = ctxRef.current;
-    if (drumGainRef.current && ctx) {
-      drumGainRef.current.gain.setTargetAtTime(clamped, ctx.currentTime, 0.02);
-    }
+  const setLevel = useCallback((voice: DrumVoice, v: number) => {
+    const clamped = Math.max(0, Math.min(1, v));
+    setLevels((l) => ({ ...l, [voice]: clamped }));
+    try { voiceGainsRef.current[voice]?.gain.rampTo(clamped, 0.02); } catch { /* */ }
   }, []);
-
+  const toggleMute = useCallback((voice: DrumVoice) => setMutes((m) => ({ ...m, [voice]: !m[voice] })), []);
+  const toggleSolo = useCallback((voice: DrumVoice) => setSolos((s) => ({ ...s, [voice]: !s[voice] })), []);
   const setFilterCutoff = useCallback((freq: number) => {
     setFilterCutoffState(freq);
-    if (filterRef.current) filterRef.current.frequency.value = freq;
+    try { filterRef.current?.frequency.rampTo(freq, 0.04); } catch { /* */ }
+  }, []);
+  // Back-compat: overall kit trim used by gesture volume / mute.
+  const setDrumVolume = useCallback((v: number) => {
+    try { masterRef.current?.gain.rampTo(Math.max(0, Math.min(1, v)), 0.02); } catch { /* */ }
   }, []);
 
-  const getMasterGain = useCallback(() => masterGainRef.current, []);
-  // getCtx ensures the AudioContext exists — creates it if needed.
-  // This allows chord synth to share the same context before drums start.
-  const getCtx = useCallback(() => {
-    if (!ctxRef.current) ensureCtx();
-    return ctxRef.current;
-  }, [ensureCtx]);
+  // Apply kit changes live.
+  useEffect(() => {
+    if (!builtRef.current) return;
+    let cancelled = false;
+    (async () => {
+      const kit = DRUM_KITS.find((k) => k.id === kitId) ?? DRUM_KITS[0];
+      setKitLoading(true);
+      await Promise.all(DRUM_VOICES.map((v) =>
+        new Promise<void>((res) => {
+          try { playersRef.current[v]?.load(kit.baseUrl + kit.urls[v]).then(() => res()).catch(() => res()); }
+          catch { res(); }
+        })));
+      if (!cancelled) setKitLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [kitId]);
+
+  // ── Save / load patterns ──
+  const persistSaved = (list: SavedPattern[]) => {
+    setSavedPatterns(list);
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify(list)); } catch { /* */ }
+  };
+  const savePattern = useCallback((name: string) => {
+    const id = `pat_${Date.now().toString(36)}`;
+    persistSaved([...loadSaved(), { id, name: name || `Pattern ${loadSaved().length + 1}`, kitId, bpm: currentBpm, swing, grid }]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [grid, kitId, currentBpm, swing]);
+  const loadSavedPattern = useCallback((id: string) => {
+    const p = loadSaved().find((x) => x.id === id);
+    if (!p) return;
+    setGrid(p.grid);
+    setKitId(p.kitId);
+    setBpm(p.bpm);
+    setSwing(p.swing);
+    setPresetName(p.name);
+  }, [setBpm, setSwing]);
+  const deleteSavedPattern = useCallback((id: string) => {
+    persistSaved(loadSaved().filter((x) => x.id !== id));
+  }, []);
+
+  // ── Cleanup ──
+  useEffect(() => {
+    // The ref containers are stable (only their properties get populated), so
+    // capturing them here is safe and satisfies the hooks lint rule.
+    const players = playersRef.current;
+    const gains = voiceGainsRef.current;
+    return () => {
+      try {
+        const e = ensureEngine();
+        if (e.tone) { seqRef.current?.stop(); e.tone.getTransport().stop(); }
+      } catch { /* */ }
+      try { seqRef.current?.dispose(); } catch { /* */ }
+      DRUM_VOICES.forEach((v) => {
+        try { players[v]?.dispose(); } catch { /* */ }
+        try { gains[v]?.dispose(); } catch { /* */ }
+      });
+      try { filterRef.current?.dispose(); } catch { /* */ }
+      try { masterRef.current?.dispose(); } catch { /* */ }
+      builtRef.current = false;
+      buildingRef.current = null;
+    };
+  }, []);
+
+  const currentPreset = DRUM_PRESETS.find((p) => p.name === presetName) ?? DRUM_PRESETS[0];
 
   return {
-    // State
-    playing,
-    presetName,
-    masterVolume,
-    drumVolume,
-    filterCutoff,
-    currentBpm,
-    currentPreset: presetRef.current,
-    // Transport
-    play,
-    stop,
-    // Setters
-    setPreset,
-    setBpm,
-    setMasterVolume,
-    setDrumVolume,
-    setFilterCutoff,
-    // Accessors (for external routing)
-    getMasterGain,
-    getCtx,
+    // grid + transport state
+    grid, playing, currentStep, presetName, currentBpm, swing, kitId, kitLoading,
+    levels, mutes, solos, filterCutoff, currentPreset, savedPatterns,
+    // editing
+    toggleStep, setStep, clearPattern, loadPreset, setKit: setKitId,
+    setBpm, setSwing, setLevel, toggleMute, toggleSolo, setFilterCutoff,
+    // transport
+    play, stop,
+    // save/load
+    savePattern, loadSavedPattern, deleteSavedPattern,
+    // back-compat aliases
+    setPreset: loadPreset, setDrumVolume,
+    // unused-but-kept accessors
+    getCtx: () => { try { return ensureEngine().ctx; } catch { return null; } },
   };
 }

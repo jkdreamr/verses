@@ -31,61 +31,67 @@ export const TRUMPET_URLS: Record<string, string> = {
   F5: "F5.mp3", A5: "A5.mp3", C6: "C6.mp3",
 };
 
-export type ChordInstrumentId = "grandPiano" | "warmStrings" | "feltKeys";
+export type ChordInstrumentId =
+  | "grandPiano"
+  | "electricPiano"
+  | "warmStrings"
+  | "feltKeys"
+  | "softPad"
+  | "synthPad";
 
 export type ChordInstrumentDef = {
   id: ChordInstrumentId;
   name: string;
   blurb: string;
-  baseUrl: string;
-  urls: Record<string, string>;
+  /** "sampler" = real recordings; "synth" = soft Tone pad/EP. */
+  kind: "sampler" | "synth";
   attack: number;
   release: number;
   lowpassHz: number;
   reverbSec: number;
   reverbWet: number;
   volumeDb: number;
+  // sampler
+  baseUrl?: string;
+  urls?: Record<string, string>;
+  // synth
+  voice?: "poly" | "fm";
+  oscillator?: "sine" | "triangle" | "sawtooth";
+  decay?: number;
+  sustain?: number;
+  detune?: number;
 };
 
 export const CHORD_INSTRUMENTS: ChordInstrumentDef[] = [
   {
-    id: "grandPiano",
-    name: "Grand Piano",
-    blurb: "Bright, articulate acoustic grand",
-    baseUrl: "/samples/piano/",
-    urls: PIANO_URLS,
-    attack: 0.005,
-    release: 1.1,
-    lowpassHz: 6500,
-    reverbSec: 1.6,
-    reverbWet: 0.18,
-    volumeDb: -6,
+    id: "grandPiano", name: "Grand Piano", blurb: "Bright, articulate acoustic grand",
+    kind: "sampler", baseUrl: "/samples/piano/", urls: PIANO_URLS,
+    attack: 0.006, release: 1.2, lowpassHz: 5600, reverbSec: 1.7, reverbWet: 0.2, volumeDb: -7,
   },
   {
-    id: "warmStrings",
-    name: "Warm Strings",
-    blurb: "Mellow bowed cello section",
-    baseUrl: "/samples/cello/",
-    urls: CELLO_URLS,
-    attack: 0.28,
-    release: 1.4,
-    lowpassHz: 3600,
-    reverbSec: 2.6,
-    reverbWet: 0.34,
-    volumeDb: -9,
+    id: "electricPiano", name: "Electric Piano", blurb: "Warm FM Rhodes-style EP",
+    kind: "synth", voice: "fm", attack: 0.006, decay: 0.9, sustain: 0.55, release: 1.0,
+    lowpassHz: 4200, reverbSec: 1.8, reverbWet: 0.24, volumeDb: -16,
   },
   {
-    id: "feltKeys",
-    name: "Felt Keys",
-    blurb: "Soft, muted felt-piano / EP",
-    baseUrl: "/samples/piano/",
-    urls: PIANO_URLS,
-    attack: 0.02,
-    release: 1.8,
-    lowpassHz: 1900,
-    reverbSec: 2.4,
-    reverbWet: 0.3,
-    volumeDb: -5,
+    id: "warmStrings", name: "Warm Strings", blurb: "Mellow bowed cello section",
+    kind: "sampler", baseUrl: "/samples/cello/", urls: CELLO_URLS,
+    attack: 0.3, release: 1.6, lowpassHz: 3400, reverbSec: 2.8, reverbWet: 0.34, volumeDb: -9,
+  },
+  {
+    id: "feltKeys", name: "Felt Keys", blurb: "Soft, muted felt piano",
+    kind: "sampler", baseUrl: "/samples/piano/", urls: PIANO_URLS,
+    attack: 0.025, release: 1.9, lowpassHz: 1800, reverbSec: 2.5, reverbWet: 0.32, volumeDb: -5,
+  },
+  {
+    id: "softPad", name: "Soft Pad", blurb: "Gentle, slow-attack warmth",
+    kind: "synth", voice: "poly", oscillator: "triangle", detune: 8,
+    attack: 0.12, decay: 0.4, sustain: 0.85, release: 1.6, lowpassHz: 3000, reverbSec: 3.2, reverbWet: 0.34, volumeDb: -20,
+  },
+  {
+    id: "synthPad", name: "Synth Pad", blurb: "Clean, airy saw pad",
+    kind: "synth", voice: "poly", oscillator: "sawtooth", detune: 12,
+    attack: 0.06, decay: 0.5, sustain: 0.7, release: 1.2, lowpassHz: 3600, reverbSec: 2.6, reverbWet: 0.3, volumeDb: -22,
   },
 ];
 
@@ -124,15 +130,40 @@ export async function createChordInstrument(
   // Reverb needs to render its impulse response before audio flows.
   await reverb.ready;
 
-  const sampler = new Tone.Sampler({
-    urls: def.urls,
-    baseUrl: def.baseUrl,
-    attack: def.attack,
-    release: def.release,
-    onload: () => onReady?.(),
-  });
+  // The source is either a real sampler or a soft Tone pad/EP; both expose the
+  // same trigger surface (triggerAttack/Release/AttackRelease/releaseAll).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let sampler: any;
+  if (def.kind === "synth") {
+    const env = { attack: def.attack, decay: def.decay ?? 0.3, sustain: def.sustain ?? 0.7, release: def.release };
+    if (def.voice === "fm") {
+      sampler = new Tone.PolySynth(Tone.FMSynth, {
+        harmonicity: 2, modulationIndex: 2.6,
+        oscillator: { type: "sine" }, modulation: { type: "triangle" },
+        envelope: env, modulationEnvelope: { attack: 0.01, decay: 0.6, sustain: 0.2, release: 0.7 },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any);
+    } else {
+      sampler = new Tone.PolySynth(Tone.Synth, {
+        // unison "fat" oscillator for warmth without clusters
+        oscillator: { type: `fat${def.oscillator ?? "triangle"}`, count: 3, spread: def.detune ?? 10 },
+        envelope: env,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any);
+    }
+    sampler.maxPolyphony = 12;
+    onReady?.();
+  } else {
+    sampler = new Tone.Sampler({
+      urls: def.urls,
+      baseUrl: def.baseUrl,
+      attack: def.attack,
+      release: def.release,
+      onload: () => onReady?.(),
+    });
+  }
 
-  // Sampler ─► filter ─► reverb ─► volume ─► (native) chord bus
+  // source ─► filter ─► reverb ─► volume ─► (native) chord bus
   sampler.connect(filter);
   filter.connect(reverb);
   reverb.connect(volume);

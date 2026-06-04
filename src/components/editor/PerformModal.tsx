@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { takesStore, newTakeId } from "@/lib/takes";
 import type { Take } from "@/lib/types";
-import { DRUM_PRESETS, useDrumEngine } from "@/hooks/perform/useDrumEngine";
+import { useDrumEngine } from "@/hooks/perform/useDrumEngine";
 import { usePerformAudioBus } from "@/hooks/perform/usePerformAudioBus";
 import {
   NOTE_NAMES,
@@ -25,6 +25,7 @@ import {
 } from "@/lib/audio/scales";
 import { OneEuroFilter } from "@/lib/audio/oneEuro";
 import { TouchInstrument } from "@/components/perform/TouchInstrument";
+import { StepSequencer } from "@/components/perform/StepSequencer";
 import { Slider } from "@/components/ui/Slider";
 import { useIsMobile } from "@/hooks/useIsMobile";
 
@@ -180,7 +181,7 @@ export function PerformModal({
   const [rightHand, setRightHand] = useState<Hand>({ present: false, x: 0.5, y: 0.5, pinch: false, gesture: null });
   const [showSkeleton, setShowSkeleton] = useState(true);
   const [swapHands, setSwapHands] = useState(false);
-  const [tab, setTab] = useState<"sound" | "chords" | "guide">("sound");
+  const [tab, setTab] = useState<"beat" | "sound" | "chords" | "guide">("beat");
   const [beatPlaying, setBeatPlaying] = useState(false);
 
   const swapRef = useRef(swapHands);
@@ -588,7 +589,6 @@ export function PerformModal({
   const handleClose = useCallback(() => onClose(), [onClose]);
 
   const fmtTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-  const currentPreset = DRUM_PRESETS.find((p) => p.name === drum.presetName) ?? DRUM_PRESETS[0];
 
   if (!open) return null;
 
@@ -702,7 +702,7 @@ export function PerformModal({
         {/* Controls */}
         <div className="flex w-full flex-shrink-0 flex-col border-t border-line/60 bg-surface/30 lg:w-80 lg:border-l lg:border-t-0">
           <div className="flex border-b border-line/50">
-            {(["sound", "chords", "guide"] as const).map((t) => (
+            {(["beat", "sound", "chords", "guide"] as const).map((t) => (
               <button key={t} onClick={() => setTab(t)}
                 className={`flex-1 px-3 py-2.5 text-[10px] uppercase tracking-[0.15em] transition-colors ${tab === t ? "bg-surface-2/60 text-accent" : "text-ink-mute hover:text-ink-text"}`}>
                 {t}
@@ -731,43 +731,13 @@ export function PerformModal({
                   </div>
                 </div>
 
-                <div>
-                  <div className="mb-1.5 text-[9px] uppercase tracking-widest text-ink-mute/60">Drum preset</div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {DRUM_PRESETS.map((p) => (
-                      <button key={p.name} onClick={() => drum.setPreset(p.name)}
-                        className={`rounded-lg px-2.5 py-1.5 text-[11px] transition-colors ${drum.presetName === p.name ? "bg-accent/15 text-accent ring-1 ring-accent/40" : "bg-surface-2 text-ink-mute hover:text-ink-text"}`}>
-                        {p.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <div className="mb-1.5 text-[9px] uppercase tracking-widest text-ink-mute/60">Tempo · {drum.currentBpm} BPM</div>
-                  <div className="flex items-center gap-1.5">
-                    <button onClick={() => drum.setBpm(drum.currentBpm - 5)} className="rounded-md bg-surface-2 px-2.5 py-1 text-xs text-ink-mute hover:text-ink-text">−5</button>
-                    <button onClick={() => drum.setBpm(drum.currentBpm - 1)} className="rounded-md bg-surface-2 px-2.5 py-1 text-xs text-ink-mute hover:text-ink-text">−</button>
-                    <span className="min-w-[2.5rem] text-center font-mono text-base text-ink-text">{drum.currentBpm}</span>
-                    <button onClick={() => drum.setBpm(drum.currentBpm + 1)} className="rounded-md bg-surface-2 px-2.5 py-1 text-xs text-ink-mute hover:text-ink-text">+</button>
-                    <button onClick={() => drum.setBpm(drum.currentBpm + 5)} className="rounded-md bg-surface-2 px-2.5 py-1 text-xs text-ink-mute hover:text-ink-text">+5</button>
-                  </div>
-                </div>
-
-                <div>
-                  <div className="mb-1.5 text-[9px] uppercase tracking-widest text-ink-mute/60">Pattern</div>
-                  <div className="space-y-0.5">
-                    {(["kick", "snare", "hihat", "perc"] as const).map((d) => (
-                      <div key={d} className="flex gap-0.5">
-                        {currentPreset.pattern[d].map((step, i) => (
-                          <div key={i} className={`h-3 w-3 rounded-sm ${step ? "bg-accent/60" : "bg-surface-2"}`} />
-                        ))}
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <p className="text-[11px] leading-relaxed text-ink-mute/60">
+                  Drum kit, tempo, swing and the step pattern live in the <span className="text-accent">Beat</span> tab.
+                </p>
               </div>
             )}
+
+            {tab === "beat" && <StepSequencer seq={drum} />}
 
             {tab === "chords" && (
               <div className="space-y-5">
