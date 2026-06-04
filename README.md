@@ -23,9 +23,9 @@ inside the page.
    - [The persistent audio engine](#the-persistent-audio-engine)
    - [Sampled instruments](#sampled-instruments)
    - [Perform: hands + touch](#perform-hands--touch)
-   - [Smart Lyric Reader: forced alignment](#smart-lyric-reader-forced-alignment)
+   - [Smart Lyric Reader: strict line-by-line alignment](#smart-lyric-reader-strict-line-by-line-alignment)
    - [Live Trumpet pipeline](#live-trumpet-pipeline)
-   - [Raw recording capture fix](#raw-recording-capture-fix)
+   - [Recording capture](#recording-capture)
    - [Voice Score pipeline](#voice-score-pipeline)
    - [Latest refinements](#latest-refinements)
    - [Tradeoffs & limitations](#tradeoffs--limitations)
@@ -70,14 +70,20 @@ src/
   app/                      App Router routes, layout, globals.css (design tokens)
   components/
     editor/                 Editor shell + feature modals
-      RecorderModal.tsx       Takes hub (recording, lyric reader, trumpet)
-      PerformModal.tsx        Perform (hands + touch)
+      PerformModal.tsx        Perform — the one place you record (hands/touch,
+                              beat, chords, smart lyrics, trumpet, voice)
+      TakesPanel.tsx          Takes — viewer for past recordings
       VoiceToScoreModal.tsx   Voice Score
       score/StaffView.tsx     VexFlow sheet-music renderer
       RhymeLens.tsx / …       Rhyme Lens (unchanged)
-    perform/TouchInstrument.tsx   Multi-touch instrument pad
+    perform/
+      TouchInstrument.tsx     Multi-touch instrument pad
+      StepSequencer.tsx       Editable 4×16 drum grid
+      LyricTeleprompter.tsx   Strict line-by-line lyric overlay
     ui/Slider.tsx             Premium slider primitive
-  hooks/perform/            useDrumEngine, useChordSynth, useHandTracking, useLiveTrumpet
+  hooks/
+    perform/                useDrumEngine, useChordSynth, useHandTracking, useLiveTrumpet
+    useSmartLyrics.ts       Speech-driven, strict line-by-line lyric follower
   lib/
     audio/                  engine.ts, samplers.ts, scales.ts, oneEuro.ts
     music/                  lyricAlign.ts, voiceScore.ts
@@ -181,80 +187,97 @@ its own gliding synth voice** (true polyphony via a Tone voice pool), plus a row
 chord pads. X→note in scale, Y→brightness/level; targets are ≥44 px with clear press
 animations and `touch-action: manipulation` for sub-frame response.
 
-## Smart Lyric Reader: forced alignment
+## Smart Lyric Reader: strict line-by-line alignment
 
-The teleprompter follows you as you sing. Because we already **know** the written lyrics,
-this is *alignment*, not open transcription (`src/lib/music/lyricAlign.ts`).
+The teleprompter sits in the Perform stage (the "black space" over the camera or touch
+pad) and follows you as you sing. Because we already **know** the written lyrics, this is
+*alignment*, not open transcription (`src/lib/music/lyricAlign.ts`, `useSmartLyrics.ts`,
+`LyricTeleprompter.tsx`).
 
-1. **Tokenize** the lyrics into words, each tagged with its line, a normalised form, and a
-   **Soundex** code.
+1. **Per-line keys.** Each lyric line is tokenised into words, and each word is tagged
+   with a normalised form plus **Soundex** and **Metaphone** codes (so "night"/"nite",
+   "come"/"comb" still match).
 2. The Web Speech API runs `continuous`, `interimResults` — a noisy, drifting transcript.
-3. On each interim result we take the **tail** (last ~4 heard words) and slide it across a
-   **forward window** of upcoming lyric tokens, scoring each offset by fuzzy word matches:
-   exact, small **Levenshtein** edit distance (tolerance scales with word length), or same
-   **Soundex** bucket (so "night"/"nite", "come"/"comb" still match).
-4. We advance a **monotonic-ish pointer** to just after the best match — clamped so it
-   never leaps forward past the window and never jumps far backward (handles repeated
-   words). The pointer drives **word-by-word highlighting** and centred auto-scroll.
-5. The recogniser stops on silence, so we **auto-restart** it on `end`. If confidence
-   stays low or nothing matches, we fall back to **Pace mode** (timed scroll) with a
-   visible notice. A manual up/down nudge is always available.
+3. On each interim result we score the **current line** and the **single next line** by the
+   fraction of their words that fuzzy-match the tail of what was heard (exact, small
+   **Levenshtein** distance, or a shared Soundex/Metaphone bucket).
+4. **Strict advance.** The active line moves forward **by at most one line at a time** and
+   **never jumps backward** — no matter what the recogniser does, the highlight walks the
+   song line by line, which keeps it accurate through repeated words and choruses. Within
+   the active line we highlight up to the furthest word matched and auto-centre the scroll.
+5. The recogniser stops on silence, so we **auto-restart** it on `end`. If speech isn't
+   available or matching stalls (>6 s), we fall back to a timed **Pace** scroll (with an
+   adjustable seconds-per-line); a manual up/down **nudge** is always available.
 
 Honest note: sung lyrics are harder to recognise than speech, and the API is
-browser-dependent — that's why the nudge and Pace fallback are always there.
+browser-dependent — that's why the strict line walk, the nudge and the Pace fallback are
+always there.
 
 ## Live Trumpet pipeline
 
-Your voice drives a **real recorded trumpet** (`Tone.Sampler` over
-`public/samples/trumpet`). Two modes:
+In Perform's **Sound** tab, flip **Voice → Trumpet** and your voice drives a **real
+recorded trumpet** (`Tone.Sampler` over `public/samples/trumpet`, `useLiveTrumpet.ts`).
+It shares the same microphone the take records from — no second permission prompt.
 
-- **Live Monitor (default).** The mic feeds a **McLeod Pitch Method (MPM) AudioWorklet**
+- **Live Monitor.** The mic feeds a **McLeod Pitch Method (MPM) AudioWorklet**
   (`public/worklets/pitch-detector.js`) running **off the main thread** — the same
   normalised-square-difference algorithm pitchy implements, inlined so it needs no
   bundler step. Each voiced frame posts `{ freq, clarity, rms }`; **clarity gates note-on**
   (noisy/unvoiced frames are ignored), Hz is converted to the nearest note (optionally
-  **snapped to a chosen key/scale**), and the sampler is driven with **portamento** so
-  slides feel like a brass player. Input **RMS → velocity**, so louder singing is louder
-  and brighter. ~30–100 ms of latency is inherent to real-time pitch→audio and can't be
-  fully removed (Vochlea's Dubler FAQ says the same); a raw-voice monitor toggle and an
-  output-gain control are provided.
+  **snapped to the performance key/scale**), and the sampler is driven with **portamento**
+  so slides feel like a brass player. Input **RMS → velocity**, so louder singing is louder
+  and brighter. A **release-hold** keeps the horn ringing through momentary clarity dips so
+  sustained, legato singing doesn't chop into separate notes. ~30–100 ms of latency is
+  inherent to real-time pitch→audio and can't be fully removed (Vochlea's Dubler FAQ says
+  the same).
 - **Sing-then-Convert.** Record the dry vocal, then analyse it **offline with pitchy**,
   segment it into clean notes, and play a **perfectly-tracked** trumpet line back — higher
-  quality, no live-latency artefacts. Press Play while a take is recording to capture it.
+  quality, no live-latency artefacts.
 
-Everything routes through the trumpet bus, so the trumpet is captured in your take.
+Everything routes through the trumpet bus, so the trumpet is captured in your take. While
+the trumpet is on, the dry-voice record tap is **ducked** so the take is the horn, not a
+latency-doubled voice + horn.
 
-## Raw recording capture fix
+## Recording capture
 
-"Raw" takes now record exactly what was sung. The fixes:
+A Perform take records **your voice + every layer** as one stream:
 
-- **Capture the real mic, dry.** `getUserMedia({ audio: { echoCancellation: false,
-  noiseSuppression: false, autoGainControl: false } })` — browser DSP muffles vocals and
-  wrecks pitch detection, and echo-cancellation strips the beat the mic is meant to hear.
-- **MIME fallback chain** with `MediaRecorder.isTypeSupported`: `audio/webm;codecs=opus` →
-  `audio/webm` → `audio/mp4` → `audio/ogg`, and the `Blob` is built from the recorder's
-  **actual** `mimeType`.
-- **Chunks** are accumulated from `ondataavailable` and the context is **resumed inside a
-  user gesture** (iOS). On stop we **self-test**: assert `blob.size`, then load it into an
-  `<audio>` element and confirm metadata resolves before review. Tracks are stopped on
-  teardown.
+- **Voice into the recording, not the speakers.** `getUserMedia` audio is routed to a
+  `MediaStreamAudioDestination` **record tap** (never back to the speakers, to avoid
+  feedback), then mixed with the engine's master so the take is voice plus drums, chords
+  and trumpet — not just the instruments. Echo cancellation is **on** here because the mic
+  is meant to hear *you*, not re-capture the monitored beat. (Voice Score, which needs a
+  dry vocal for pitch detection, keeps browser DSP **off** instead.)
+- **Video takes** composite from a layered canvas: the recorded canvas holds camera +
+  skeleton + note flashes (`captureStream`), while the live-only **chord-zone grid** sits
+  on a separate canvas that's never captured.
+- **MIME fallback chain** with `MediaRecorder.isTypeSupported` (video: `vp9/opus` →
+  `vp8/opus` → `webm` → `mp4`; audio: `webm;opus` → `webm` → `mp4` → `ogg`); the `Blob` is
+  built from the recorder's **actual** `mimeType`.
+- **Chunks** accumulate from `ondataavailable`, the context is **resumed inside a user
+  gesture** (iOS), and tracks are stopped on teardown. Takes are stored in IndexedDB and
+  reviewed in the Takes panel.
 
 ## Voice Score pipeline
 
 Hum or sing a melody → notes → chords → sheet music (`src/lib/music/voiceScore.ts`,
 `VoiceToScoreModal.tsx`).
 
+**One auto-optimal pipeline — no quality/timing knobs.** There are no Strict/Balanced/
+Sensitive or Raw/Light/Strong modes any more: Voice Score always runs the most accurate
+path automatically. The only control is an (auto-detected, overridable) tempo.
+
 1. **Detection.** Primary engine is **basic-pitch** (neural): the recorded blob is
    resampled to 22.05 kHz mono in an `OfflineAudioContext`, run through the lazily-loaded
    TensorFlow.js model (vendored at `public/models/basic-pitch`), and decoded to note
-   events with onsets + pitch bends. A tuned **YIN** path is kept as a fast, offline
-   fallback (with the existing Strict / Balanced / Sensitive modes) and is used
-   automatically if the model can't load or finds nothing.
-2. **Smoothing.** Median pitch smoothing + octave-error correction; a polyphonic neural
-   result is reduced to a single melodic line.
-3. **Segmentation & quantization.** Pitch-stability + onset/amplitude segmentation merges
-   micro-fragments; onsets/durations snap to a grid (None / 16th / 8th) against a
-   detected or user-set **BPM** (estimated from inter-onset intervals).
+   events with onsets + pitch bends. A single tuned **YIN** path is kept as a silent
+   offline fallback, used automatically if the model can't load or finds nothing.
+2. **Smoothing.** Median pitch smoothing + **octave-error correction** (the neural result
+   is cross-checked against a YIN track and only snapped when YIN strongly agrees); a
+   polyphonic result is reduced to a single melodic line, then leftover slivers are merged.
+3. **Segmentation & quantization.** Micro-fragments are absorbed into their neighbours and
+   onsets/durations snap to a **1/16 grid** against the **auto-detected BPM** (estimated
+   from inter-onset intervals; you can type a tempo to override it).
 4. **Key inference.** A **Krumhansl-Schmuckler** profile correlation over the
    duration-weighted pitch-class histogram picks the best of all 24 major/minor keys.
 5. **Chord inference.** Notes are grouped into beat windows and **`Tonal.Chord.detect`**
@@ -268,6 +291,33 @@ Hum or sing a melody → notes → chords → sheet music (`src/lib/music/voiceS
    against the original recording. Live input warnings flag clipping / silence / noise.
 
 ## Latest refinements
+
+**One place to record: Perform.** Recording has moved entirely into Perform, and **Takes
+is now a pure viewer** for past recordings (the old recorder is gone). Two things came with
+it:
+
+- **Smart lyrics in the stage.** A **Lyrics** toggle drops your written words into the
+  Perform "black space" and follows your voice **strictly line by line** — a new aligner
+  (`createLineAligner`) only ever advances the active line by one and never jumps backward,
+  so the highlight stays accurate through repeats and choruses. Pace fallback + manual
+  nudge included.
+- **Voice → Trumpet in the Sound tab.** The live trumpet now lives in Perform and shares
+  the take's microphone (no second prompt). A **release-hold** keeps the horn ringing
+  through brief clarity dips so legato singing doesn't chop, and turning it on **ducks the
+  dry-voice** record tap so the take is the horn rather than a doubled voice + horn.
+
+**Perform — the drum loop restarts cleanly.** Closing your left hand into a fist stops the
+beat and opening it again **restarts** it. The sequence is now started once and the shared
+transport does the play/stop, fixing the case where fist→open went silent.
+
+**Perform — takes capture your voice.** The singer's mic is routed into the recording tap
+(not the speakers, to avoid feedback), so a take is voice **plus** the instruments — not
+just the drums/piano.
+
+**Voice Score — one auto-optimal pipeline.** The Strict/Balanced/Sensitive, Raw/Light/
+Strong and Neural/Fast selectors are gone. It always runs neural transcription with octave
+repair, sliver-merging and a 1/16 grid at the auto-detected tempo; the only knob left is an
+optional tempo override.
 
 **Perform — a chord-placement grid that's on screen but never in the recording.**
 The camera view now shows a guide dividing it into the exact zones the hand maps to,
@@ -379,52 +429,38 @@ are avoided. Verified offline: C-major scale → C, A-minor melody → A minor, 
 Paste a YouTube link in the bottom bar to play it, set **A/B loop** points, and drop
 named markers at key timestamps. When you record, the beat can auto-start.
 
-### Takes (the recording hub)
+### Takes (your recordings)
 
-Click **takes → ● new take**, then choose what to enable:
+Open **takes** to review everything you've recorded — **play, rename, download, delete**.
+Takes is a viewer now; all recording happens in **Perform** (there's an **↗ Perform**
+button right in the panel).
 
-- **Normal** — a clean, raw mic take (or video + audio). This is the dry-vocal path.
-- **Hand Gestures** — adds the gesture drum machine + sampled chords (desktop).
-- **Live Trumpet** — your voice as a sampled trumpet (desktop).
-- **Gestures + Trumpet** — both at once.
+### Perform — the one place you record
 
-Pick a start point, hit **● Record**, perform, then **Stop → review → Save**. Saved takes
-live in the Takes panel (play, rename, download, delete).
-
-### Perform (hands + touch)
-
-Open **perform**. Up top, choose **Hands** or **Touch**.
+Open **perform**. Up top, choose **Hands** or **Touch**, toggle **Lyrics**, and hit
+**Record** whenever you're ready. Recordings capture **your voice + every layer** (beat,
+chords, trumpet); use headphones so the beat doesn't bleed into the mic.
 
 - **Hands:** Start camera. Keep both hands in frame. The on-screen **grid** shows which
   zone triggers which chord/note (toggle it with **Grid on/off**, top-right — it's a live
   guide and never appears in your recording). **Right hand** moves left↔right to pick the
   note/chord (locked to your key) and up↕down for brightness; **pinch** to sound it.
-  **Left hand:** hold open palm to start the beat, fist to stop, pinch to mute. Set
-  key/scale, chord progression and timbre in the side panel; the **Master / Drums /
-  Chords** sliders work live and independently. Press **Record** to capture a video take
-  (camera + your playing, without the grid).
+  **Left hand:** hold open palm to start the beat, fist to stop, pinch to mute. Press
+  **Record** to capture a video take (camera + your playing, without the grid).
 - **Touch (and mobile):** drag on the pad — left↔right is pitch, up↕down is brightness;
   multiple fingers = chords. Tap the large chord pads for the progression.
+- **Lyrics:** click **Lyrics** to drop your written words into the stage. They scroll
+  **strictly line by line** as you sing (see Smart Lyric Reader above); a Pace fallback and
+  up/down nudge are always there.
 - **Beat tab:** build the drum groove yourself. Pick a kit (Acoustic / Punch / Lo-Fi),
   load a template and then **click or drag across the grid** to add/remove hits per
   instrument. Set tempo + swing, mute/solo a row, adjust per-voice levels, and **Save** a
   pattern to reuse later. Hit **Play beat** to hear it loop with a moving playhead.
-- **Sound tab:** the **Master / Drums / Chords** sliders move each layer independently and
+- **Sound tab:** flip **Voice → Trumpet** to sing through a sampled horn (pick Trumpet /
+  Muted / Brass Bold / Flugel / Jazz Lead, set Brightness / Glide, optionally **Snap to
+  song key**). The **Master / Drums / Chords** sliders move each layer independently and
   click-free; pick a chord timbre (Grand Piano, Electric Piano, Warm Strings, Felt Keys,
   Soft Pad, Synth Pad). Chords voice-lead automatically, so changes glide smoothly.
-
-### Live Trumpet
-
-In a New Take, enable **Live Trumpet**. Pick a voice (Trumpet / Muted / Brass Bold /
-Flugel / Jazz Lead) and a **mode**: *Live Monitor* (plays as you sing) or *Sing →
-Convert* (record dry, then play a clean tracked line). Adjust Brightness / Glide / Output,
-optionally **Snap to key**, and use headphones to avoid feedback.
-
-### Smart Lyric Reader
-
-During any take, the teleprompter is on the right. Choose **Smart**, **Pace** or
-**Manual**. Smart listens and highlights word-by-word as you sing; if it loses you it
-falls back to Pace with a notice. The up/down nudge is always there.
 
 ### Playable Piano
 
@@ -434,12 +470,13 @@ notes after release.
 
 ### Voice to Score
 
-Open **voice score**. Pick an **Engine** (*Neural* = most accurate, *Fast* = YIN), set
-**BPM** (or leave it auto) and **Timing** (quantize grid). Hit **Record**, sing one clear
-melody (headphones help), then **Stop**. You'll get the detected **key + chord sheet**,
-and three views: **Piano Roll**, **Note List**, **Staff**. Click notes to select and
-**pitch ±1 / split / merge / delete**. Play the **detected** melody (sampled piano) or the
-**original**, then export **MIDI / MusicXML / JSON / CSV** or **Print a lead sheet**.
+Open **voice score**, hit **Record**, sing one clear melody (headphones help), then
+**Stop**. There are no accuracy/timing knobs — it always runs the most accurate path and
+auto-detects everything (the only control is an optional **tempo** override). You'll get
+the detected **key + chord sheet**, and three views: **Piano Roll**, **Note List**,
+**Staff**. Click notes to select and **pitch ±1 / split / merge / delete**. Play the
+**detected** melody (sampled piano) or the **original**, then export **MIDI / MusicXML /
+JSON / CSV** or **Print a lead sheet**.
 
 > Tips: sing one line at a time, hold notes a touch longer, and keep background music off.
 

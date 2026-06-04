@@ -51,7 +51,7 @@ export function LyricTeleprompter({ smart, onClose }: { smart: Smart; onClose: (
     : "text-ink-mute";
 
   return (
-    <div className="absolute inset-x-0 bottom-0 z-10 flex h-[46%] flex-col bg-gradient-to-t from-bg via-bg/92 to-transparent px-4 pb-3 pt-6">
+    <div className="absolute inset-x-0 bottom-0 z-10 flex h-[46%] flex-col bg-gradient-to-t from-bg from-40% via-bg/95 to-bg/55 px-4 pb-3 pt-6 backdrop-blur-md">
       {/* controls */}
       <div className="mb-1 flex items-center gap-2">
         <span className="text-[9px] uppercase tracking-[0.14em] text-ink-mute/60">Lyrics</span>
