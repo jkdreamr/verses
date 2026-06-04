@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { takesStore, newTakeId } from "@/lib/takes";
 import type { Take } from "@/lib/types";
 import { useDrumEngine } from "@/hooks/perform/useDrumEngine";
@@ -22,6 +22,7 @@ import {
   midiToFreq,
   midiToLabel,
   keyToPc,
+  buildScaleLadder,
 } from "@/lib/audio/scales";
 import { OneEuroFilter } from "@/lib/audio/oneEuro";
 import { TouchInstrument } from "@/components/perform/TouchInstrument";
@@ -52,6 +53,7 @@ const PINCH_ON = 0.45; // ratio of pinch distance / palm size
 const PINCH_OFF = 0.62;
 
 const AUDIO_MIME = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
+const VIDEO_MIME = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm", "video/mp4"];
 const pickMime = (cands: string[]): string | undefined => {
   if (typeof MediaRecorder === "undefined") return undefined;
   for (const m of cands) { try { if (MediaRecorder.isTypeSupported(m)) return m; } catch { /* */ } }
@@ -82,6 +84,86 @@ function detectGesture(lms: any[]): GestureId | null {
   if (count === 2 && idx && mid) return "two";
   if (count >= 4) return "open";
   return null;
+}
+
+// ─── Chord-zone grid overlay (live only — never on the capture canvas) ────────
+
+function drawChordGrid(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  labels: string[],
+  activeIdx: number,
+  rh: Hand | null,
+  reducedMotion: boolean,
+  now: number,
+) {
+  ctx.clearRect(0, 0, w, h);
+  const n = labels.length;
+  if (n === 0) return;
+  const bw = w / n;
+
+  // active-zone fill (gentle pulse, unless reduced motion)
+  if (activeIdx >= 0) {
+    const pulse = reducedMotion ? 0.18 : 0.13 + 0.06 * (0.5 + 0.5 * Math.sin(now / 240));
+    ctx.fillStyle = `rgba(201,168,76,${pulse})`;
+    ctx.fillRect(activeIdx * bw, 0, bw, h);
+  }
+
+  // dividers
+  ctx.strokeStyle = "rgba(255,255,255,0.13)";
+  ctx.lineWidth = 1;
+  for (let i = 1; i < n; i++) {
+    ctx.beginPath();
+    ctx.moveTo(i * bw, 0);
+    ctx.lineTo(i * bw, h);
+    ctx.stroke();
+  }
+
+  // labels — show all when there's room, else thin out (always show active)
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  const labelEvery = n <= 12 ? 1 : Math.ceil(n / 9);
+  for (let i = 0; i < n; i++) {
+    const isActive = i === activeIdx;
+    if (!isActive && i % labelEvery !== 0) continue;
+    const x = i * bw + bw / 2;
+    ctx.font = isActive ? "600 16px Inter, system-ui, sans-serif" : "12px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillText(labels[i], x + 1, 9);
+    ctx.fillStyle = isActive ? "rgba(201,168,76,1)" : "rgba(255,255,255,0.72)";
+    ctx.fillText(labels[i], x, 8);
+  }
+
+  // Y expression hint
+  ctx.textAlign = "right";
+  ctx.font = "10px Inter, system-ui, sans-serif";
+  ctx.fillStyle = "rgba(255,255,255,0.3)";
+  ctx.fillText("brighter ↑", w - 8, 8);
+  ctx.fillText("mellow ↓", w - 8, h - 18);
+
+  // right-hand indicator (positioned in canvas space so it tracks the camera)
+  if (rh && rh.present) {
+    const cx = rh.x * w;
+    const cy = rh.y * h;
+    const r = Math.max(26, w * 0.05);
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, 2 * Math.PI);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = rh.pinch ? "rgba(201,168,76,1)" : "rgba(201,168,76,0.55)";
+    ctx.fillStyle = rh.pinch ? "rgba(201,168,76,0.28)" : "rgba(201,168,76,0.08)";
+    ctx.fill();
+    ctx.stroke();
+    if (activeIdx >= 0) {
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = "600 15px Inter, system-ui, sans-serif";
+      ctx.fillStyle = "rgba(0,0,0,0.6)";
+      ctx.fillText(labels[activeIdx], cx + 1, cy + 1);
+      ctx.fillStyle = "rgba(201,168,76,1)";
+      ctx.fillText(labels[activeIdx], cx, cy);
+    }
+  }
 }
 
 // ─── Piano display (chord tones) ─────────────────────────────────────────────
@@ -132,12 +214,20 @@ export function PerformModal({
 
   // ── Camera / MediaPipe refs ──
   const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  // captureCanvas = the RECORDED layer (camera + skeleton + note flashes).
+  // gridCanvas    = the LIVE-ONLY chord-zone overlay (never captured).
+  const captureCanvasRef = useRef<HTMLCanvasElement>(null);
+  const gridCanvasRef = useRef<HTMLCanvasElement>(null);
+  const flashRef = useRef(0);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handLandmarkerRef = useRef<any>(null);
   const rafRef = useRef<number | null>(null);
   const lastFrameRef = useRef(0);
   const camStreamRef = useRef<MediaStream | null>(null);
+  const rightHandRef = useRef<Hand>({ present: false, x: 0.5, y: 0.5, pinch: false, gesture: null });
+  const showGridRef = useRef(true);
+  const reducedMotionRef = useRef(false);
+  const zonesRef = useRef<string[]>([]);
 
   // ── Lead synth (right-hand theremin voice) ──
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -180,9 +270,24 @@ export function PerformModal({
   const [leftHand, setLeftHand] = useState<Hand>({ present: false, x: 0.5, y: 0.5, pinch: false, gesture: null });
   const [rightHand, setRightHand] = useState<Hand>({ present: false, x: 0.5, y: 0.5, pinch: false, gesture: null });
   const [showSkeleton, setShowSkeleton] = useState(true);
+  const [showGrid, setShowGrid] = useState(true);
   const [swapHands, setSwapHands] = useState(false);
   const [tab, setTab] = useState<"beat" | "sound" | "chords" | "guide">("beat");
   const [beatPlaying, setBeatPlaying] = useState(false);
+
+  // Zone labels for the live chord/note grid — derived from the REAL X→action
+  // mapping so the guide is truthful (chord mode: progression slots; lead mode:
+  // the in-key scale ladder).
+  const gridZones = useMemo<string[]>(() => {
+    if (rightMode === "chords") return chordSlots.map((s) => chordLabel(s.root, s.quality));
+    return buildScaleLadder(keyToPc(rootKey), scaleId, 48, 84).map(midiToLabel);
+  }, [rightMode, chordSlots, rootKey, scaleId]);
+  useEffect(() => { zonesRef.current = gridZones; }, [gridZones]);
+  useEffect(() => { showGridRef.current = showGrid; }, [showGrid]);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    reducedMotionRef.current = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  }, []);
 
   const swapRef = useRef(swapHands);
   useEffect(() => { swapRef.current = swapHands; }, [swapHands]);
@@ -218,9 +323,12 @@ export function PerformModal({
     if (sk !== null) setShowSkeleton(sk === "true");
     const sw = localStorage.getItem("verses:swapHands");
     if (sw !== null) setSwapHands(sw === "true");
+    const sg = localStorage.getItem("verses:showChordGrid");
+    if (sg !== null) setShowGrid(sg === "true");
   }, []);
   useEffect(() => { localStorage.setItem("verses:showSkeleton", String(showSkeleton)); }, [showSkeleton]);
   useEffect(() => { localStorage.setItem("verses:swapHands", String(swapHands)); }, [swapHands]);
+  useEffect(() => { localStorage.setItem("verses:showChordGrid", String(showGrid)); }, [showGrid]);
 
   // Pick default input mode based on device
   useEffect(() => {
@@ -273,6 +381,7 @@ export function PerformModal({
       const filter = leadFilterRef.current;
       if (hand.pinch && hand.present) {
         if (!sounding) {
+          flashRef.current = performance.now();
           void ensureLead().then(() => {
             leadSynthRef.current?.triggerAttack(midiToFreq(midi), undefined, 0.4 + expr * 0.55);
           });
@@ -293,6 +402,7 @@ export function PerformModal({
       setLeadNote(slot ? chordLabel(slot.root, slot.quality) : "—");
       if (hand.pinch && hand.present) {
         if (!sounding || rightSlotRef.current !== slot.slot) {
+          flashRef.current = performance.now();
           playChord(slot);
           setActiveSlot(slot.slot);
           rightSlotRef.current = slot.slot;
@@ -415,6 +525,7 @@ export function PerformModal({
       }
     }
 
+    rightHandRef.current = nr;
     setLeftHand(nl);
     setRightHand(nr);
     handleRight(nr);
@@ -424,48 +535,90 @@ export function PerformModal({
   // ── Detection + draw loop ──
   const loop = useCallback(() => {
     const video = videoRef.current;
-    const canvas = canvasRef.current;
-    if (!video || !canvas || video.readyState < 2) {
+    const cap = captureCanvasRef.current;
+    if (!video || !cap || video.readyState < 2) {
       rafRef.current = requestAnimationFrame(loop);
       return;
     }
-    const ctx = canvas.getContext("2d");
-    if (!ctx) { rafRef.current = requestAnimationFrame(loop); return; }
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const cw = video.videoWidth || 640;
+    const ch = video.videoHeight || 480;
+    if (cap.width !== cw) cap.width = cw;
+    if (cap.height !== ch) cap.height = ch;
+    const cctx = cap.getContext("2d");
+    if (!cctx) { rafRef.current = requestAnimationFrame(loop); return; }
+
+    // 1) The mirrored camera frame — this IS the recorded picture.
+    cctx.save();
+    cctx.translate(cw, 0);
+    cctx.scale(-1, 1);
+    cctx.drawImage(video, 0, 0, cw, ch);
+    cctx.restore();
 
     const now = performance.now();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let landmarks: any[][] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let handedness: any[][] = [];
     if (handLandmarkerRef.current && now - lastFrameRef.current > 33) {
       lastFrameRef.current = now;
       try {
         const res = handLandmarkerRef.current.detectForVideo(video, now);
-        if (res.landmarks?.length) {
-          processHands(res.landmarks, res.handedness);
-          if (showSkeleton) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            res.landmarks.forEach((lms: any[], i: number) => {
-              const isRight = (res.handedness[i]?.[0]?.categoryName ?? "Right") === "Left";
-              ctx.strokeStyle = isRight ? "rgba(201,168,76,0.9)" : "rgba(122,162,247,0.9)";
-              ctx.lineWidth = 2;
-              for (const [a, b] of HAND_CONNECTIONS) {
-                ctx.beginPath();
-                ctx.moveTo(lms[a].x * canvas.width, lms[a].y * canvas.height);
-                ctx.lineTo(lms[b].x * canvas.width, lms[b].y * canvas.height);
-                ctx.stroke();
-              }
-              ctx.fillStyle = isRight ? "rgba(201,168,76,0.95)" : "rgba(122,162,247,0.95)";
-              for (const lm of lms) {
-                ctx.beginPath();
-                ctx.arc(lm.x * canvas.width, lm.y * canvas.height, 3, 0, 2 * Math.PI);
-                ctx.fill();
-              }
-            });
-          }
-        } else {
-          processHands([], []);
-        }
+        landmarks = res.landmarks ?? [];
+        handedness = res.handedness ?? [];
+        processHands(landmarks, handedness);
       } catch { /* per-frame errors ignored */ }
+    }
+
+    // 2) Skeleton — drawn in display space (1 − x) to match the mirrored frame.
+    //    Part of the performance, so it stays on the capture canvas.
+    if (showSkeleton && landmarks.length) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      landmarks.forEach((lms: any[], i: number) => {
+        const isRight = (handedness[i]?.[0]?.categoryName ?? "Right") === "Left";
+        cctx.strokeStyle = isRight ? "rgba(201,168,76,0.9)" : "rgba(122,162,247,0.9)";
+        cctx.lineWidth = 2;
+        for (const [a, b] of HAND_CONNECTIONS) {
+          cctx.beginPath();
+          cctx.moveTo((1 - lms[a].x) * cw, lms[a].y * ch);
+          cctx.lineTo((1 - lms[b].x) * cw, lms[b].y * ch);
+          cctx.stroke();
+        }
+        cctx.fillStyle = isRight ? "rgba(201,168,76,0.95)" : "rgba(122,162,247,0.95)";
+        for (const lm of lms) {
+          cctx.beginPath();
+          cctx.arc((1 - lm.x) * cw, lm.y * ch, 3, 0, 2 * Math.PI);
+          cctx.fill();
+        }
+      });
+    }
+
+    // 3) Note-trigger flash — a recorded performance visual.
+    const dt = now - flashRef.current;
+    if (dt >= 0 && dt < 200) {
+      cctx.strokeStyle = `rgba(201,168,76,${(1 - dt / 200) * 0.55})`;
+      cctx.lineWidth = 12;
+      cctx.strokeRect(6, 6, cw - 12, ch - 12);
+    }
+
+    // 4) Chord-zone GRID — a SEPARATE canvas that is NEVER drawn onto the capture
+    //    canvas, so the guide shows live but can never appear in a recording.
+    const grid = gridCanvasRef.current;
+    if (grid) {
+      if (grid.width !== cw) grid.width = cw;
+      if (grid.height !== ch) grid.height = ch;
+      const gctx = grid.getContext("2d");
+      if (gctx) {
+        if (showGridRef.current) {
+          const labels = zonesRef.current;
+          const rh = rightHandRef.current;
+          const activeIdx = rh.present && labels.length
+            ? Math.min(labels.length - 1, Math.max(0, Math.floor(rh.x * labels.length)))
+            : -1;
+          drawChordGrid(gctx, cw, ch, labels, activeIdx, rh, reducedMotionRef.current, now);
+        } else {
+          gctx.clearRect(0, 0, grid.width, grid.height);
+        }
+      }
     }
     rafRef.current = requestAnimationFrame(loop);
   }, [processHands, showSkeleton]);
@@ -518,8 +671,28 @@ export function PerformModal({
   const startRecording = useCallback(async () => {
     const engine = ensureEngine();
     await resumeEngine();
-    const mime = pickMime(AUDIO_MIME) ?? "audio/webm";
-    const recorder = new MediaRecorder(engine.recordDest.stream, { mimeType: mime });
+    const audioStream = engine.recordDest.stream;
+
+    // With the camera on we record the PERFORMANCE picture from the capture
+    // canvas (camera + skeleton + flashes) — never the grid overlay — combined
+    // with the audio tap. Otherwise (touch mode) it's an audio-only take.
+    const cap = captureCanvasRef.current;
+    const isVideo = inputMode === "camera" && camActive && !!cap;
+    let stream: MediaStream;
+    let mime: string;
+    if (isVideo && cap) {
+      const videoStream = cap.captureStream(30);
+      stream = new MediaStream([
+        ...videoStream.getVideoTracks(),
+        ...audioStream.getAudioTracks(),
+      ]);
+      mime = pickMime(VIDEO_MIME) ?? "video/webm";
+    } else {
+      stream = audioStream;
+      mime = pickMime(AUDIO_MIME) ?? "audio/webm";
+    }
+
+    const recorder = new MediaRecorder(stream, { mimeType: mime });
     chunksRef.current = [];
     recStartRef.current = Date.now();
     recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
@@ -533,7 +706,7 @@ export function PerformModal({
         mime: recorder.mimeType || mime,
         duration: (Date.now() - recStartRef.current) / 1000,
         size: blob.size,
-        has_video: false,
+        has_video: isVideo,
         created_at: new Date().toISOString(),
         blob,
       };
@@ -543,7 +716,7 @@ export function PerformModal({
     recorder.start(250);
     recorderRef.current = recorder;
     setRecording(true);
-  }, [onTakeSaved, songId]);
+  }, [onTakeSaved, songId, inputMode, camActive]);
 
   const stopRecording = useCallback(() => {
     if (recorderRef.current && recorderRef.current.state !== "inactive") {
@@ -633,8 +806,12 @@ export function PerformModal({
         <div className="flex min-w-0 flex-[3] flex-col">
           {inputMode === "camera" ? (
             <div className="relative flex-1 overflow-hidden bg-black">
-              <video ref={videoRef} muted playsInline className="h-full w-full object-cover" style={{ transform: "scaleX(-1)" }} />
-              <canvas ref={canvasRef} className="pointer-events-none absolute inset-0 h-full w-full" style={{ transform: "scaleX(-1)" }} />
+              {/* hidden camera source — frames are composited onto the capture canvas */}
+              <video ref={videoRef} muted playsInline aria-hidden className="pointer-events-none absolute h-px w-px opacity-0" />
+              {/* RECORDED layer: camera + skeleton + flashes (captureStream source) */}
+              <canvas ref={captureCanvasRef} aria-hidden className="h-full w-full" style={{ objectFit: "cover" }} />
+              {/* LIVE-ONLY chord-zone grid — never part of the recording */}
+              <canvas ref={gridCanvasRef} aria-hidden className="pointer-events-none absolute inset-0 h-full w-full" style={{ objectFit: "cover" }} />
 
               {!camActive && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-bg/92 px-6 text-center">
@@ -655,24 +832,26 @@ export function PerformModal({
                 <div className="absolute bottom-3 left-3 right-3 rounded-lg bg-bg/90 px-3 py-2 backdrop-blur"><span className="text-[11px] text-danger">{camError}</span></div>
               )}
 
-              {/* HUD overlays (screen-space, positioned by display coords) */}
-              {camActive && rightHand.present && (
-                <div className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2"
-                  style={{ left: `${rightHand.x * 100}%`, top: `${rightHand.y * 100}%` }}>
-                  <div className={`flex h-16 w-16 items-center justify-center rounded-full border-2 transition-all ${rightHand.pinch ? "glow-accent border-accent bg-accent/25" : "border-accent/40 bg-accent/5"}`}>
-                    <span className="text-[12px] font-semibold text-accent">{leadNote}</span>
-                  </div>
-                </div>
-              )}
+              {/* status badges (DOM corner — never recorded, alignment-independent) */}
               {camActive && (
-                <div className="absolute left-3 top-3 flex gap-2">
-                  <span className="rounded-md bg-bg/60 px-2 py-1 font-mono text-[10px] text-[#7aa2f7] backdrop-blur-sm">
-                    L · {leftHand.present ? (leftHand.gesture ?? "—").toUpperCase() : beatPlaying ? "BEAT ●" : "—"}
-                  </span>
-                  <span className="rounded-md bg-bg/60 px-2 py-1 font-mono text-[10px] text-accent backdrop-blur-sm">
-                    R · {rightHand.pinch ? "PLAY" : "ready"}
-                  </span>
-                </div>
+                <>
+                  <div className="absolute left-3 top-3 flex gap-2">
+                    <span className="rounded-md bg-bg/60 px-2 py-1 font-mono text-[10px] text-[#7aa2f7] backdrop-blur-sm">
+                      L · {leftHand.present ? (leftHand.gesture ?? "—").toUpperCase() : beatPlaying ? "BEAT ●" : "—"}
+                    </span>
+                    <span className="rounded-md bg-bg/60 px-2 py-1 font-mono text-[10px] text-accent backdrop-blur-sm">
+                      R · {rightHand.pinch ? "PLAY" : "ready"}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => setShowGrid((v) => !v)}
+                    aria-pressed={showGrid}
+                    className={`absolute right-3 top-3 rounded-md px-2.5 py-1 font-mono text-[10px] backdrop-blur-sm transition-colors ${showGrid ? "bg-accent/20 text-accent" : "bg-bg/60 text-ink-mute hover:text-ink-text"}`}
+                    title="Show/hide the chord-zone guide (live only — never recorded)"
+                  >
+                    Grid {showGrid ? "on" : "off"}
+                  </button>
+                </>
               )}
             </div>
           ) : (
