@@ -7,6 +7,7 @@ import { StaffView } from "./score/StaffView";
 import {
   transcribeNeural,
   monophonicReduce,
+  mergeShortFragments,
   quantizeNotes,
   inferKey,
   inferChords,
@@ -19,9 +20,10 @@ import {
 import { ensureEngine, resumeEngine } from "@/lib/audio/engine";
 import { createChordInstrument, CHORD_INSTRUMENTS, type SampledInstrument } from "@/lib/audio/samplers";
 
-type ScoreEngine = "neural" | "fast";
-const gridFromQuantize = (q: QuantizeMode): QuantGrid =>
-  q === "raw" ? "none" : q === "light" ? "16" : "8";
+// Voice Score runs one auto-optimal pipeline — no user-facing quality/timing
+// knobs. The neural model (basic-pitch) is always primary; YIN is the silent
+// fallback. Timing snaps to a 1/16 grid at the detected tempo.
+const QUANT_GRID: QuantGrid = "16";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -29,8 +31,6 @@ const gridFromQuantize = (q: QuantizeMode): QuantGrid =>
 
 type RecordingState = "idle" | "recording" | "analyzing" | "results" | "error";
 type PlaybackMode = "detected" | "original";
-type QualityMode = "strict" | "balanced" | "sensitive";
-type QuantizeMode = "raw" | "light" | "strong";
 type ViewMode = "piano" | "list" | "staff";
 
 interface NoteEvent {
@@ -57,47 +57,17 @@ const PIANO_ROLL_ROW_H = 18; // px per note row
 const PIANO_ROLL_LABEL_W = 48; // px for note name labels
 const PIANO_ROLL_PX_PER_SEC = 100; // px per second
 
-// Quality mode parameters
-const QUALITY_PARAMS: Record<QualityMode, {
-  yinThreshold: number;
-  silenceRms: number;
-  noisyFallback: number;
-  confidenceFloor: number;
-  minSamples: number;
-  segmentTolerance: number;
-  mergeGap: number;
-  minNoteMs: number;
-}> = {
-  strict: {
-    yinThreshold: 0.12,
-    silenceRms: 0.02,
-    noisyFallback: 0.4,
-    confidenceFloor: 0.3,
-    minSamples: 8,  // 120ms
-    segmentTolerance: 1,
-    mergeGap: 0.12,
-    minNoteMs: 150,
-  },
-  balanced: {
-    yinThreshold: 0.18,
-    silenceRms: 0.012,
-    noisyFallback: 0.55,
-    confidenceFloor: 0.15,
-    minSamples: 5,  // 75ms
-    segmentTolerance: 2,
-    mergeGap: 0.2,
-    minNoteMs: 100,
-  },
-  sensitive: {
-    yinThreshold: 0.25,
-    silenceRms: 0.008,
-    noisyFallback: 0.7,
-    confidenceFloor: 0.08,
-    minSamples: 3,  // 45ms
-    segmentTolerance: 3,
-    mergeGap: 0.3,
-    minNoteMs: 60,
-  },
+// One auto-tuned parameter set for the YIN fallback path — picked to balance
+// accuracy against over-segmentation for a single sung melody.
+const YIN_PARAMS = {
+  yinThreshold: 0.15,
+  silenceRms: 0.012,
+  noisyFallback: 0.5,
+  confidenceFloor: 0.18,
+  minSamples: 6, // ~90ms
+  segmentTolerance: 2,
+  mergeGap: 0.18,
+  minNoteMs: 110,
 };
 
 let noteIdCounter = 0;
@@ -115,10 +85,10 @@ interface RawSample {
   rms: number;
 }
 
-function samplesToNotes(samples: RawSample[], quality: QualityMode = "balanced", quantize: QuantizeMode = "light"): NoteEvent[] {
+function samplesToNotes(samples: RawSample[]): NoteEvent[] {
   if (samples.length === 0) return [];
 
-  const params = QUALITY_PARAMS[quality];
+  const params = YIN_PARAMS;
 
   // Step 0.5: octave-error correction — if a sample jumps exactly ±12 semitones
   // from its neighbors but the neighbors agree, snap it back
@@ -185,17 +155,9 @@ function samplesToNotes(samples: RawSample[], quality: QualityMode = "balanced",
     const endTime = seg[seg.length - 1].time + sampleIntervalSec;
     const rawDuration = endTime - startTime;
 
-    // Quantization
-    let duration: number;
-    if (quantize === "strong") {
-      const QUANT = 0.125; // 1/8 note at ~120bpm
-      duration = Math.max(QUANT, Math.round(rawDuration / QUANT) * QUANT);
-    } else if (quantize === "light") {
-      const QUANT = 0.0625; // 1/16 note
-      duration = Math.max(QUANT, Math.round(rawDuration / QUANT) * QUANT);
-    } else {
-      duration = Math.max(0.04, rawDuration);
-    }
+    // Raw duration — timing is quantized later (in runInference) against the
+    // detected tempo, so the neural and YIN paths share a single grid.
+    const duration = Math.max(0.04, rawDuration);
 
     // Median pitch
     const midis = seg.map((s) => s.midi).sort((a, b) => a - b);
@@ -478,23 +440,16 @@ export function VoiceToScoreModal({
   const [rawAudioUrl, setRawAudioUrl] = useState<string | null>(null);
   const [tipsOpen, setTipsOpen] = useState(false);
 
-  // New: quality, quantize, view mode, editing, warnings
-  const [qualityMode, setQualityMode] = useState<QualityMode>("balanced");
-  const [quantizeMode, setQuantizeMode] = useState<QuantizeMode>("light");
+  // View mode, editing, warnings. Pitch/timing settings are auto-optimal.
   const [viewMode, setViewMode] = useState<ViewMode>("piano");
-  const [engine, setEngine] = useState<ScoreEngine>("neural");
   const [bpm, setBpm] = useState(0); // 0 = auto-estimate
   const [detectedBpm, setDetectedBpm] = useState(100);
   const [keyInfo, setKeyInfo] = useState<KeyInfo | null>(null);
   const [chords, setChords] = useState<ChordHit[]>([]);
   const [neuralProgress, setNeuralProgress] = useState(0);
   const bpmRef = useRef(0);
-  const quantizeModeRef = useRef<QuantizeMode>("light");
-  const engineRef = useRef<ScoreEngine>("neural");
   const recordedBlobRef = useRef<Blob | null>(null);
   useEffect(() => { bpmRef.current = bpm; }, [bpm]);
-  useEffect(() => { quantizeModeRef.current = quantizeMode; }, [quantizeMode]);
-  useEffect(() => { engineRef.current = engine; }, [engine]);
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [inputWarnings, setInputWarnings] = useState<InputWarning[]>([]);
   const [, setPeakLevel] = useState(0);
@@ -740,8 +695,7 @@ export function VoiceToScoreModal({
       setPeakLevel(maxPeak);
       if (noiseCount > 0) setNoiseFloor(noiseAcc / noiseCount);
 
-      const qParams = QUALITY_PARAMS[qualityMode];
-      const result = detectPitchYIN(pitchBufferRef.current, sr, qParams);
+      const result = detectPitchYIN(pitchBufferRef.current, sr, YIN_PARAMS);
       if (result !== null) {
         const { freq, confidence, rms } = result;
         const midi = freqToMidi(freq);
@@ -770,18 +724,16 @@ export function VoiceToScoreModal({
       }
     }, SAMPLE_INTERVAL_MS);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [startMeterLoop, qualityMode]);
+  }, [startMeterLoop]);
 
   // Stable ref so timer callback can call stopRecording without stale closure
   const stopRecordingRef = useRef<() => void>(() => {});
 
-  // ── Inference pipeline: (quantize) → key → chords → results ───────────────
-  const runInference = useCallback(async (rawNotes: NoteEvent[], doQuantize: boolean) => {
+  // ── Inference pipeline: quantize → key → chords → results ─────────────────
+  const runInference = useCallback(async (rawNotes: NoteEvent[]) => {
     const bpmVal = bpmRef.current > 0 ? bpmRef.current : estimateBpm(rawNotes);
     setDetectedBpm(bpmVal);
-    const finalNotes = doQuantize
-      ? quantizeNotes(rawNotes, gridFromQuantize(quantizeModeRef.current), bpmVal)
-      : rawNotes;
+    const finalNotes = quantizeNotes(rawNotes, QUANT_GRID, bpmVal);
     const k = inferKey(finalNotes);
     let ch: ChordHit[] = [];
     try { ch = await inferChords(finalNotes, bpmVal, 2, k.accidental); } catch { ch = []; }
@@ -792,17 +744,19 @@ export function VoiceToScoreModal({
     setRecState("results");
   }, []);
 
-  // Engine-aware analysis. Neural (basic-pitch) is primary; YIN is the fallback.
+  // Always run the most accurate path: neural (basic-pitch) first, with the YIN
+  // track as a silent fallback. Both feed the same quantize → key → chords step.
   const analyze = useCallback(async (blob: Blob | null) => {
-    if (engineRef.current === "neural" && blob && blob.size > 1024) {
+    if (blob && blob.size > 1024) {
       try {
         const ac = new AudioContext();
         const buf = await ac.decodeAudioData(await blob.arrayBuffer());
         await ac.close();
         let nn = await transcribeNeural(buf, (p) => setNeuralProgress(p));
         nn = monophonicReduce(nn);
+        nn = mergeShortFragments(nn, 0.08); // absorb slivers left by overlap-trimming
         setNeuralProgress(0);
-        if (nn.length > 0) { await runInference(nn, true); return; }
+        if (nn.length > 0) { await runInference(nn); return; }
         toast("Neural model found no clear notes — used fast detection", "info");
       } catch (err) {
         console.warn("[VoiceScore] neural transcription failed:", err);
@@ -810,9 +764,9 @@ export function VoiceToScoreModal({
         setNeuralProgress(0);
       }
     }
-    // YIN fallback (samplesToNotes already quantizes internally)
-    await runInference(samplesToNotes(rawSamplesRef.current, qualityMode, quantizeMode), false);
-  }, [qualityMode, quantizeMode, runInference, toast]);
+    // YIN fallback
+    await runInference(samplesToNotes(rawSamplesRef.current));
+  }, [runInference, toast]);
 
   const stopRecording = useCallback(() => {
     if (recState !== "recording") return;
@@ -1262,69 +1216,26 @@ export function VoiceToScoreModal({
             Pitch detection runs entirely in your browser.
           </p>
           <div className="flex flex-wrap items-center gap-3">
-            {/* Engine */}
+            {/* Tempo — auto-detected, with optional override */}
             <div className="flex items-center gap-1.5">
-              <span className="text-[9px] uppercase tracking-wider text-ink-mute/40">Engine</span>
-              <div className="flex rounded border border-ink-line/30">
-                {([["neural", "Neural"], ["fast", "Fast"]] as const).map(([m, label]) => (
-                  <button
-                    key={m}
-                    onClick={() => setEngine(m)}
-                    title={m === "neural" ? "Spotify basic-pitch (most accurate)" : "YIN — fast, monophonic"}
-                    className={`px-2 py-0.5 text-[10px] transition-colors ${
-                      engine === m ? "bg-amber-gold/10 text-amber-gold" : "text-ink-mute/50 hover:text-ink-text"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {/* Tempo */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-[9px] uppercase tracking-wider text-ink-mute/40">BPM</span>
+              <span className="text-[9px] uppercase tracking-wider text-ink-mute/40">Tempo</span>
               <input
                 type="number" min={40} max={240}
                 value={bpm > 0 ? bpm : ""}
-                placeholder={String(detectedBpm)}
+                placeholder={`${detectedBpm}`}
                 onChange={(e) => setBpm(e.target.value ? Math.max(40, Math.min(240, parseInt(e.target.value) || 0)) : 0)}
-                className="w-14 rounded border border-ink-line/40 bg-ink/40 px-1.5 py-0.5 text-center text-[11px] text-ink-text outline-none"
+                title="Auto-detected from your singing. Type a value to override."
+                className="w-16 rounded border border-ink-line/40 bg-ink/40 px-1.5 py-0.5 text-center text-[11px] text-ink-text outline-none"
               />
+              <span className="text-[9px] uppercase tracking-wider text-ink-mute/40">{bpm > 0 ? "BPM" : "BPM · auto"}</span>
             </div>
-            {/* Quality mode (YIN/Fast path) */}
-            <div className={`flex items-center gap-1.5 ${engine === "neural" ? "opacity-40" : ""}`}>
-              <span className="text-[9px] uppercase tracking-wider text-ink-mute/40">Quality</span>
-              <div className="flex rounded border border-ink-line/30">
-                {(["strict", "balanced", "sensitive"] as const).map(m => (
-                  <button
-                    key={m}
-                    onClick={() => setQualityMode(m)}
-                    className={`px-2 py-0.5 text-[10px] capitalize transition-colors ${
-                      qualityMode === m ? "bg-amber-gold/10 text-amber-gold" : "text-ink-mute/50 hover:text-ink-text"
-                    }`}
-                  >
-                    {m}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {/* Quantize mode */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-[9px] uppercase tracking-wider text-ink-mute/40">Timing</span>
-              <div className="flex rounded border border-ink-line/30">
-                {(["raw", "light", "strong"] as const).map(m => (
-                  <button
-                    key={m}
-                    onClick={() => setQuantizeMode(m)}
-                    className={`px-2 py-0.5 text-[10px] capitalize transition-colors ${
-                      quantizeMode === m ? "bg-amber-gold/10 text-amber-gold" : "text-ink-mute/50 hover:text-ink-text"
-                    }`}
-                  >
-                    {m}
-                  </button>
-                ))}
-              </div>
-            </div>
+            {/* Everything else is tuned automatically */}
+            <span
+              className="rounded-full bg-amber-gold/10 px-2 py-0.5 text-[10px] text-amber-gold/80"
+              title="The neural pitch model, octave repair and 1/16 timing grid are all tuned automatically for the most accurate result."
+            >
+              ✦ Auto-tuned
+            </span>
           </div>
         </div>
 
@@ -1538,9 +1449,7 @@ export function VoiceToScoreModal({
         {recState === "analyzing" && (
           <div className="mb-6 flex items-center gap-2 font-mono text-xs text-ink-mute">
             <Spinner />
-            {engine === "neural"
-              ? `Transcribing with the neural model…${neuralProgress > 0 ? ` ${Math.round(neuralProgress * 100)}%` : ""}`
-              : "Running YIN pitch analysis…"}
+            {`Transcribing with the neural model…${neuralProgress > 0 ? ` ${Math.round(neuralProgress * 100)}%` : ""}`}
           </div>
         )}
 
