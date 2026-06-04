@@ -36,6 +36,9 @@ export const TRUMPET_PRESETS: TrumpetPreset[] = [
 const CLARITY_GATE = 0.55;
 const MIN_FREQ = 75;
 const MAX_FREQ = 1100;
+// Keep the horn ringing briefly through momentary clarity dips so sustained,
+// legato singing doesn't chop into separate notes.
+const RELEASE_HOLD_MS = 110;
 
 const freqToMidi = (f: number) => Math.round(69 + 12 * Math.log2(f / 440));
 const brightnessToHz = (b: number) => 1500 + Math.max(0, Math.min(1, b)) * 5500;
@@ -89,6 +92,7 @@ export function useLiveTrumpet({ micStream, enabled }: UseLiveTrumpetConfig) {
   const pitchHistRef = useRef<number[]>([]);
   const committedMidiRef = useRef(0);
   const candidateRef = useRef<{ midi: number; count: number }>({ midi: 0, count: 0 });
+  const lastVoicedRef = useRef(0);
 
   const brightnessRef = useRef(brightness);
   const portamentoRef = useRef(portamento);
@@ -201,10 +205,12 @@ export function useLiveTrumpet({ micStream, enabled }: UseLiveTrumpetConfig) {
             trumpet.setBrightnessHz(brightnessToHz(brightnessRef.current) + expr * 3200);
             const port = 0.01 + portamentoRef.current * 0.3;
             trumpet.noteOn(f, velocity, port);
+            lastVoicedRef.current = performance.now();
             setDetectedFreq(f);
             setDetectedNote(midiToLabel(playMidi));
             setIsActive(true);
-          } else {
+          } else if (performance.now() - lastVoicedRef.current > RELEASE_HOLD_MS) {
+            // only release once we've been unvoiced past the hold window
             trumpet.noteOff();
             pitchHistRef.current = [];
             committedMidiRef.current = 0;
