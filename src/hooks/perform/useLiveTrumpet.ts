@@ -69,6 +69,7 @@ export function useLiveTrumpet({ micStream, enabled }: UseLiveTrumpetConfig) {
   const [inputLevel, setInputLevel] = useState(0);
   const [isActive, setIsActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   // ── convert ──
   const [captureState, setCaptureState] = useState<CaptureState>("idle");
@@ -125,14 +126,16 @@ export function useLiveTrumpet({ micStream, enabled }: UseLiveTrumpetConfig) {
         await resumeEngine();
         // sampled trumpet (load once)
         if (!trumpetRef.current) {
+          setLoading(true);
           const inst = await createTrumpetInstrument(engine, {
             brightnessHz: brightnessToHz(brightnessRef.current),
             reverbWet,
             volumeDb: lin01ToDb(outputGain),
           });
-          if (cancelled) { inst.dispose(); return; }
+          if (cancelled) { inst.dispose(); setLoading(false); return; }
           trumpetRef.current = inst;
           await inst.ready;
+          setLoading(false);
         }
 
         // worklet pitch detector
@@ -311,7 +314,7 @@ export function useLiveTrumpet({ micStream, enabled }: UseLiveTrumpetConfig) {
 
   return {
     // detected
-    detectedNote, detectedFreq, confidence, inputLevel, isActive, error,
+    detectedNote, detectedFreq, confidence, inputLevel, isActive, error, loading,
     // mode
     mode, setMode,
     // params

@@ -1427,8 +1427,11 @@ export function RecorderModal({
                   {/* Trumpet sub-panel */}
                   {(performLayer === "trumpet" || performLayer === "both") ? (
                     <div className="rounded border border-ink-line/60 bg-ink-surface/30 p-3">
-                      <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-amber-gold">
+                      <div className="mb-2 flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-amber-gold">
                         Sampled Trumpet
+                        {trumpet.loading && (
+                          <span className="rounded-full bg-amber-gold/15 px-1.5 py-0.5 text-[8px] normal-case tracking-normal text-amber-gold/90">loading samples…</span>
+                        )}
                       </div>
 
                       {/* Mode */}
@@ -1723,6 +1726,8 @@ export function RecorderModal({
                             </div>
                             <span className="font-mono text-[10px] text-amber-gold">ACTIVE</span>
                           </>
+                        ) : trumpet.loading ? (
+                          <span className="font-mono text-amber-gold/80">loading trumpet samples…</span>
                         ) : (
                           <span className="font-mono text-ink-mute">listening...</span>
                         )}
