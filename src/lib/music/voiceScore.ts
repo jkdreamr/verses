@@ -8,7 +8,7 @@
 // bundle stays light. The neural model is vendored at /models/basic-pitch.
 // ───────────────────────────────────────────────────────────────────────────
 
-import { midiToNoteName } from "@/lib/pitchDetection";
+import { midiToNoteName, detectPitchYIN } from "@/lib/pitchDetection";
 
 export interface NoteEvent {
   midi: number;
@@ -71,14 +71,17 @@ export async function transcribeNeural(
 
   const poly = outputToNotesPoly(
     frames, onsets,
-    opts.onsetThresh ?? 0.5,
-    opts.frameThresh ?? 0.3,
-    opts.minNoteLen ?? 5,
-    true,
+    opts.onsetThresh ?? 0.5,   // onsetThreshold
+    opts.frameThresh ?? 0.3,   // frameThreshold
+    opts.minNoteLen ?? 11,     // minNoteLength ≈ 120ms
+    true,                      // inferOnsets
+    1100,                      // maxFreq — top of the sung range
+    80,                        // minFreq
+    true,                      // melodiaTrick
   );
   const timed = noteFramesToTime(addPitchBendsToNoteEvents(contours, poly));
 
-  return timed
+  let notes: NoteEvent[] = timed
     .filter((n) => n.pitchMidi >= 36 && n.pitchMidi <= 96)
     .sort((a, b) => a.startTimeSeconds - b.startTimeSeconds)
     .map((n) => ({
@@ -89,6 +92,67 @@ export async function transcribeNeural(
       confidence: Math.max(0.2, Math.min(1, n.amplitude)),
       id: nextNoteId(),
     }));
+
+  // Cross-check pitch against a YIN track to repair octave flips (basic-pitch can
+  // octave-err on voice). Conservative — only snaps when YIN strongly agrees.
+  notes = correctOctaves(notes, yinPitchTrack(resampled));
+  // Absorb tiny same-pitch fragments into their neighbour (vibrato/articulation).
+  notes = mergeShortFragments(notes, 0.1);
+  return notes;
+}
+
+/** Merge sub-threshold fragments into a same-pitch neighbour. */
+export function mergeShortFragments(notes: NoteEvent[], minSec = 0.1): NoteEvent[] {
+  if (notes.length < 2) return notes;
+  const out: NoteEvent[] = [];
+  for (const n of notes) {
+    const prev = out[out.length - 1];
+    if (prev && n.duration < minSec && Math.abs(n.midi - prev.midi) <= 1 &&
+        n.startTime - (prev.startTime + prev.duration) < 0.08) {
+      prev.duration = Math.round((n.startTime + n.duration - prev.startTime) * 1000) / 1000;
+      continue;
+    }
+    out.push({ ...n });
+  }
+  return out;
+}
+
+const medianOf = (a: number[]): number => {
+  if (a.length === 0) return 0;
+  const s = [...a].sort((x, y) => x - y);
+  return s[Math.floor(s.length / 2)];
+};
+
+/** Continuous YIN pitch track (float MIDI) over a mono buffer. */
+function yinPitchTrack(buffer: AudioBuffer): { t: number; midi: number }[] {
+  const data = buffer.getChannelData(0) as Float32Array<ArrayBuffer>;
+  const sr = buffer.sampleRate;
+  const win = 2048, hop = 1024;
+  const out: { t: number; midi: number }[] = [];
+  const w = new Float32Array(win) as Float32Array<ArrayBuffer>;
+  for (let i = 0; i + win <= data.length; i += hop) {
+    w.set(data.subarray(i, i + win));
+    const r = detectPitchYIN(w, sr, { yinThreshold: 0.15, silenceRms: 0.01, noisyFallback: 0.5 });
+    if (r && r.freq > 0) out.push({ t: i / sr, midi: 69 + 12 * Math.log2(r.freq / 440) });
+  }
+  return out;
+}
+
+/** Snap a note to the octave nearest the YIN reference when it's an octave off. */
+function correctOctaves(notes: NoteEvent[], track: { t: number; midi: number }[]): NoteEvent[] {
+  if (track.length === 0) return notes;
+  return notes.map((n) => {
+    const span = track.filter((p) => p.t >= n.startTime - 0.03 && p.t <= n.startTime + n.duration + 0.03);
+    if (span.length < 2) return n;
+    const ref = medianOf(span.map((p) => p.midi));
+    let m = n.midi;
+    while (m - ref > 6) m -= 12;
+    while (ref - m > 6) m += 12;
+    // accept only a genuine octave fix that lands very close to the YIN reference
+    return Math.abs(m - n.midi) >= 12 && Math.abs(m - ref) <= 1.5
+      ? { ...n, midi: m, name: midiToNoteName(m) }
+      : n;
+  });
 }
 
 /** Reduce a (possibly polyphonic) transcription to a single melodic line. */
@@ -178,6 +242,24 @@ export function inferKey(notes: NoteEvent[]): KeyInfo {
 
 export type ChordHit = { startTime: number; symbol: string };
 
+// Root-relative chord templates, ordered so simpler chords win on a tie.
+const CHORD_TEMPLATES: { suffix: string; ivs: number[] }[] = [
+  { suffix: "", ivs: [0, 4, 7] },       // major
+  { suffix: "m", ivs: [0, 3, 7] },      // minor
+  { suffix: "7", ivs: [0, 4, 7, 10] },
+  { suffix: "maj7", ivs: [0, 4, 7, 11] },
+  { suffix: "m7", ivs: [0, 3, 7, 10] },
+  { suffix: "dim", ivs: [0, 3, 6] },
+  { suffix: "sus4", ivs: [0, 5, 7] },
+];
+
+/**
+ * Per-window chord inference by chroma template matching: build a duration- and
+ * confidence-weighted 12-bin chroma for each beat window and pick the
+ * (root, quality) whose template best correlates (rewards in-chord energy,
+ * penalises out-of-chord energy). More robust than set-based detection when a
+ * 5th is missing or a passing tone sneaks in.
+ */
 export async function inferChords(
   notes: NoteEvent[],
   bpm: number,
@@ -185,45 +267,64 @@ export async function inferChords(
   accidental: "sharp" | "flat" = "sharp",
 ): Promise<ChordHit[]> {
   if (notes.length === 0) return [];
-  const { Chord } = await import("@tonaljs/tonal");
   const beat = 60 / bpm;
   const win = beat * beatsPerChord;
   const end = Math.max(...notes.map((n) => n.startTime + n.duration));
   const names = accidental === "flat" ? PITCH_CLASSES_FLAT : PITCH_CLASSES_SHARP;
 
   const hits: ChordHit[] = [];
-  let lastSymbol = "";
+  let last = "";
   for (let t = 0; t < end; t += win) {
-    const inWin = notes.filter((n) => n.startTime < t + win && n.startTime + n.duration > t);
-    if (inWin.length === 0) continue;
-    // unique pitch classes weighted toward longer notes (bass-ish first)
-    const pcs = Array.from(new Set(inWin.sort((a, b) => a.midi - b.midi).map((n) => names[((n.midi % 12) + 12) % 12])));
-    if (pcs.length < 2) continue;
-    const detected = Chord.detect(pcs, { assumePerfectFifth: true });
-    const symbol = detected[0] ?? "";
-    if (symbol && symbol !== lastSymbol) {
+    const chroma = new Array(12).fill(0);
+    let energy = 0;
+    for (const n of notes) {
+      const overlap = Math.min(n.startTime + n.duration, t + win) - Math.max(n.startTime, t);
+      if (overlap <= 0) continue;
+      const w = overlap * Math.max(0.2, n.confidence);
+      chroma[((n.midi % 12) + 12) % 12] += w;
+      energy += w;
+    }
+    if (energy <= 0) continue;
+    for (let i = 0; i < 12; i++) chroma[i] /= energy;
+
+    let bestScore = -Infinity, bestRoot = 0, bestSuffix = "";
+    for (let root = 0; root < 12; root++) {
+      for (const tpl of CHORD_TEMPLATES) {
+        let inSum = 0;
+        for (const iv of tpl.ivs) inSum += chroma[(root + iv) % 12];
+        let outSum = 0;
+        for (let pc = 0; pc < 12; pc++) {
+          if (!tpl.ivs.includes(((pc - root) % 12 + 12) % 12)) outSum += chroma[pc];
+        }
+        const score = inSum - 0.55 * outSum - 0.03 * tpl.ivs.length;
+        if (score > bestScore) { bestScore = score; bestRoot = root; bestSuffix = tpl.suffix; }
+      }
+    }
+    const symbol = names[bestRoot] + bestSuffix;
+    if (symbol !== last) {
       hits.push({ startTime: Math.round(t * 1000) / 1000, symbol });
-      lastSymbol = symbol;
+      last = symbol;
     }
   }
   return hits;
 }
 
-/** Estimate a tempo from inter-onset intervals (fallback when user hasn't set one). */
+/**
+ * Estimate tempo by phase-aligning a comb of candidate beat grids to the note
+ * onsets (a cos-weighted autocorrelation). The fundamental tempo wins because
+ * off-beat onsets score negatively, avoiding the usual 2×/½× errors.
+ */
 export function estimateBpm(notes: NoteEvent[]): number {
-  if (notes.length < 3) return 100;
-  const iois: number[] = [];
-  for (let i = 1; i < notes.length; i++) {
-    const d = notes[i].startTime - notes[i - 1].startTime;
-    if (d > 0.1 && d < 2) iois.push(d);
+  if (notes.length < 4) return 100;
+  const onsets = notes.map((n) => n.startTime);
+  let best = 100, bestScore = -Infinity;
+  for (let bpm = 70; bpm <= 170; bpm++) {
+    const beat = 60 / bpm;
+    let score = 0;
+    for (const t of onsets) score += Math.cos(2 * Math.PI * ((t % beat) / beat));
+    if (score > bestScore) { bestScore = score; best = bpm; }
   }
-  if (iois.length === 0) return 100;
-  iois.sort((a, b) => a - b);
-  const median = iois[Math.floor(iois.length / 2)];
-  let bpm = 60 / median;
-  while (bpm < 60) bpm *= 2;
-  while (bpm > 200) bpm /= 2;
-  return Math.round(bpm);
+  return best;
 }
 
 // ── MusicXML lead-sheet export ──────────────────────────────────────────────
