@@ -119,8 +119,8 @@ const loadSaved = (): SavedPattern[] => {
 
 /**
  * Step-sequencer drum engine. Holds an editable 4×16 grid, plays it on the shared
- * Tone.Transport with sampled kits, and exposes a moving playhead. Backward-compatible
- * with the old transport API (play/stop/setPreset/setBpm/…) used by RecorderModal.
+ * Tone.Transport with sampled kits, and exposes a moving playhead. Also keeps the
+ * simple transport API (play/stop/setPreset/setBpm/…) used across Perform.
  */
 export function useDrumEngine(destNode: AudioNode | null) {
   // ── React state ──

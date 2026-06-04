@@ -194,7 +194,7 @@ export function YoutubeBar({
     togglePlay();
   });
 
-  // External controllers (e.g. RecorderModal, PerformModal) can dispatch these events
+  // External controllers (e.g. PerformModal) can dispatch these events
   // to control the loaded YouTube beat. The play event accepts an optional
   // `detail.startAt` (seconds) to seek before playback.
   useEffect(() => {

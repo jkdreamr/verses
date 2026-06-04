@@ -10,13 +10,13 @@ export function TakesPanel({
   songId,
   reloadKey,
   onClose,
-  onNewTake,
+  onOpenPerform,
 }: {
   open: boolean;
   songId: string;
   reloadKey: number;
   onClose: () => void;
-  onNewTake: () => void;
+  onOpenPerform: () => void;
 }) {
   const { toast } = useToast();
   const [takes, setTakes] = useState<Take[]>([]);
@@ -160,10 +160,11 @@ export function TakesPanel({
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={onNewTake}
+            onClick={onOpenPerform}
+            title="Recording lives in Perform — open it to capture a new take"
             className="btn-primary text-[12px]"
           >
-            ● new take
+            ↗ Perform
           </button>
           <button
             onClick={onClose}
@@ -180,8 +181,9 @@ export function TakesPanel({
           <div className="px-4 py-3 text-sm text-ink-mute">loading…</div>
         ) : takes.length === 0 ? (
           <div className="px-4 py-6 text-sm text-ink-mute">
-            No takes yet — tap{" "}
-            <span className="text-amber-gold">● new take</span> to record one.
+            No takes yet. Recording lives in{" "}
+            <button onClick={onOpenPerform} className="text-amber-gold underline-offset-2 hover:underline">Perform</button>{" "}
+            — sing with the beat, chords, lyrics and trumpet, and your takes show up here.
           </div>
         ) : (
           <ul className="divide-y divide-ink-line">

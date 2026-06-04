@@ -11,8 +11,8 @@ import {
 
 /**
  * Back-compat view of the singleton audio engine. The node names mirror the old
- * hand-rolled bus so existing consumers (RecorderModal) keep compiling while the
- * graph itself is now the shared, persistent {@link ensureEngine} singleton.
+ * hand-rolled bus so consumers keep a stable shape while the graph itself is now
+ * the shared, persistent {@link ensureEngine} singleton.
  */
 export type PerformAudioBus = {
   ctx: AudioContext;

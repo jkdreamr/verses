@@ -19,7 +19,6 @@ import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { ExportModal } from "./ExportModal";
 import { TagsModal } from "./TagsModal";
 import { SelectionTooltip } from "./SelectionTooltip";
-import { RecorderModal } from "./RecorderModal";
 import { TakesPanel } from "./TakesPanel";
 import { PerformModal } from "./PerformModal";
 import { VoiceToScoreModal } from "./VoiceToScoreModal";
@@ -44,7 +43,7 @@ export function Editor({ songId }: { songId: string }) {
   // Only one right-side rail can be open at a time.
   // Only one modal can be open at a time.
   const [activeRail, setActiveRail] = useState<"none" | "rhymes" | "history" | "takes" | "rhymeLens">("none");
-  const [activeModal, setActiveModal] = useState<"none" | "ocr" | "export" | "tags" | "recorder" | "perform" | "voiceScore" | "structure">("none");
+  const [activeModal, setActiveModal] = useState<"none" | "ocr" | "export" | "tags" | "perform" | "voiceScore" | "structure">("none");
   const [rhymeWord, setRhymeWord] = useState<string | null>(null);
   const [takesReloadKey, setTakesReloadKey] = useState(0);
 
@@ -57,7 +56,6 @@ export function Editor({ songId }: { songId: string }) {
   const exportOpen = activeModal === "export";
   const tagsOpen = activeModal === "tags";
   const structureOpen = activeModal === "structure";
-  const recorderOpen = activeModal === "recorder";
   const performOpen = activeModal === "perform";
   const voiceToScoreOpen = activeModal === "voiceScore";
 
@@ -643,22 +641,7 @@ export function Editor({ songId }: { songId: string }) {
         songId={song.id}
         reloadKey={takesReloadKey}
         onClose={closeRail}
-        onNewTake={() => openModal("recorder")}
-      />
-
-      <RecorderModal
-        open={recorderOpen}
-        songId={song.id}
-        hasYoutube={!!youtube}
-        markers={youtube?.markers ?? []}
-        loopStart={youtube?.loop_start ?? null}
-        lyrics={song.content}
-        youtubeSession={youtube ?? null}
-        onClose={closeModal}
-        onSaved={() => {
-          setTakesReloadKey((k) => k + 1);
-          openRail("takes");
-        }}
+        onOpenPerform={() => openModal("perform")}
       />
 
       {performOpen && (
