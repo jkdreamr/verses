@@ -666,8 +666,8 @@ export function Editor({ songId }: { songId: string }) {
           open={performOpen}
           onClose={closeModal}
           songId={song.id}
+          lyrics={song.content}
           onTakeSaved={() => setTakesReloadKey((k) => k + 1)}
-          youtubeSession={youtube}
         />
       )}
 

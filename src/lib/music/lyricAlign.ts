@@ -234,3 +234,94 @@ export function createLyricAligner(lyrics: string) {
 
   return { tokens, lines, reset, process, get pointer() { return pointer; } };
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// Strict line-by-line aligner. The active line advances by EXACTLY one (to the
+// next non-empty line) when the singer reaches it, and never skips lines or jumps
+// backward. This is deliberately conservative — a karaoke-style follow that stays
+// readable even when recognition is patchy.
+// ───────────────────────────────────────────────────────────────────────────
+
+export type LineKey = { norm: string; sx: string; mp: string };
+export type LineAlignResult = {
+  lineIndex: number;
+  /** Index of the furthest matched word within the active line (-1 = none). */
+  wordInLine: number;
+  confidence: number;
+  matched: boolean;
+};
+
+function keyOf(w: string): LineKey {
+  const norm = normalizeWord(w);
+  return { norm, sx: soundex(norm), mp: metaphone(norm) };
+}
+
+function keyMatches(heard: LineKey[], target: LineKey): boolean {
+  if (!target.norm) return false;
+  for (const h of heard) {
+    if (!h.norm) continue;
+    if (h.norm === target.norm) return true;
+    const len = Math.max(h.norm.length, target.norm.length);
+    if (len >= 4) {
+      if (levenshtein(h.norm, target.norm) <= (len >= 7 ? 2 : 1)) return true;
+      if ((h.sx && h.sx === target.sx) || (h.mp && h.mp === target.mp)) return true;
+    }
+  }
+  return false;
+}
+
+export function createLineAligner(lyrics: string) {
+  const lines = lyrics.split(/\r?\n/);
+  const lineKeys: LineKey[][] = lines.map((l) =>
+    (l.match(/[A-Za-z0-9']+/g) ?? []).map(keyOf).filter((k) => k.norm),
+  );
+  let currentLine = 0;
+
+  const nextNonEmpty = (from: number): number => {
+    let i = Math.max(0, from);
+    while (i < lineKeys.length - 1 && lineKeys[i].length === 0) i++;
+    return Math.min(i, Math.max(0, lines.length - 1));
+  };
+  // start on the first line that actually has words
+  currentLine = nextNonEmpty(0);
+
+  const lineScore = (heard: LineKey[], li: number): number => {
+    if (li < 0 || li >= lineKeys.length) return 0;
+    const toks = lineKeys[li];
+    if (toks.length === 0) return 0;
+    let m = 0;
+    for (const t of toks) if (keyMatches(heard, t)) m++;
+    return m / toks.length;
+  };
+
+  const reset = () => { currentLine = nextNonEmpty(0); };
+  const setLine = (n: number) => { currentLine = Math.max(0, Math.min(lines.length - 1, n)); };
+
+  const process = (transcript: string): LineAlignResult => {
+    const tail = (transcript.match(/[A-Za-z0-9']+/g) ?? []).slice(-8).map(keyOf).filter((k) => k.norm);
+    if (tail.length === 0) return { lineIndex: currentLine, wordInLine: -1, confidence: 0, matched: false };
+
+    const next = nextNonEmpty(currentLine + 1);
+    const curS = lineScore(tail, currentLine);
+    const nextS = lineScore(tail, next);
+
+    // Advance exactly one (non-empty) line when the next line is clearly active.
+    if (next > currentLine && nextS > 0 && nextS >= curS) {
+      currentLine = next;
+    }
+
+    // furthest matched word within the active line (for word-level highlight)
+    let wordInLine = -1;
+    const toks = lineKeys[currentLine] ?? [];
+    for (let i = 0; i < toks.length; i++) if (keyMatches(tail, toks[i])) wordInLine = i;
+
+    return {
+      lineIndex: currentLine,
+      wordInLine,
+      confidence: Math.max(curS, nextS),
+      matched: curS > 0 || nextS > 0,
+    };
+  };
+
+  return { lines, reset, setLine, process, get line() { return currentLine; } };
+}

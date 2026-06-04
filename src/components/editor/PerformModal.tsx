@@ -27,8 +27,10 @@ import {
 import { OneEuroFilter } from "@/lib/audio/oneEuro";
 import { TouchInstrument } from "@/components/perform/TouchInstrument";
 import { StepSequencer } from "@/components/perform/StepSequencer";
+import { LyricTeleprompter } from "@/components/perform/LyricTeleprompter";
 import { Slider } from "@/components/ui/Slider";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useSmartLyrics } from "@/hooks/useSmartLyrics";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -202,13 +204,14 @@ export function PerformModal({
   open,
   onClose,
   songId,
+  lyrics,
   onTakeSaved,
 }: {
   open: boolean;
   onClose: () => void;
   songId: string;
+  lyrics?: string;
   onTakeSaved: () => void;
-  youtubeSession?: unknown;
 }) {
   const isMobile = useIsMobile();
 
@@ -279,6 +282,15 @@ export function PerformModal({
   const [swapHands, setSwapHands] = useState(false);
   const [tab, setTab] = useState<"beat" | "sound" | "chords" | "guide">("beat");
   const [beatPlaying, setBeatPlaying] = useState(false);
+
+  // ── Smart Lyric Reader (strict line-by-line teleprompter in the stage) ──
+  const smart = useSmartLyrics(lyrics ?? "");
+  const { start: smartStart, stop: smartStop } = smart;
+  const [showLyrics, setShowLyrics] = useState(false);
+  const toggleLyrics = useCallback(() => {
+    if (showLyrics) { smartStop(); setShowLyrics(false); }
+    else { smartStart(); setShowLyrics(true); }
+  }, [showLyrics, smartStart, smartStop]);
 
   // Zone labels for the live chord/note grid — derived from the REAL X→action
   // mapping so the guide is truthful (chord mode: progression slots; lead mode:
@@ -781,10 +793,12 @@ export function PerformModal({
     stopMic();
     stopDrums();
     releaseChord();
+    smartStop();
+    setShowLyrics(false);
     beatLatchRef.current = "stopped";
     setBeatPlaying(false);
     void suspendBus();
-  }, [suspendBus, releaseChord, stopCamera, stopMic, stopDrums]);
+  }, [suspendBus, releaseChord, stopCamera, stopMic, stopDrums, smartStop]);
 
   // Keep a stable ref to the latest cleanup so the close/unmount effects depend
   // only on the `open` primitive — never on `cleanup` itself (which changes when
@@ -835,6 +849,12 @@ export function PerformModal({
               className={`px-2.5 py-1 text-[11px] transition-colors ${inputMode === "touch" ? "bg-accent/15 text-accent" : "text-ink-mute hover:text-ink-text"}`}
             >Touch</button>
           </div>
+          <button
+            onClick={toggleLyrics}
+            aria-pressed={showLyrics}
+            className={`rounded-lg border px-2.5 py-1 text-[11px] transition-colors ${showLyrics ? "border-accent/40 bg-accent/15 text-accent" : "border-line/70 text-ink-mute hover:text-ink-text"}`}
+            title="Show the smart lyric teleprompter — it follows your voice line by line"
+          >Lyrics</button>
           <button onClick={handleClose} className="rounded-lg px-3 py-1 text-[12px] text-ink-mute transition-colors hover:bg-surface-2 hover:text-ink-text">Close</button>
         </div>
       </div>
@@ -892,9 +912,12 @@ export function PerformModal({
                   </button>
                 </>
               )}
+
+              {showLyrics && <LyricTeleprompter smart={smart} onClose={toggleLyrics} />}
             </div>
           ) : (
-            <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+            <div className="relative flex-1 overflow-y-auto p-4 sm:p-6">
+              {showLyrics && <LyricTeleprompter smart={smart} onClose={toggleLyrics} />}
               <TouchInstrument
                 rootKey={rootKey}
                 scaleId={scaleId}
