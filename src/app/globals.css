@@ -140,6 +140,24 @@ input[type="range"]::-moz-range-thumb {
   border-radius: 4px;
 }
 
+/* The full-bleed writing surface uses the amber caret as its focus indicator —
+   no box/ring (a ringed prose editor looks like an error state). */
+.editor-surface:focus,
+.editor-surface:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+/* Hide scrollbars where they'd break a layered/overlay (e.g. the editor mirror,
+   horizontally-scrolling toolbars) while keeping the element scrollable. */
+.scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
 /* Snappier taps on touch devices; pointer cursor on real buttons */
 button,
 [role="button"] {

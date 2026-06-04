@@ -101,6 +101,24 @@ export function Editor({ songId }: { songId: string }) {
   // Re-sync scroll when highlights change (e.g. analysis updated, focus toggled)
   useEffect(() => { syncScroll(); }, [charHighlights, syncScroll]);
 
+  // Keep the highlight mirror locked to the textarea on resize / reflow (rotation,
+  // window resize, font toggle, panel open/close all change the box).
+  useEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const onResize = () => syncScroll();
+    window.addEventListener("resize", onResize);
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(() => syncScroll());
+      ro.observe(ta);
+    }
+    return () => {
+      window.removeEventListener("resize", onResize);
+      ro?.disconnect();
+    };
+  }, [syncScroll]);
+
   // Load song — only depend on songId so we don't refetch when guestMode flips
   const initialGuestParam = searchParams.get("guest") === "1";
   useEffect(() => {
@@ -493,27 +511,31 @@ export function Editor({ songId }: { songId: string }) {
           if (song) void persist(song, { force: true });
         }}
         placeholder="untitled"
-        className="mx-auto mt-8 w-[min(720px,calc(100%-3rem))] bg-transparent text-center font-serif text-2xl tracking-tight text-ink-mute/70 placeholder:text-ink-mute/25 focus:text-ink-text transition-colors duration-200 print:text-ink"
+        className="editor-surface mx-auto mt-8 w-[min(720px,calc(100%-3rem))] bg-transparent text-center font-serif text-2xl tracking-tight text-ink-mute/70 placeholder:text-ink-mute/25 transition-colors duration-200 focus:text-ink-text print:text-ink"
+        style={{ caretColor: "rgb(var(--accent))" }}
       />
 
       {/* Canvas */}
       <div className="mx-auto mt-4 flex w-[min(720px,calc(100%-3rem))] flex-1 flex-col">
-        {/* Layered editor: highlight mirror behind transparent textarea */}
-        <div className="relative flex-1" style={{ minHeight: "60vh" }}>
+        {/* Layered editor: highlight mirror behind transparent textarea.
+            Both layers share the EXACT same box (absolute inset-0) + typography so
+            the rhyme highlights stay locked to their words on scroll/resize. */}
+        <div className="relative flex-1 overflow-hidden" style={{ minHeight: "60vh" }}>
           {/* Highlight mirror layer */}
           <div
             ref={highlightRef}
             aria-hidden
-            className={`pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words py-4 leading-[1.85] tracking-wide ${
+            className={`pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-1 py-4 leading-[1.85] tracking-wide ${
               serif ? "serif text-[18px]" : "font-mono text-[15px]"
             }`}
-            style={{ color: "transparent", wordBreak: "break-word" }}
+            style={{ color: "transparent", wordBreak: "break-word", boxSizing: "border-box" }}
           >
             {charHighlights.size > 0
               ? renderHighlightedText(song.content, charHighlights)
               : song.content + "\n"}
           </div>
-          {/* Actual textarea */}
+          {/* Actual textarea — same box, scrollbar hidden so its text column width
+              matches the mirror exactly (no wrap drift across platforms). */}
           <textarea
             ref={textareaRef}
             value={song.content}
@@ -523,14 +545,10 @@ export function Editor({ songId }: { songId: string }) {
             spellCheck
             autoFocus
             placeholder="start writing…"
-            className={`relative z-[1] w-full resize-none bg-transparent py-4 leading-[1.85] tracking-wide outline-none placeholder:text-ink-mute/40 ${
+            className={`editor-surface scrollbar-hide absolute inset-0 z-[1] resize-none overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-1 py-4 leading-[1.85] tracking-wide placeholder:text-ink-mute/40 ${
               serif ? "serif text-[18px]" : "font-mono text-[15px]"
             }`}
-            style={{
-              minHeight: "60vh",
-              height: "100%",
-              caretColor: "var(--ink-text, #e5e5e5)",
-            }}
+            style={{ wordBreak: "break-word", boxSizing: "border-box", caretColor: "rgb(var(--accent))" }}
           />
         </div>
 
