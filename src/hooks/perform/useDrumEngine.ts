@@ -209,6 +209,11 @@ export function useDrumEngine(destNode: AudioNode | null) {
         Array.from({ length: STEPS }, (_, i) => i),
         "16n",
       );
+      // Start the looping sequence ONCE; play/stop control the transport only.
+      // (Re-calling Sequence.start() after stop is the classic Tone gotcha that
+      // leaves the loop silent — so we never do that.)
+      seq.loop = true;
+      seq.start(0);
       seqRef.current = seq;
       builtRef.current = true;
     })();
@@ -226,7 +231,10 @@ export function useDrumEngine(destNode: AudioNode | null) {
     t.bpm.value = currentBpm;
     t.swing = swing;
     t.swingSubdivision = "16n";
-    seqRef.current?.start(0);
+    // The sequence is already started + looping; (re)start the transport from the
+    // top. Works reliably for play → stop → play (e.g. fist then open palm).
+    t.stop();
+    t.position = 0;
     t.start();
     setPlaying(true);
   }, [currentBpm, ensureBuilt, swing]);
@@ -235,7 +243,6 @@ export function useDrumEngine(destNode: AudioNode | null) {
     try {
       const e = ensureEngine();
       if (e.tone) {
-        seqRef.current?.stop();
         e.tone.getTransport().stop();
       }
     } catch { /* */ }

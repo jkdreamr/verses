@@ -224,6 +224,10 @@ export function PerformModal({
   const rafRef = useRef<number | null>(null);
   const lastFrameRef = useRef(0);
   const camStreamRef = useRef<MediaStream | null>(null);
+  // Mic for capturing the singer's voice into the recording (+ trumpet later).
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const micRecGainRef = useRef<GainNode | null>(null);
   const rightHandRef = useRef<Hand>({ present: false, x: 0.5, y: 0.5, pinch: false, gesture: null });
   const showGridRef = useRef(true);
   const reducedMotionRef = useRef(false);
@@ -257,6 +261,7 @@ export function PerformModal({
   const [camActive, setCamActive] = useState(false);
   const [mpLoading, setMpLoading] = useState(false);
   const [camError, setCamError] = useState<string | null>(null);
+  const [micError, setMicError] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [recElapsed, setRecElapsed] = useState(0);
   const [rootKey, setRootKey] = useState("C");
@@ -667,10 +672,43 @@ export function PerformModal({
     setRightHand({ present: false, x: 0.5, y: 0.5, pinch: false, gesture: null });
   }, [releaseChord]);
 
+  // ── Mic: route the singer's voice into the recording tap (not the speakers) ──
+  const ensureMic = useCallback(async (): Promise<MediaStream | null> => {
+    if (micStreamRef.current) return micStreamRef.current;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: false },
+      });
+      micStreamRef.current = stream;
+      const engine = ensureEngine();
+      const src = engine.ctx.createMediaStreamSource(stream);
+      const g = engine.ctx.createGain();
+      g.gain.value = 1;
+      src.connect(g);
+      g.connect(engine.recordDest); // captured in takes, never sent to the speakers
+      micSourceRef.current = src;
+      micRecGainRef.current = g;
+      return stream;
+    } catch (err) {
+      setMicError(`Mic unavailable — recordings won't include your voice. ${err instanceof Error ? err.message : ""}`);
+      return null;
+    }
+  }, []);
+
+  const stopMic = useCallback(() => {
+    try { micRecGainRef.current?.disconnect(); } catch { /* */ }
+    try { micSourceRef.current?.disconnect(); } catch { /* */ }
+    micStreamRef.current?.getTracks().forEach((t) => t.stop());
+    micStreamRef.current = null;
+    micSourceRef.current = null;
+    micRecGainRef.current = null;
+  }, []);
+
   // ── Recording ──
   const startRecording = useCallback(async () => {
     const engine = ensureEngine();
     await resumeEngine();
+    await ensureMic(); // so the take captures the singer's voice + the instruments
     const audioStream = engine.recordDest.stream;
 
     // With the camera on we record the PERFORMANCE picture from the capture
@@ -716,7 +754,7 @@ export function PerformModal({
     recorder.start(250);
     recorderRef.current = recorder;
     setRecording(true);
-  }, [onTakeSaved, songId, inputMode, camActive]);
+  }, [onTakeSaved, songId, inputMode, camActive, ensureMic]);
 
   const stopRecording = useCallback(() => {
     if (recorderRef.current && recorderRef.current.state !== "inactive") {
@@ -740,12 +778,13 @@ export function PerformModal({
     setRecording(false);
     setRecElapsed(0);
     stopCamera();
+    stopMic();
     stopDrums();
     releaseChord();
     beatLatchRef.current = "stopped";
     setBeatPlaying(false);
     void suspendBus();
-  }, [suspendBus, releaseChord, stopCamera, stopDrums]);
+  }, [suspendBus, releaseChord, stopCamera, stopMic, stopDrums]);
 
   // Keep a stable ref to the latest cleanup so the close/unmount effects depend
   // only on the `open` primitive — never on `cleanup` itself (which changes when
@@ -1036,6 +1075,9 @@ export function PerformModal({
           </button>
         </div>
         <div className="flex items-center gap-2">
+          <span className="hidden text-[10px] text-ink-mute/60 sm:inline" title="Recordings capture your voice + the instruments. Use headphones so the beat doesn't bleed into your vocal.">
+            {micError ? <span className="text-danger">{micError}</span> : "captures voice + music · 🎧 use headphones"}
+          </span>
           <button onClick={recording ? stopRecording : () => void startRecording()}
             className={`rounded-lg px-3.5 py-1.5 text-[11px] font-medium uppercase tracking-wider transition-colors ${recording ? "bg-danger/20 text-danger hover:bg-danger/30" : "bg-accent/15 text-accent hover:bg-accent/25"}`}>
             {recording ? "Stop rec" : "● Record"}
