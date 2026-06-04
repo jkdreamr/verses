@@ -27,6 +27,7 @@ inside the page.
    - [Live Trumpet pipeline](#live-trumpet-pipeline)
    - [Raw recording capture fix](#raw-recording-capture-fix)
    - [Voice Score pipeline](#voice-score-pipeline)
+   - [Latest refinements](#latest-refinements)
    - [Tradeoffs & limitations](#tradeoffs--limitations)
 3. [Part 2 — User guide](#part-2--user-guide)
 4. [Privacy](#privacy) · [Development](#development) · [Disclosure](#disclosure)
@@ -266,6 +267,57 @@ Hum or sing a melody → notes → chords → sheet music (`src/lib/music/voiceS
    Detected-melody playback uses a sampled piano (`Tone.Sampler`); you can also A/B it
    against the original recording. Live input warnings flag clipping / silence / noise.
 
+## Latest refinements
+
+A second pass focused on making each feature genuinely musician-usable.
+
+**Editor — highlights pinned to the text (scroll-sync).** Rhyme Lens draws its coloured
+boxes in a *backdrop* layer behind a transparent-text textarea. Previously the two layers
+were different sizes (the textarea's `height:100%` resolved smaller than the absolutely-
+positioned backdrop), so their scroll ranges diverged and the boxes drifted off their
+words. Both layers are now the **exact same `absolute inset-0` box** with identical font,
+line-height, padding, `white-space`, `word-break` and `box-sizing`; the textarea's
+scrollbar is hidden so its text column width matches the backdrop on every platform; and
+the backdrop's `scrollTop/scrollLeft` are synced on `scroll`, `input`, window `resize` and
+via a `ResizeObserver`. Verified pixel-locked over 40+ lines. The editor's focus cue is now
+an on-brand **amber caret** instead of a focus-ring box (a ringed prose editor reads like an
+error state); form inputs elsewhere keep their accessible ring.
+
+**Perform — a real step sequencer.** The drum machine is now an editable **4×16 grid**
+(`useDrumEngine` + `StepSequencer`): click or click-drag to paint hits, scheduled on the
+**`Tone.Transport`** clock via a **`Tone.Sequence`** (with `transport.swing`), and a moving
+playhead drawn through **`Tone.Draw`** so it lands on the right visual frame. Three sampled
+kits (Acoustic / Punch / Lo-Fi) load as `Tone.Player`s per voice → per-voice gain (level +
+mute/solo) → lowpass → drum bus. Tempo, swing, clear, editable templates and **save/load of
+custom patterns to localStorage** round it out.
+
+**Perform — voice-led, softer chords.** On each chord change the engine generates the
+inversion/octave candidates and picks the **voicing that moves the least** from the sounding
+chord (sorted nearest-neighbour cost), then releases only departing notes and attacks only
+new ones, so common tones keep ringing (no hard cut). Six softened timbres: Grand Piano,
+**Electric Piano** (FM), Warm Strings, Felt Keys, plus **Soft Pad** and **Synth Pad**
+(`Tone.PolySynth` with fat unison oscillators) — all with slow-ish attacks, long releases,
+warm lowpass + reverb and gentler default velocity.
+
+**Takes — sharper lyric matching + a smoother trumpet.** The forced-alignment matcher now
+adds a compact **Metaphone** phonetic key beside Soundex + Levenshtein, so sung mis-hearings
+("fone"/"phone", "rite"/"right") still align; the windowed pointer tolerates skipped/repeated
+words and never leaps backward, and a clear **Pace-mode** badge appears when it can't hear
+you. The Live Trumpet **median-smooths** the worklet pitch and adds **note hysteresis** (a
+new note must hold ~2 frames before the sampler commits) to stop semitone chatter, and maps
+loudness to **velocity *and* brightness** (the lowpass opens as you sing louder) with
+portamento glide between committed notes.
+
+**Voice Score — tuned harder.** basic-pitch runs with solo-voice params (onset 0.5 / frame
+0.3 / `minNoteLength` 11 frames / `minFreq` 80 / `maxFreq` 1100 / inferOnsets + melodiaTrick);
+a **YIN pitch track over the same buffer cross-checks octaves** and conservatively repairs
+basic-pitch's octave flips; tiny same-pitch fragments are merged. Chords come from **chroma
+template matching** (a duration/confidence-weighted 12-bin chroma per window correlated
+against maj/min/7/maj7/m7/dim/sus templates) for a cleaner chord sheet, and tempo is found by
+**phase-aligning candidate beat grids to the onsets** (cos autocorrelation) so 2×/½× errors
+are avoided. Verified offline: C-major scale → C, A-minor melody → A minor, a 120 BPM grid →
+120, and a I–IV–V → "C F G".
+
 ## Tradeoffs & limitations
 
 - **Latency is real.** Live voice→trumpet and hand→sound have ~30–100 ms of unavoidable
@@ -328,6 +380,13 @@ Open **perform**. Up top, choose **Hands** or **Touch**.
   Chords** sliders work live and independently. Press **Record** to capture it.
 - **Touch (and mobile):** drag on the pad — left↔right is pitch, up↕down is brightness;
   multiple fingers = chords. Tap the large chord pads for the progression.
+- **Beat tab:** build the drum groove yourself. Pick a kit (Acoustic / Punch / Lo-Fi),
+  load a template and then **click or drag across the grid** to add/remove hits per
+  instrument. Set tempo + swing, mute/solo a row, adjust per-voice levels, and **Save** a
+  pattern to reuse later. Hit **Play beat** to hear it loop with a moving playhead.
+- **Sound tab:** the **Master / Drums / Chords** sliders move each layer independently and
+  click-free; pick a chord timbre (Grand Piano, Electric Piano, Warm Strings, Felt Keys,
+  Soft Pad, Synth Pad). Chords voice-lead automatically, so changes glide smoothly.
 
 ### Live Trumpet
 

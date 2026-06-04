@@ -787,20 +787,15 @@ export function PerformModal({
                         <span className="font-mono text-[9px] text-ink-mute/60">Slot {slot.slot}</span>
                         <button onClick={() => { playChord(slot); setTimeout(() => releaseChord(), 700); }} className="text-[9px] text-ink-mute hover:text-accent">preview</button>
                       </div>
-                      <div className="grid grid-cols-4 gap-1">
-                        <select value={slot.root} onChange={(e) => updateSlot(slot.slot, { root: e.target.value }, setChordSlots)} className="rounded bg-bg/60 px-1 py-0.5 font-mono text-[10px] text-ink-text">
+                      <div className="grid grid-cols-3 gap-1">
+                        <select value={slot.root} aria-label={`Slot ${slot.slot} root`} onChange={(e) => updateSlot(slot.slot, { root: e.target.value }, setChordSlots)} className="rounded bg-bg/60 px-1 py-1 font-mono text-[10px] text-ink-text">
                           {ROOTS.map((r) => <option key={r} value={r}>{r}</option>)}
                         </select>
-                        <select value={slot.quality} onChange={(e) => updateSlot(slot.slot, { quality: e.target.value as ChordQuality }, setChordSlots)} className="rounded bg-bg/60 px-1 py-0.5 font-mono text-[10px] text-ink-text">
+                        <select value={slot.quality} aria-label={`Slot ${slot.slot} quality`} onChange={(e) => updateSlot(slot.slot, { quality: e.target.value as ChordQuality }, setChordSlots)} className="rounded bg-bg/60 px-1 py-1 font-mono text-[10px] text-ink-text">
                           {QUALITIES.map((q) => <option key={q} value={q}>{q}</option>)}
                         </select>
-                        <select value={slot.octave} onChange={(e) => updateSlot(slot.slot, { octave: parseInt(e.target.value) }, setChordSlots)} className="rounded bg-bg/60 px-1 py-0.5 font-mono text-[10px] text-ink-text">
-                          {[2, 3, 4, 5].map((o) => <option key={o} value={o}>O{o}</option>)}
-                        </select>
-                        <select value={slot.inversion} onChange={(e) => updateSlot(slot.slot, { inversion: e.target.value as "root" | "first" | "second" }, setChordSlots)} className="rounded bg-bg/60 px-1 py-0.5 font-mono text-[10px] text-ink-text">
-                          <option value="root">Root</option>
-                          <option value="first">1st</option>
-                          <option value="second">2nd</option>
+                        <select value={slot.octave} aria-label={`Slot ${slot.slot} octave`} onChange={(e) => updateSlot(slot.slot, { octave: parseInt(e.target.value) }, setChordSlots)} className="rounded bg-bg/60 px-1 py-1 font-mono text-[10px] text-ink-text">
+                          {[2, 3, 4, 5].map((o) => <option key={o} value={o}>Oct {o}</option>)}
                         </select>
                       </div>
                     </div>
