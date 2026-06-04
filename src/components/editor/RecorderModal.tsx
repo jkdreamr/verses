@@ -1959,11 +1959,12 @@ function SmartTeleprompter({
             </button>
           ))}
         </div>
-        {isRecording && lyricFollowMode === "smart" ? (
+        {isRecording && lyricFollowMode === "smart" && (smartStatus === "fallback" || smartStatus === "unavailable") ? (
+          <span className="rounded-full bg-accent/15 px-2 py-0.5 font-mono text-[9px] uppercase tracking-wide text-accent" title="Couldn't hear you clearly — scrolling on a timer. Use the nudge arrows anytime.">
+            ◐ Pace mode
+          </span>
+        ) : isRecording && lyricFollowMode === "smart" ? (
           <span className={`font-mono text-[10px] ${statusColor()}`}>{statusLabel()}</span>
-        ) : null}
-        {isRecording && smartStatus === "unavailable" && lyricFollowMode === "smart" ? (
-          <span className="font-mono text-[10px] text-ink-mute">Smart follow unavailable — using pace</span>
         ) : null}
         {/* Nudge buttons */}
         <div className="ml-auto flex gap-1">

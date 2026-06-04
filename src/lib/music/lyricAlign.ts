@@ -16,6 +16,8 @@ export type LyricToken = {
   norm: string;
   /** Soundex code (phonetic bucket). */
   soundex: string;
+  /** Metaphone code (sharper phonetic bucket). */
+  metaphone: string;
   /** Line index this word belongs to. */
   line: number;
   /** Global word index. */
@@ -50,6 +52,64 @@ export function soundex(word: string): string {
   return (out + "000").slice(0, 4);
 }
 
+/**
+ * Metaphone (Philips 1990, compact). A sharper phonetic key than Soundex —
+ * catches sung mis-hearings Soundex misses (e.g. "fone"/"phone", "rite"/"right").
+ */
+export function metaphone(input: string): string {
+  const w = input.toUpperCase().replace(/[^A-Z]/g, "");
+  if (!w) return "";
+  const len = w.length;
+  const vowel = (c: string) => "AEIOU".includes(c);
+  let i = 0;
+  let out = "";
+  if (/^(AE|GN|KN|PN|WR)/.test(w)) i = 1;
+  else if (w[0] === "X") { out = "S"; i = 1; }
+  else if (w.startsWith("WH")) { out = "W"; i = 2; }
+  while (i < len && out.length < 6) {
+    const c = w[i];
+    const prev = w[i - 1] || "";
+    const next = w[i + 1] || "";
+    const next2 = w[i + 2] || "";
+    if (c === prev && c !== "C") { i++; continue; }
+    switch (c) {
+      case "A": case "E": case "I": case "O": case "U": if (i === 0) out += c; break;
+      case "B": if (!(i === len - 1 && prev === "M")) out += "B"; break;
+      case "C":
+        if (next === "I" && next2 === "A") out += "X";
+        else if (next === "H") { out += prev === "S" ? "K" : "X"; i++; }
+        else if ("IEY".includes(next)) { if (prev !== "S") out += "S"; }
+        else out += "K";
+        break;
+      case "D": if (next === "G" && "IEY".includes(next2)) { out += "J"; i += 2; } else out += "T"; break;
+      case "F": out += "F"; break;
+      case "G":
+        if (next === "H") { i++; }            // gh — treat as silent
+        else if (next === "N") { /* gn — silent g */ }
+        else if ("IEY".includes(next)) out += "J";
+        else out += "K";
+        break;
+      case "H": if (vowel(prev) && !vowel(next)) { /* silent */ } else if ("CSPTG".includes(prev)) { /* silent */ } else out += "H"; break;
+      case "J": out += "J"; break;
+      case "K": if (prev !== "C") out += "K"; break;
+      case "L": out += "L"; break;
+      case "M": out += "M"; break;
+      case "N": out += "N"; break;
+      case "P": if (next === "H") { out += "F"; i++; } else out += "P"; break;
+      case "Q": out += "K"; break;
+      case "R": out += "R"; break;
+      case "S": if (next === "H") { out += "X"; i++; } else if (next === "I" && (next2 === "O" || next2 === "A")) out += "X"; else out += "S"; break;
+      case "T": if (next === "H") { out += "0"; i++; } else if (next === "I" && (next2 === "O" || next2 === "A")) out += "X"; else out += "T"; break;
+      case "V": out += "F"; break;
+      case "W": case "Y": if (vowel(next)) out += c; break;
+      case "X": out += "KS"; break;
+      case "Z": out += "S"; break;
+    }
+    i++;
+  }
+  return out;
+}
+
 /** Levenshtein edit distance (bounded small inputs). */
 export function levenshtein(a: string, b: string): number {
   if (a === b) return 0;
@@ -77,7 +137,11 @@ export function wordsMatch(heard: string, target: LyricToken): boolean {
     const tol = len >= 7 ? 2 : 1;
     if (levenshtein(heard, target.norm) <= tol) return true;
   }
-  if (len >= 4 && soundex(heard) === target.soundex && target.soundex !== "") return true;
+  if (len >= 4) {
+    if (soundex(heard) === target.soundex && target.soundex !== "") return true;
+    const mh = metaphone(heard);
+    if (mh && mh === target.metaphone) return true;
+  }
   return false;
 }
 
@@ -90,7 +154,7 @@ export function tokenizeLyrics(lyrics: string): { tokens: LyricToken[]; lines: s
     for (const w of words) {
       const norm = normalizeWord(w);
       if (!norm) continue;
-      tokens.push({ raw: w, norm, soundex: soundex(norm), line: lineIdx, index: index++ });
+      tokens.push({ raw: w, norm, soundex: soundex(norm), metaphone: metaphone(norm), line: lineIdx, index: index++ });
     }
   });
   return { tokens, lines };

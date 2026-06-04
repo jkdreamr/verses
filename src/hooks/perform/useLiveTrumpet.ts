@@ -84,6 +84,11 @@ export function useLiveTrumpet({ micStream, enabled }: UseLiveTrumpetConfig) {
   const convChunksRef = useRef<Blob[]>([]);
   const convNotesRef = useRef<ConvNote[]>([]);
 
+  // pitch smoothing (median + note hysteresis to stop semitone chatter)
+  const pitchHistRef = useRef<number[]>([]);
+  const committedMidiRef = useRef(0);
+  const candidateRef = useRef<{ midi: number; count: number }>({ midi: 0, count: 0 });
+
   const brightnessRef = useRef(brightness);
   const portamentoRef = useRef(portamento);
   const snapRef = useRef({ enabled: snapEnabled, key: snapKey, scale: snapScale });
@@ -162,19 +167,45 @@ export function useLiveTrumpet({ micStream, enabled }: UseLiveTrumpetConfig) {
           if (!trumpet || modeRef.current !== "live") { setIsActive(false); return; }
 
           if (clarity >= CLARITY_GATE && freq >= MIN_FREQ && freq <= MAX_FREQ) {
-            let f = freq;
+            // 1) median-smooth the raw pitch (kills single-frame outliers / octave flips)
+            const hist = pitchHistRef.current;
+            hist.push(freq);
+            if (hist.length > 5) hist.shift();
+            const sorted = [...hist].sort((a, b) => a - b);
+            const med = sorted[Math.floor(sorted.length / 2)];
+
+            // 2) target note (optionally snapped to a key/scale)
+            let targetMidi = freqToMidi(med);
             if (snapRef.current.enabled) {
-              const m = snapToScale(freqToMidi(freq), keyToPc(snapRef.current.key), snapRef.current.scale);
-              f = midiToFreq(m);
+              targetMidi = snapToScale(targetMidi, keyToPc(snapRef.current.key), snapRef.current.scale);
             }
-            const velocity = Math.max(0.3, Math.min(1, rms * 7));
-            const port = 0.01 + portamentoRef.current * 0.25;
+
+            // 3) hysteresis — only commit to a new note once it's held ~2 frames,
+            //    so we don't chatter back and forth across a semitone boundary.
+            if (targetMidi === committedMidiRef.current) {
+              candidateRef.current = { midi: targetMidi, count: 0 };
+            } else if (candidateRef.current.midi === targetMidi) {
+              if (++candidateRef.current.count >= 2) committedMidiRef.current = targetMidi;
+            } else {
+              candidateRef.current = { midi: targetMidi, count: 1 };
+            }
+            const playMidi = committedMidiRef.current || targetMidi;
+            const f = midiToFreq(playMidi);
+
+            // 4) dynamics: loudness → velocity AND brightness (open the lowpass)
+            const expr = Math.min(1, rms * 7);
+            const velocity = Math.max(0.35, expr);
+            trumpet.setBrightnessHz(brightnessToHz(brightnessRef.current) + expr * 3200);
+            const port = 0.01 + portamentoRef.current * 0.3;
             trumpet.noteOn(f, velocity, port);
             setDetectedFreq(f);
-            setDetectedNote(midiToLabel(freqToMidi(f)));
+            setDetectedNote(midiToLabel(playMidi));
             setIsActive(true);
           } else {
             trumpet.noteOff();
+            pitchHistRef.current = [];
+            committedMidiRef.current = 0;
+            candidateRef.current = { midi: 0, count: 0 };
             setIsActive(false);
           }
         };
