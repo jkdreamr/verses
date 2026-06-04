@@ -269,6 +269,28 @@ Hum or sing a melody → notes → chords → sheet music (`src/lib/music/voiceS
 
 ## Latest refinements
 
+**Perform — a chord-placement grid that's on screen but never in the recording.**
+The camera view now shows a guide dividing it into the exact zones the hand maps to,
+so you know where to reach for each chord/note. It is **truthful** — boundaries come
+straight from the real `X→action` mapping (`floor(x · N)` over the progression slots in
+chord mode; the in-key scale ladder in lead mode), reflect the chosen key/scale, and the
+active zone lights up as your hand moves. The recording-exclusion uses a **two-canvas**
+design:
+
+- A **capture canvas** composites the mirrored camera frame + skeleton + note-trigger
+  flashes — this *is* the recorded picture. A Perform take now combines
+  `captureCanvas.captureStream(30)` with the engine's audio tap into one `MediaStream`
+  and records video (`has_video:true`); touch mode stays audio-only.
+- A **separate grid canvas** (a distinct DOM element, `pointer-events-none`, layered on
+  top) draws the zone lines, labels, active highlight and hand indicator. It is **never**
+  drawn onto the capture canvas, so the guide is impossible to capture — playback shows
+  camera + skeleton + flashes, never the grid. A live show/hide toggle (default on) and
+  `prefers-reduced-motion` are honoured; both canvases share one 0..1→width space so the
+  guide, the recorded picture and the hand indicator always align.
+
+The trumpet now exposes a sample-loading state (the panel + status bar show "loading
+samples…") so a take started before the samples arrive is never silently empty.
+
 A second pass focused on making each feature genuinely musician-usable.
 
 **Editor — highlights pinned to the text (scroll-sync).** Rhyme Lens draws its coloured
@@ -373,11 +395,14 @@ live in the Takes panel (play, rename, download, delete).
 
 Open **perform**. Up top, choose **Hands** or **Touch**.
 
-- **Hands:** Start camera. Keep both hands in frame. **Right hand** moves left↔right to
-  pick the note/chord (locked to your key) and up↕down for brightness; **pinch** to sound
-  it. **Left hand:** hold open palm to start the beat, fist to stop, pinch to mute. Set
+- **Hands:** Start camera. Keep both hands in frame. The on-screen **grid** shows which
+  zone triggers which chord/note (toggle it with **Grid on/off**, top-right — it's a live
+  guide and never appears in your recording). **Right hand** moves left↔right to pick the
+  note/chord (locked to your key) and up↕down for brightness; **pinch** to sound it.
+  **Left hand:** hold open palm to start the beat, fist to stop, pinch to mute. Set
   key/scale, chord progression and timbre in the side panel; the **Master / Drums /
-  Chords** sliders work live and independently. Press **Record** to capture it.
+  Chords** sliders work live and independently. Press **Record** to capture a video take
+  (camera + your playing, without the grid).
 - **Touch (and mobile):** drag on the pad — left↔right is pitch, up↕down is brightness;
   multiple fingers = chords. Tap the large chord pads for the progression.
 - **Beat tab:** build the drum groove yourself. Pick a kit (Acoustic / Punch / Lo-Fi),
