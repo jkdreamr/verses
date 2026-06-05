@@ -8,6 +8,7 @@ import {
   transcribeNeural,
   monophonicReduce,
   mergeShortFragments,
+  simplifyMelody,
   quantizeNotes,
   inferKey,
   inferChords,
@@ -733,7 +734,9 @@ export function VoiceToScoreModal({
   const runInference = useCallback(async (rawNotes: NoteEvent[]) => {
     const bpmVal = bpmRef.current > 0 ? bpmRef.current : estimateBpm(rawNotes);
     setDetectedBpm(bpmVal);
-    const finalNotes = quantizeNotes(rawNotes, QUANT_GRID, bpmVal);
+    // Quantize, then collapse to the melodic gist (join held/repeated pitches,
+    // absorb slivers) so a hummed tune reads as clear notes, not micro-events.
+    const finalNotes = simplifyMelody(quantizeNotes(rawNotes, QUANT_GRID, bpmVal));
     const k = inferKey(finalNotes);
     let ch: ChordHit[] = [];
     try { ch = await inferChords(finalNotes, bpmVal, 2, k.accidental); } catch { ch = []; }
@@ -755,6 +758,7 @@ export function VoiceToScoreModal({
         let nn = await transcribeNeural(buf, (p) => setNeuralProgress(p));
         nn = monophonicReduce(nn);
         nn = mergeShortFragments(nn, 0.08); // absorb slivers left by overlap-trimming
+        nn = simplifyMelody(nn);            // collapse to the melodic gist
         setNeuralProgress(0);
         if (nn.length > 0) { await runInference(nn); return; }
         toast("Neural model found no clear notes — used fast detection", "info");

@@ -71,9 +71,9 @@ export async function transcribeNeural(
 
   const poly = outputToNotesPoly(
     frames, onsets,
-    opts.onsetThresh ?? 0.5,   // onsetThreshold
+    opts.onsetThresh ?? 0.55,  // onsetThreshold — a touch higher = fewer note splits
     opts.frameThresh ?? 0.3,   // frameThreshold
-    opts.minNoteLen ?? 11,     // minNoteLength ≈ 120ms
+    opts.minNoteLen ?? 16,     // minNoteLength ≈ 180ms — drop ornamental slivers
     true,                      // inferOnsets
     1100,                      // maxFreq — top of the sung range
     80,                        // minFreq
@@ -109,6 +109,41 @@ export function mergeShortFragments(notes: NoteEvent[], minSec = 0.1): NoteEvent
     const prev = out[out.length - 1];
     if (prev && n.duration < minSec && Math.abs(n.midi - prev.midi) <= 1 &&
         n.startTime - (prev.startTime + prev.duration) < 0.08) {
+      prev.duration = Math.round((n.startTime + n.duration - prev.startTime) * 1000) / 1000;
+      continue;
+    }
+    out.push({ ...n });
+  }
+  return out;
+}
+
+/**
+ * Collapse a transcription to its melodic GIST. A hummed tune should read as a
+ * handful of clear notes, not dozens of micro-events: (1) join consecutive
+ * same-pitch notes separated by a small gap into one sustained note, and (2)
+ * absorb still-too-short slivers into the preceding note. Keeps the contour,
+ * drops the ornamentation.
+ */
+export function simplifyMelody(notes: NoteEvent[], minDur = 0.12, joinGap = 0.16): NoteEvent[] {
+  if (notes.length < 2) return notes;
+  const sorted = [...notes].sort((a, b) => a.startTime - b.startTime);
+
+  const joined: NoteEvent[] = [];
+  for (const n of sorted) {
+    const prev = joined[joined.length - 1];
+    const gap = prev ? n.startTime - (prev.startTime + prev.duration) : Infinity;
+    if (prev && prev.midi === n.midi && gap <= joinGap) {
+      prev.duration = Math.round((n.startTime + n.duration - prev.startTime) * 1000) / 1000;
+      prev.confidence = Math.max(prev.confidence, n.confidence);
+      continue;
+    }
+    joined.push({ ...n });
+  }
+
+  const out: NoteEvent[] = [];
+  for (const n of joined) {
+    const prev = out[out.length - 1];
+    if (n.duration < minDur && prev) {
       prev.duration = Math.round((n.startTime + n.duration - prev.startTime) * 1000) / 1000;
       continue;
     }
