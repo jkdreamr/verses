@@ -262,8 +262,16 @@ function PianoKeyboard({
   const isActive = (note: string | null) => !!note && activeNotes.some((n) => NOTE_NAMES[n % 12] === note);
 
   // Convert note name to MIDI number for the current octave
+  // Handle both sharp (#) and flat (b) notation
   const noteToMidi = (note: string) => {
-    const noteIndex = NOTE_NAMES.indexOf(note);
+    // Normalize flats to sharps for consistent MIDI mapping
+    const normalized = note
+      .replace("Db", "C#")
+      .replace("Eb", "D#")
+      .replace("Gb", "F#")
+      .replace("Ab", "G#")
+      .replace("Bb", "A#");
+    const noteIndex = NOTE_NAMES.indexOf(normalized);
     if (noteIndex === -1) return null;
     return octave * 12 + noteIndex;
   };
