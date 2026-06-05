@@ -505,13 +505,17 @@ export function useVocalFx({ micStream, enabled }: { micStream: MediaStream | nu
     if (micSourceRef.current && chainRef.current) chainRef.current.disconnectInput(micSourceRef.current);
     try { micSourceRef.current?.disconnect(); } catch { /* */ }
     workletRef.current = null; sinkRef.current = null; micSourceRef.current = null;
+    // Dispose the entire chain so reverb/delay tails and pitch-shift nodes
+    // are fully disconnected from engine.master immediately. Without this,
+    // switching to Photobooth (or any other mode) leaves the Tone nodes wired
+    // up and audible. chainRef is nulled so the next enable rebuilds fresh.
+    try { chainRef.current?.dispose(); } catch { /* */ }
+    chainRef.current = null;
     setReady(false);
   }
 
   useEffect(() => () => {
     teardown();
-    try { chainRef.current?.dispose(); } catch { /* */ }
-    chainRef.current = null;
   }, []);
 
   // ── public setters ──
