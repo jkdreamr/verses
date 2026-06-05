@@ -220,6 +220,33 @@ export function useVocalFx({ micStream, enabled }: { micStream: MediaStream | nu
     manualPitchRef.current = semitones;
     chainRef.current?.setMainPitch(semitones);
   }, []);
+
+  // Mode B: the OTHER hand performs the effects live — wash (space), a momentary
+  // harmony throw, or a "kill" (dry). Direct chain writes, layered on top of the
+  // rack's base settings, so there's no per-frame React state churn. Pass null to
+  // restore the base mix when the hand leaves.
+  const setLiveFx = useCallback((s: { space: number; harmony: boolean; bypass: boolean } | null) => {
+    const c = chainRef.current;
+    const p = paramsRef.current;
+    if (!c) return;
+    if (s == null) {
+      c.setReverb(p.reverbOn, p.reverbDecay, p.reverbMix);
+      c.setDelay(p.delayOn, p.delayTime, p.delayFeedback, p.delayMix);
+      c.setHarmony(p.harmonyOn, p.harmonyInterval, p.harmonyMix);
+      return;
+    }
+    if (s.bypass) {
+      c.setReverb(false, p.reverbDecay, 0);
+      c.setDelay(false, p.delayTime, p.delayFeedback, 0);
+      c.setHarmony(false, p.harmonyInterval, 0);
+      return;
+    }
+    const a = Math.max(0, Math.min(1, s.space));
+    c.setReverb(true, Math.max(p.reverbDecay, 2.4), Math.min(0.92, p.reverbMix + a * 0.55));
+    c.setDelay(true, p.delayTime, Math.min(0.85, p.delayFeedback + a * 0.2), Math.min(0.8, p.delayMix + a * 0.4));
+    const harmOn = p.harmonyOn || s.harmony;
+    c.setHarmony(harmOn, p.harmonyInterval, harmOn ? Math.max(p.harmonyMix, s.harmony ? 0.4 : 0) : 0);
+  }, []);
   const setManualActive = useCallback((active: boolean) => {
     manualActiveRef.current = active;
     const c = chainRef.current;
@@ -234,6 +261,6 @@ export function useVocalFx({ micStream, enabled }: { micStream: MediaStream | nu
   return useMemo(() => ({
     params, update, applyPreset, presetName,
     ready, loading, error, detectedNote, inputLevel, confidence, latencyMs,
-    setManualPitch, setManualActive, detectKey, detectingKey,
-  }), [params, update, applyPreset, presetName, ready, loading, error, detectedNote, inputLevel, confidence, latencyMs, setManualPitch, setManualActive, detectKey, detectingKey]);
+    setManualPitch, setManualActive, setLiveFx, detectKey, detectingKey,
+  }), [params, update, applyPreset, presetName, ready, loading, error, detectedNote, inputLevel, confidence, latencyMs, setManualPitch, setManualActive, setLiveFx, detectKey, detectingKey]);
 }

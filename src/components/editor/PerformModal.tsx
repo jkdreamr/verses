@@ -394,6 +394,11 @@ export function PerformModal({
   const pitchEuroRef = useRef(new OneEuroFilter({ minCutoff: 1.2, beta: 0.02 }));
   const vfxActiveRef = useRef(false);
   const [touchBend, setTouchBend] = useState(0); // touch pitch-bend in Mode B
+  // Left-hand live effects (Mode B): wash / harmony throw / kill.
+  type LiveFx = { present: boolean; space: number; harmony: boolean; bypass: boolean };
+  const leftFxRef = useRef<LiveFx>({ present: false, space: 0, harmony: false, bypass: false });
+  const leftFxActiveRef = useRef(false);
+  const [liveFxHud, setLiveFxHud] = useState<LiveFx>({ present: false, space: 0, harmony: false, bypass: false });
 
   // ── Mic calibration (noise floor → gates note-on for trumpet + Vocal FX) ──
   const [calibrating, setCalibrating] = useState(false);
@@ -581,23 +586,46 @@ export function PerformModal({
     }
   }, [busSetDrum, drumVol, playDrumsFn, stopDrums]);
 
-  // ── Mode B: right hand height → live vocal pitch shift ──
-  const { setManualPitch: vfxSetPitch, setManualActive: vfxSetActive } = vfx;
-  const handleVocalHands = useCallback((hand: Hand) => {
-    if (!hand.present) {
+  // ── Mode B: right hand bends pitch, left hand performs the effects ──
+  const { setManualPitch: vfxSetPitch, setManualActive: vfxSetActive, setLiveFx: vfxSetLiveFx } = vfx;
+  const handleVocalHands = useCallback((right: Hand, left: Hand) => {
+    // RIGHT → pitch (raise = up an octave, middle = unison, lower = down)
+    if (!right.present) {
       if (vfxActiveRef.current) { vfxSetActive(false); vfxActiveRef.current = false; }
       pitchEuroRef.current.reset();
       livePitchRef.current = 0;
-      return;
+    } else {
+      if (!vfxActiveRef.current) { vfxSetActive(true); vfxActiveRef.current = true; }
+      const raw = (0.5 - right.y) * 2 * VOCAL_PITCH_RANGE;
+      let semis = pitchEuroRef.current.filter(raw, performance.now());
+      if (vocalKeyLockRef.current) semis = snapShiftToScale(Math.round(semis), scaleRef.current);
+      livePitchRef.current = semis;
+      vfxSetPitch(semis);
     }
-    if (!vfxActiveRef.current) { vfxSetActive(true); vfxActiveRef.current = true; }
-    // hand top (y≈0) = up an octave, middle = unison, bottom = down an octave
-    const raw = (0.5 - hand.y) * 2 * VOCAL_PITCH_RANGE;
-    let semis = pitchEuroRef.current.filter(raw, performance.now());
-    if (vocalKeyLockRef.current) semis = snapShiftToScale(Math.round(semis), scaleRef.current);
-    livePitchRef.current = semis;
-    vfxSetPitch(semis);
-  }, [vfxSetActive, vfxSetPitch]);
+
+    // LEFT → effects: height = wash, pinch = harmony throw, fist = kill (dry)
+    if (left.present) {
+      const bypass = left.gesture === "fist";
+      const harmony = left.gesture === "pinch";
+      const space = bypass ? 0 : Math.max(0, Math.min(1, 1 - left.y));
+      vfxSetLiveFx({ space, harmony, bypass });
+      leftFxRef.current = { present: true, space, harmony, bypass };
+      leftFxActiveRef.current = true;
+    } else if (leftFxActiveRef.current) {
+      vfxSetLiveFx(null);
+      leftFxActiveRef.current = false;
+      leftFxRef.current = { present: false, space: 0, harmony: false, bypass: false };
+    }
+  }, [vfxSetActive, vfxSetPitch, vfxSetLiveFx]);
+
+  // If the camera stops mid-performance the loop can't release the hand state, so
+  // restore the base mix / pitch here.
+  useEffect(() => {
+    if (perfMode === "vocal" && !camActive) {
+      if (leftFxActiveRef.current) { vfxSetLiveFx(null); leftFxActiveRef.current = false; leftFxRef.current = { present: false, space: 0, harmony: false, bypass: false }; }
+      if (vfxActiveRef.current) { vfxSetActive(false); vfxActiveRef.current = false; livePitchRef.current = 0; }
+    }
+  }, [perfMode, camActive, vfxSetActive, vfxSetLiveFx]);
 
   // ── MediaPipe loader ──
   const loadMediaPipe = useCallback(async () => {
@@ -674,7 +702,7 @@ export function PerformModal({
       handleRight(nr);
       handleLeft(nl);
     } else {
-      handleVocalHands(nr);
+      handleVocalHands(nr, nl);
     }
   }, [handleLeft, handleRight, handleVocalHands, releaseChord]);
 
@@ -901,10 +929,13 @@ export function PerformModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [perfMode]);
 
-  // Throttled HUD mirror of the live hand-pitch (avoids per-frame re-renders).
+  // Throttled HUD mirror of the live hand state (avoids per-frame re-renders).
   useEffect(() => {
     if (perfMode !== "vocal") return;
-    const id = window.setInterval(() => setLiveShift(livePitchRef.current), 100);
+    const id = window.setInterval(() => {
+      setLiveShift(livePitchRef.current);
+      setLiveFxHud({ ...leftFxRef.current });
+    }, 100);
     return () => window.clearInterval(id);
   }, [perfMode]);
 
@@ -1084,8 +1115,17 @@ export function PerformModal({
 
               {!camActive && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-bg/92 px-6 text-center">
-                  <p className="text-sm text-ink-text/80">Right hand plays {rightMode === "lead" ? "the melody" : "chords"}; left hand runs the beat.</p>
-                  <p className="text-[12px] text-ink-mute">Pinch to sound a note. Keep both hands in frame.</p>
+                  {perfMode === "vocal" ? (
+                    <>
+                      <p className="text-sm text-ink-text/80">Sing into the mic. <span className="text-accent">Right hand</span> bends your pitch; <span className="text-accent">left hand</span> plays the effects.</p>
+                      <p className="text-[12px] text-ink-mute">Raise the left hand for wash, pinch for harmony, fist to go dry. Keep both hands in frame. 🎧 use headphones.</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-sm text-ink-text/80">Right hand plays {rightMode === "lead" ? "the melody" : "chords"}; left hand runs the beat.</p>
+                      <p className="text-[12px] text-ink-mute">Pinch to sound a note. Keep both hands in frame.</p>
+                    </>
+                  )}
                   <button onClick={startCamera} className="glow-accent-sm mt-1 rounded-lg bg-accent/15 px-4 py-2 text-[13px] font-medium text-accent transition-colors hover:bg-accent/25">
                     Start camera
                   </button>
@@ -1155,7 +1195,7 @@ export function PerformModal({
                 </div>
               </div>
               <p className="max-w-xs text-[11px] leading-relaxed text-ink-mute/70">
-                Shape autotune, harmony, delay &amp; reverb in the <span className="text-accent">Voice</span> tab. Switch to <span className="text-accent">Hands</span> to bend pitch with your hand. 🎧 use headphones.
+                Shape autotune, harmony, delay &amp; reverb in the <span className="text-accent">Voice</span> tab. Switch to <span className="text-accent">Hands</span> to bend pitch with one hand and play the effects with the other. 🎧 use headphones.
               </p>
             </div>
           ) : (
@@ -1188,13 +1228,22 @@ export function PerformModal({
                 <div className="text-[9px] uppercase tracking-wider text-ink-mute/50">Voice</div>
                 <div className="truncate font-serif text-2xl font-semibold text-ink-text">{vfx.detectedNote ?? "—"}</div>
               </div>
-              <div className="min-w-[64px]">
+              <div className="min-w-[58px]">
                 <div className="text-[9px] uppercase tracking-wider text-ink-mute/50">Shift</div>
                 <div className="font-mono text-lg font-semibold tabular-nums text-accent">
                   {liveShift > 0 ? "+" : ""}{liveShift.toFixed(liveShift % 1 === 0 ? 0 : 1)}
                   <span className="ml-0.5 text-[10px] text-ink-mute">st</span>
                 </div>
               </div>
+              {liveFxHud.present && (
+                <div className="min-w-[58px]">
+                  <div className="text-[9px] uppercase tracking-wider text-ink-mute/50">Hand FX</div>
+                  <div className={`font-mono text-lg font-semibold tabular-nums ${liveFxHud.bypass ? "text-danger" : "text-accent"}`}>
+                    {liveFxHud.bypass ? "DRY" : `${Math.round(liveFxHud.space * 100)}%`}
+                    {!liveFxHud.bypass && liveFxHud.harmony && <span className="ml-1 text-[10px] text-accent">+harm</span>}
+                  </div>
+                </div>
+              )}
               <div className="flex flex-1 flex-wrap items-center justify-end gap-1.5">
                 {vfx.params.autotuneOn && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] text-accent">Auto-tune</span>}
                 {vfx.params.harmonyOn && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] text-accent">Harmony</span>}
@@ -1394,22 +1443,44 @@ export function PerformModal({
 
             {tab === "guide" && (
               <div className="space-y-4 text-[12px] leading-relaxed text-ink-mute">
-                <div>
-                  <div className="mb-1.5 text-[9px] uppercase tracking-widest text-ink-mute/50">Right hand — melody / chords</div>
-                  <ul className="space-y-1">
-                    <li><span className="text-accent">Move left↔right</span> — pick the note / chord (locked to your key)</li>
-                    <li><span className="text-accent">Move up↕down</span> — brightness &amp; volume</li>
-                    <li><span className="text-accent">Pinch</span> — sound it; release to stop</li>
-                  </ul>
-                </div>
-                <div>
-                  <div className="mb-1.5 text-[9px] uppercase tracking-widest text-ink-mute/50">Left hand — beat</div>
-                  <ul className="space-y-1">
-                    <li><span className="text-[#7aa2f7]">Open palm</span> (hold) — start the loop</li>
-                    <li><span className="text-[#7aa2f7]">Fist</span> (hold) — stop</li>
-                    <li><span className="text-[#7aa2f7]">Pinch</span> — mute / unmute</li>
-                  </ul>
-                </div>
+                {perfMode === "vocal" ? (
+                  <>
+                    <div>
+                      <div className="mb-1.5 text-[9px] uppercase tracking-widest text-ink-mute/50">Right hand — pitch</div>
+                      <ul className="space-y-1">
+                        <li><span className="text-accent">Raise / lower</span> — bend your voice up &amp; down</li>
+                        <li><span className="text-accent">Key-lock</span> — snaps the bend to your scale (Voice tab)</li>
+                      </ul>
+                    </div>
+                    <div>
+                      <div className="mb-1.5 text-[9px] uppercase tracking-widest text-ink-mute/50">Left hand — effects</div>
+                      <ul className="space-y-1">
+                        <li><span className="text-[#7aa2f7]">Raise / lower</span> — more / less wash (reverb + echo)</li>
+                        <li><span className="text-[#7aa2f7]">Pinch</span> — throw in a harmony</li>
+                        <li><span className="text-[#7aa2f7]">Fist</span> — kill the FX (go dry)</li>
+                      </ul>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <div className="mb-1.5 text-[9px] uppercase tracking-widest text-ink-mute/50">Right hand — melody / chords</div>
+                      <ul className="space-y-1">
+                        <li><span className="text-accent">Move left↔right</span> — pick the note / chord (locked to your key)</li>
+                        <li><span className="text-accent">Move up↕down</span> — brightness &amp; volume</li>
+                        <li><span className="text-accent">Pinch</span> — sound it; release to stop</li>
+                      </ul>
+                    </div>
+                    <div>
+                      <div className="mb-1.5 text-[9px] uppercase tracking-widest text-ink-mute/50">Left hand — beat</div>
+                      <ul className="space-y-1">
+                        <li><span className="text-[#7aa2f7]">Open palm</span> (hold) — start the loop</li>
+                        <li><span className="text-[#7aa2f7]">Fist</span> (hold) — stop</li>
+                        <li><span className="text-[#7aa2f7]">Pinch</span> — mute / unmute</li>
+                      </ul>
+                    </div>
+                  </>
+                )}
                 <div className="rounded-lg bg-surface-2/60 p-2.5 text-[11px] text-ink-mute/70">
                   No camera? Switch to <span className="text-accent">Touch</span> up top — same instrument with your fingers.
                 </div>
