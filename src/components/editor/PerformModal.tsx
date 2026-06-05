@@ -186,6 +186,63 @@ function drawChordGrid(
   }
 }
 
+// ─── Pitch-ladder overlay for Mode B (live only — never recorded) ─────────────
+function drawPitchLadder(
+  ctx: CanvasRenderingContext2D,
+  w: number, h: number,
+  semis: number, range: number,
+  scaleId: ScaleId, keyLock: boolean,
+  rh: Hand | null,
+) {
+  ctx.clearRect(0, 0, w, h);
+  const set = scaleIntervals(scaleId);
+  const inScale = (s: number) => set.includes(((s % 12) + 12) % 12);
+  const yFor = (s: number) => h * (1 - (s + range) / (2 * range));
+
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  for (let s = -range; s <= range; s++) {
+    if (keyLock && !inScale(s) && s !== 0) continue;
+    const y = yFor(s);
+    ctx.strokeStyle = s === 0 ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.09)";
+    ctx.lineWidth = s === 0 ? 1.5 : 1;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+    ctx.font = "11px ui-monospace, monospace";
+    ctx.fillStyle = "rgba(255,255,255,0.4)";
+    ctx.fillText(s === 0 ? "0" : s > 0 ? `+${s}` : `${s}`, 8, y - 3);
+  }
+
+  // active shift band + line
+  const ay = yFor(Math.max(-range, Math.min(range, semis)));
+  ctx.fillStyle = "rgba(201,168,76,0.16)";
+  ctx.fillRect(0, ay - 11, w, 22);
+  ctx.strokeStyle = "rgba(201,168,76,0.9)";
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(0, ay); ctx.lineTo(w, ay); ctx.stroke();
+  ctx.textAlign = "right";
+  ctx.font = "600 14px Inter, system-ui, sans-serif";
+  ctx.fillStyle = "rgba(201,168,76,1)";
+  ctx.fillText(`${semis > 0 ? "+" : ""}${semis % 1 === 0 ? semis : semis.toFixed(1)} st`, w - 10, ay - 6);
+
+  // hand marker
+  if (rh && rh.present) {
+    const cx = rh.x * w;
+    ctx.beginPath();
+    ctx.arc(cx, ay, Math.max(18, w * 0.035), 0, 2 * Math.PI);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(201,168,76,0.85)";
+    ctx.fillStyle = "rgba(201,168,76,0.18)";
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  ctx.textAlign = "right";
+  ctx.font = "10px Inter, system-ui, sans-serif";
+  ctx.fillStyle = "rgba(255,255,255,0.32)";
+  ctx.fillText("raise hand ↑", w - 10, 16);
+  ctx.fillText("lower hand ↓", w - 10, h - 12);
+}
+
 // ─── Piano display (chord tones) ─────────────────────────────────────────────
 
 function PianoKeyboard({ activeNotes }: { activeNotes: number[] }) {
@@ -335,6 +392,7 @@ export function PerformModal({
   useEffect(() => { vocalKeyLockRef.current = vocalKeyLock; }, [vocalKeyLock]);
   const pitchEuroRef = useRef(new OneEuroFilter({ minCutoff: 1.2, beta: 0.02 }));
   const vfxActiveRef = useRef(false);
+  const [touchBend, setTouchBend] = useState(0); // touch pitch-bend in Mode B
 
   // Zone labels for the live chord/note grid — derived from the REAL X→action
   // mapping so the guide is truthful (chord mode: progression slots; lead mode:
@@ -698,6 +756,8 @@ export function PerformModal({
             ? Math.min(labels.length - 1, Math.max(0, Math.floor(rh.x * labels.length)))
             : -1;
           drawChordGrid(gctx, cw, ch, labels, activeIdx, rh, reducedMotionRef.current, now);
+        } else if (showGridRef.current && perfModeRef.current === "vocal") {
+          drawPitchLadder(gctx, cw, ch, livePitchRef.current, VOCAL_PITCH_RANGE, scaleRef.current, vocalKeyLockRef.current, rightHandRef.current);
         } else {
           gctx.clearRect(0, 0, grid.width, grid.height);
         }
@@ -1050,6 +1110,39 @@ export function PerformModal({
               )}
 
               {showLyrics && <LyricTeleprompter smart={smart} onClose={toggleLyrics} />}
+            </div>
+          ) : perfMode === "vocal" ? (
+            <div className="relative flex flex-1 flex-col items-center justify-center gap-7 overflow-y-auto p-6 text-center">
+              {showLyrics && <LyricTeleprompter smart={smart} onClose={toggleLyrics} />}
+              <div>
+                <div className="text-[10px] uppercase tracking-[0.2em] text-ink-mute/50">You&apos;re singing</div>
+                <div className="font-serif text-6xl font-semibold text-ink-text">{vfx.detectedNote ?? "—"}</div>
+              </div>
+              {/* input meter */}
+              <div className="h-2 w-60 max-w-[70%] overflow-hidden rounded-full bg-surface-2" aria-hidden>
+                <div className="h-full rounded-full bg-success/70 transition-[width] duration-75" style={{ width: `${Math.round(Math.min(1, vfx.inputLevel) * 100)}%` }} />
+              </div>
+              {/* touch pitch bend */}
+              <div className="w-72 max-w-[80%]">
+                <div className="mb-1 flex items-center justify-between text-[11px] text-ink-mute">
+                  <span>Pitch bend</span>
+                  <span className="font-mono tabular-nums">{touchBend > 0 ? "+" : ""}{touchBend} st</span>
+                </div>
+                <input
+                  type="range" min={-12} max={12} step={1} value={touchBend}
+                  onChange={(e) => { const v = parseInt(e.target.value); setTouchBend(v); livePitchRef.current = v; vfx.setManualActive(true); vfx.setManualPitch(v); }}
+                  className="slider-premium w-full" aria-label="Pitch bend in semitones"
+                />
+                <div className="mt-2 flex items-center justify-center gap-2">
+                  <button
+                    onClick={() => { setTouchBend(0); livePitchRef.current = 0; vfx.setManualActive(false); vfx.setManualPitch(0); }}
+                    className="rounded-md bg-surface-2 px-3 py-1 text-[11px] text-ink-mute transition-colors hover:text-ink-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7aa2f7]"
+                  >↺ Back to auto-tune</button>
+                </div>
+              </div>
+              <p className="max-w-xs text-[11px] leading-relaxed text-ink-mute/70">
+                Shape autotune, harmony, delay &amp; reverb in the <span className="text-accent">Voice</span> tab. Switch to <span className="text-accent">Hands</span> to bend pitch with your hand. 🎧 use headphones.
+              </p>
             </div>
           ) : (
             <div className="relative flex-1 overflow-y-auto p-4 sm:p-6">
