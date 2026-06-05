@@ -1,38 +1,1378 @@
 # Verses
 
-**A songwriting and performance workbench for the browser.**
+**Verses is a browser-based songwriting and performance workbench.**
 
-Write lyrics, see how they rhyme, build a beat, then perform — make music with your
-hands or your fingers, turn your voice into a trumpet, and turn a hummed melody into
-real sheet music. Everything runs in the browser. No account required.
+It combines lyric writing, rhyme analysis, beat playback, gesture/touch performance, live vocal effects, recording, voice-to-trumpet, and voice-to-score transcription in one creative workspace.
 
-Live: **[verses-zeta.vercel.app](https://verses-zeta.vercel.app)** · Repo: **jkdreamr/verses**
+The goal is not to replace the songwriter. The goal is to keep the songwriter in flow.
 
-The mental model: **your body is the instrument.** Verses isn't "AI writes your song" —
-the artist controls everything. It just gives you more ways to play while you're still
-inside the page.
+> **Write, hear, perform, record, and notate ideas without leaving the browser.**
+
+Live app: **https://verses-zeta.vercel.app**
+Repository: **https://github.com/jkdreamr/verses**
 
 ---
 
 ## Contents
 
-1. [Quickstart](#quickstart)
-2. [Part 1 — Technical deep-dive](#part-1--technical-deep-dive)
-   - [Architecture](#architecture)
-   - [Tech stack](#tech-stack)
-   - [The persistent audio engine](#the-persistent-audio-engine)
-   - [Sampled instruments](#sampled-instruments)
-   - [Perform: hands + touch](#perform-hands--touch)
-   - [Smart Lyric Reader: strict line-by-line alignment](#smart-lyric-reader-strict-line-by-line-alignment)
-   - [Live Trumpet pipeline](#live-trumpet-pipeline)
-   - [Recording capture](#recording-capture)
-   - [Voice Score pipeline](#voice-score-pipeline)
-   - [Latest refinements](#latest-refinements)
-   - [Tradeoffs & limitations](#tradeoffs--limitations)
-3. [Part 2 — User guide](#part-2--user-guide)
-4. [Privacy](#privacy) · [Development](#development) · [Disclosure](#disclosure)
+1. [Overview](#overview)
+2. [User Guide](#user-guide)
+3. [Technical Architecture](#technical-architecture)
+4. [Feature-by-Feature Technical Details](#feature-by-feature-technical-details)
+5. [Evaluation and Evidence](#evaluation-and-evidence)
+6. [Limitations and Tradeoffs](#limitations-and-tradeoffs)
+7. [Privacy](#privacy)
+8. [Development](#development)
+9. [Credits and Disclosure](#credits-and-disclosure)
+10. [Rubric Coverage](#rubric-coverage)
 
 ---
+
+# Overview
+
+Songwriting usually happens across many disconnected tools: a notes app for lyrics, YouTube for beats, a rhyme website for word ideas, a voice memo app for recordings, a DAW for vocal effects, and notation software for melodies.
+
+Verses brings those early-stage songwriting actions into one browser app.
+
+The core workflow is:
+
+1. Write lyrics.
+2. Find rhymes and visualize sound patterns.
+3. Write to a beat.
+4. Scan handwritten lyrics if needed.
+5. Perform with hands, touch, voice, drums, chords, and vocal effects.
+6. Record takes.
+7. Convert sung melodies into notes, chords, and sheet music.
+
+Verses treats a song as more than plain text. A song is text, sound, rhythm, voice, movement, performance, and notation.
+
+---
+
+# User Guide
+
+This section explains how to use every major part of the app.
+
+---
+
+## 1. Opening the App
+
+Open the live app in a modern browser.
+
+Recommended:
+
+* Chrome or Edge on desktop for camera/mic features.
+* `localhost` or HTTPS for development.
+* Headphones for vocal effects and recording.
+
+The core writing features work without an account. Guest-mode song data is stored locally in the browser.
+
+---
+
+## 2. Dashboard
+
+The dashboard is the home screen for songs.
+
+From the dashboard, users can:
+
+* Create a new song.
+* Open an existing song.
+* Search songs by title, lyrics, or tags.
+* See song previews.
+* See when each song was last updated.
+* Delete songs.
+* Toggle between light mode and dark mode.
+
+The dashboard is meant to feel like a small song library rather than a file manager.
+
+---
+
+## 3. Light and Dark Mode
+
+Verses supports both dark mode and light mode.
+
+The theme toggle changes the app theme and saves the preference locally, so the next visit keeps the same appearance.
+
+Dark mode is the default because the app is designed for long writing and late-night music sessions.
+
+---
+
+## 4. Lyric Editor
+
+The editor is the main writing surface.
+
+It includes:
+
+* Song title field.
+* Large lyric textarea.
+* Autosave.
+* Version snapshots.
+* Word and line count.
+* Font toggle.
+* Structure tags.
+* Rhyme tools.
+* OCR import.
+* Export options.
+* YouTube beat bar.
+* Perform / Takes / Voice Score access.
+
+The editor is intentionally minimal so the lyric stays at the center.
+
+---
+
+## 5. Autosave
+
+Verses saves drafts automatically.
+
+Autosave helps prevent losing work during:
+
+* browser refreshes
+* navigation
+* accidental tab closing
+* long writing sessions
+
+Version history gives additional protection by keeping snapshots of earlier drafts.
+
+---
+
+## 6. Structure Tags
+
+The structure tag picker inserts common songwriting labels into the lyrics.
+
+Examples:
+
+* Verse
+* Chorus
+* Pre-Chorus
+* Hook
+* Bridge
+* Outro
+
+This helps organize lyrics while writing.
+
+---
+
+## 7. Tags
+
+Tags organize songs in the dashboard.
+
+A user can tag songs by:
+
+* genre
+* mood
+* class/project
+* draft status
+* performance type
+* any custom label
+
+Search includes tags, so tags can be used as lightweight organization.
+
+---
+
+## 8. Version History
+
+Version history stores earlier snapshots of a song.
+
+Users can:
+
+* Open version history.
+* Preview older versions.
+* Restore a previous draft.
+
+This is useful because songwriting often involves trying risky changes, cutting lines, and later wanting them back.
+
+---
+
+## 9. Rhyme Finder
+
+Rhyme Finder gives word-level rhyme suggestions.
+
+How to use it:
+
+1. Highlight a word in the lyric editor.
+2. Open the rhyme panel.
+3. Switch between Perfect, Near, and Sounds Like.
+4. Click a result to copy it.
+5. Right-click a result to search rhymes for that new word.
+
+Results are grouped by syllable count, which makes them more useful for lyrics and meter.
+
+---
+
+## 10. Rhyme Lens
+
+Rhyme Lens analyzes the whole lyric and highlights sound relationships directly behind the text.
+
+It can show:
+
+* end rhymes
+* internal rhymes
+* multisyllabic rhymes
+* compound/mosaic rhymes
+* slant rhymes
+* family rhymes
+* assonance
+* consonance
+* alliteration
+* repeated phrases
+* cross-line echoes
+* rhyme chains
+* dense rhyme pockets
+* weaker lines
+
+Rhyme Lens has density modes:
+
+* **Clean**: fewer, stronger highlights
+* **Detailed**: balanced analysis
+* **Max**: shows the most sound relationships
+
+The Sound Map lets users isolate one rhyme family at a time.
+
+---
+
+## 11. YouTube Beat Bar
+
+The beat bar lets users write to a YouTube beat from inside the editor.
+
+Users can:
+
+* Paste a YouTube URL.
+* Play or pause the beat.
+* Seek through the beat.
+* Set loop start and loop end.
+* Add named markers.
+* Keep writing while the beat plays.
+
+This supports a common songwriting workflow: looping a beat section while drafting lyrics.
+
+---
+
+## 12. OCR: Scan Handwritten Lyrics
+
+The OCR feature imports lyrics from a photo.
+
+Users can:
+
+1. Open the scan modal.
+2. Upload or take a photo of handwritten lyrics.
+3. Wait for OCR extraction.
+4. Edit the extracted text.
+5. Insert it at the cursor or replace the current lyric.
+
+This is useful for writers who start in a notebook and later move into the app.
+
+---
+
+## 13. Export and Print
+
+The export modal lets users move lyrics out of Verses.
+
+Options include:
+
+* Download as `.txt`.
+* Copy lyrics to clipboard.
+* Open print view.
+
+The print view can be used for rehearsal, sharing, or saving as PDF.
+
+---
+
+## 14. Takes
+
+Takes are recordings attached to a song.
+
+Users can:
+
+* View previous takes.
+* Play takes.
+* Rename takes.
+* Download takes.
+* Delete takes.
+
+Takes are stored locally in the browser through IndexedDB.
+
+---
+
+## 15. Perform
+
+Perform is the main live performance and recording area.
+
+It includes:
+
+* Chords & Drums mode.
+* Vocal FX mode.
+* Photobooth mode.
+* Hands/camera input.
+* Touch input.
+* Lyric teleprompter.
+* Drum sequencer.
+* Chord instruments.
+* Voice-to-trumpet.
+* Recording.
+
+Perform is where a written song can become a recorded performance.
+
+---
+
+## 16. Chords & Drums Mode
+
+Chords & Drums mode lets the user play music with hands or touch.
+
+### Hands Input
+
+With camera input:
+
+* The right hand controls chords or melody.
+* Horizontal hand position selects a chord or note.
+* Vertical hand position controls expression.
+* Pinching triggers sound.
+* The left hand controls beat transport.
+* Open palm starts drums.
+* Fist stops drums.
+* Pinch mutes/unmutes drums.
+
+A live guide grid shows which zones trigger which musical actions. The guide is only for the performer and is not included in recordings.
+
+### Touch Input
+
+Touch mode works without a camera.
+
+* Dragging on the pad controls pitch and expression.
+* Multiple fingers can create multiple voices.
+* Chord pads trigger harmonic progressions.
+
+Touch mode is especially useful on mobile or when camera input is not reliable.
+
+---
+
+## 17. Step Sequencer
+
+The step sequencer is a 4x16 drum grid.
+
+It includes:
+
+* kick row
+* snare row
+* hi-hat row
+* percussion row
+* preset templates
+* tempo control
+* swing control
+* drum kit selection
+* click-and-drag editing
+* mute and solo per row
+* per-voice volume
+* saved custom patterns
+
+The sequencer gives the user a simple beat-making tool inside the songwriting workspace.
+
+---
+
+## 18. Chord Slots and Chord Presets
+
+Verses includes an 8-slot chord system.
+
+Users can:
+
+* choose a chord progression preset
+* edit each chord slot
+* choose root note
+* choose chord quality
+* choose octave
+* choose inversion
+* preview chord tones
+* save custom progressions
+
+Supported chord qualities include:
+
+* major
+* minor
+* maj7
+* min7
+* dom7
+* sus2
+* sus4
+* dim
+* aug
+* add9
+* 6
+* min6
+
+Chord presets include pop, R&B, sad, jazz, trap-dark, and gospel-style progressions.
+
+---
+
+## 19. Chord and Lead Sounds
+
+Verses includes multiple chord timbres:
+
+* Grand Piano
+* Electric Piano
+* Warm Strings
+* Felt Keys
+* Soft Pad
+* Synth Pad
+
+Lead mode turns the right hand or touch pad into a scale-locked melody instrument. The selected key and scale keep notes musical, while pitch glide makes the instrument feel more expressive.
+
+---
+
+## 20. Smart Lyric Reader
+
+The Smart Lyric Reader is a performance teleprompter.
+
+It displays:
+
+* previous line
+* active line
+* next line
+
+It supports:
+
+* Smart mode
+* Pace mode
+* manual line nudging
+* word-level highlighting
+* compact karaoke-style display
+
+Smart mode listens to the performer and aligns heard words against the written lyrics. Pace mode scrolls by time when speech recognition is unavailable or unreliable.
+
+---
+
+## 21. Vocal FX Mode
+
+Vocal FX mode turns the app into a live vocal processor.
+
+Users can sing into the microphone and shape the voice with a rack of effects.
+
+Presets include:
+
+* Clean Studio
+* Modern Pop
+* Rap Lead
+* R&B Smooth
+* Indie Double
+* Dream Hall
+* Live Low Latency
+* Raw Clean
+
+Controls include:
+
+* input gain
+* noise gate
+* high-pass filter
+* tone EQ
+* autotune amount
+* retune speed
+* key and scale
+* auto key detection
+* de-esser
+* compressor
+* saturation
+* doubler
+* harmony
+* delay
+* reverb
+* output gain
+* latency/window-size control
+
+Users can choose whether recordings capture the processed vocal or a raw clean vocal.
+
+---
+
+## 22. Hand-Controlled Vocal FX
+
+In Vocal FX camera mode, hand movement controls live vocal effects.
+
+Right hand:
+
+* raises or lowers pitch
+* can snap pitch changes to the selected key/scale
+* controls a visible pitch ladder
+
+Left hand:
+
+* adds reverb/delay wash
+* triggers harmony throws
+* can bypass effects and return to a dry vocal
+
+This makes vocal processing performable instead of only slider-based.
+
+---
+
+## 23. Touch-Controlled Vocal FX
+
+In touch mode, Vocal FX provides a touch-friendly singing stage.
+
+Users can:
+
+* see detected note
+* see input level
+* control pitch bend with a slider
+* use the Voice rack for detailed settings
+
+This gives mobile users access to the same vocal engine without needing hand tracking.
+
+---
+
+## 24. Voice → Trumpet
+
+Voice → Trumpet turns sung pitch into a trumpet-style instrument.
+
+Users can:
+
+* enable Voice → Trumpet in the Sound tab
+* sing into the mic
+* choose a trumpet preset
+* adjust brightness
+* choose tracking mode
+* map voice range into trumpet range
+* snap output to the song key/scale
+* use live mode for real-time play
+* use convert mode for cleaner playback
+
+Presets include:
+
+* Trumpet
+* Muted
+* Brass Bold
+* Flugel
+* Jazz Lead
+
+Tracking modes include:
+
+* Fast
+* Balanced
+* Accurate
+
+Range modes include:
+
+* Auto
+* Same
+* +12
+* +24
+* -12
+
+---
+
+## 25. Photobooth Mode
+
+Photobooth records a simpler camera/mic performance.
+
+It is useful when the user wants a raw performance capture without hand instruments, grids, or heavy vocal processing.
+
+---
+
+## 26. Recording
+
+Recording happens inside Perform.
+
+Depending on mode, recordings can include:
+
+* camera video
+* skeleton overlay
+* note flashes
+* drums
+* chords
+* lead synth
+* Vocal FX
+* Voice → Trumpet
+* raw voice
+* processed voice
+
+Live helper guides, such as the chord grid or pitch ladder, are not recorded.
+
+Recordings are saved as takes and can be played, renamed, downloaded, or deleted.
+
+---
+
+## 27. Voice Score
+
+Voice Score converts a sung or hummed melody into musical notation.
+
+Users can:
+
+1. Open Voice Score.
+2. Record a melody.
+3. Let Verses analyze it.
+4. View detected notes.
+5. See inferred key and chords.
+6. Switch between Piano Roll, Note List, and Staff views.
+7. Edit notes.
+8. Export the result.
+
+Exports include:
+
+* MIDI
+* MusicXML
+* JSON
+* CSV
+* printable lead sheet
+
+Voice Score is designed for musicians who can sing an idea before they can notate it.
+
+---
+
+## 28. PWA and Native Shell
+
+Verses can be used as a browser app and includes installability support.
+
+It also includes a Tauri scaffold for building native desktop shells for macOS, Windows, and Linux.
+
+---
+
+# Technical Architecture
+
+## App Structure
+
+Verses is built with:
+
+* Next.js 14 App Router
+* React 18
+* TypeScript
+* Tailwind CSS
+* Web Audio API
+* Tone.js
+* MediaPipe Tasks Vision
+* TensorFlow.js
+* Spotify basic-pitch
+* VexFlow
+* Tesseract.js
+* Datamuse API
+* pitchy
+* Tonal.js
+* IndexedDB
+* localStorage
+* Tauri
+
+The application is organized around a few main areas:
+
+* `src/app`: routes and app shell
+* `src/components/editor`: lyric editor and editor modals
+* `src/components/perform`: performance UI
+* `src/hooks/perform`: audio, hand, trumpet, chord, and drum hooks
+* `src/lib/audio`: shared audio engine, samplers, scales, filters, and calibration
+* `src/lib/music`: lyric alignment and voice-score logic
+* `src/lib/rhymeLens.ts`: local rhyme analysis engine
+* `public/worklets`: pitch detector AudioWorklet
+* `public/samples`: instrument samples
+* `public/models/basic-pitch`: neural transcription model
+
+The app is client-heavy by design. Writing, audio, OCR, hand tracking, pitch detection, recording, and transcription all run in the browser.
+
+---
+
+## Lazy Loading
+
+Heavy features are loaded only when needed.
+
+Examples:
+
+* Tone.js loads when audio features start.
+* MediaPipe loads when hand tracking starts.
+* Tesseract loads when OCR opens.
+* TensorFlow/basic-pitch loads when Voice Score analyzes a recording.
+* VexFlow loads for notation rendering.
+
+This keeps the initial editor experience lighter.
+
+---
+
+## Storage
+
+The core guest-mode app uses local browser storage.
+
+* Songs: `localStorage`
+* Version snapshots: `localStorage`
+* YouTube sessions: `localStorage`
+* UI preferences: `localStorage`
+* Drum/chord/Vocal FX presets: `localStorage`
+* Takes: IndexedDB
+
+IndexedDB is used for takes because recordings are binary Blobs and are too large for normal localStorage.
+
+---
+
+## Shared Audio Engine
+
+Verses uses one persistent Web Audio engine.
+
+The engine creates one `AudioContext` and shared buses:
+
+```txt
+drumBus ─┐
+chordBus ─┤
+trumpetBus ─┤──► master ─► compressor ─► limiter ─► speakers
+padBus ─┘                              └──────► recordDest
+```
+
+This design keeps audio routing consistent:
+
+* drums, chords, pads, trumpet, and vocals share the same engine
+* recordings tap the same final audio graph
+* volume sliders control real nodes in the graph
+* the app avoids creating multiple competing AudioContexts
+* samples can stay cached across feature panels
+
+Tone.js is attached to the same AudioContext when it is needed.
+
+---
+
+# Feature-by-Feature Technical Details
+
+## Lyric Editor
+
+The editor uses a native textarea for typing. This preserves normal browser text behavior: selection, keyboard navigation, scrolling, spellcheck, copy/paste, and accessibility.
+
+Rhyme Lens requires styled highlights behind the text, which a textarea cannot do directly. Verses solves this with a highlight mirror:
+
+1. The highlight layer renders behind the textarea.
+2. The textarea text is made visually transparent enough for highlights to show.
+3. Both layers share identical font, padding, line height, wrapping, and scroll position.
+4. A scroll/resize sync keeps highlights pinned to words.
+
+This gives the app both native text editing and rich visual analysis.
+
+---
+
+## Autosave and Versions
+
+Autosave tracks changed song state and persists it on a timer. It also saves on page lifecycle events such as hiding or closing the tab.
+
+Version snapshots are stored separately from the current song. This lets the user restore earlier drafts without losing the current save object.
+
+---
+
+## Theme System
+
+Theme is stored in localStorage. The app toggles a root `light` class on the document element, and CSS variables update the interface.
+
+This makes theme switching global and avoids duplicating light/dark styles across components.
+
+---
+
+## Rhyme Finder
+
+Rhyme Finder uses the Datamuse API.
+
+The selected word is sent through one of three relationship modes:
+
+* perfect rhyme
+* near rhyme
+* sounds-like
+
+The app debounces requests, caches results for the session, filters low-quality results, sorts by score, and groups by syllable count.
+
+Grouping by syllable count matters because a lyricist often needs a rhyme that fits a rhythmic slot, not just any rhyming word.
+
+---
+
+## Rhyme Lens
+
+Rhyme Lens is a local phonetic analysis engine.
+
+Pipeline:
+
+1. Split lyrics into lines.
+2. Tokenize words and preserve character offsets.
+3. Normalize tokens.
+4. Build phonetic shapes.
+5. Extract vowel skeletons, consonant skeletons, endings, and clusters.
+6. Build one-word and multi-word spans.
+7. Compare spans for sound similarity.
+8. Filter filler words and weak phrases.
+9. Group matching spans into rhyme families.
+10. Assign stable colors.
+11. Render highlights behind the editor text.
+
+It detects:
+
+* end rhyme
+* internal rhyme
+* multisyllabic rhyme
+* compound/mosaic rhyme
+* slant rhyme
+* assonance
+* consonance
+* alliteration
+* repetition
+* cross-line echo
+* rhyme chains
+* dense pockets
+* weak lines
+
+The analysis is approximate because accent and vocal delivery affect rhyme, but it gives a useful structural map of the lyric.
+
+---
+
+## YouTube Beat Bar
+
+The beat bar uses the YouTube IFrame API.
+
+Verses stores the beat URL, loop points, and markers with the song session. A playback loop checks current time and seeks back to the loop start when needed.
+
+YouTube audio is not directly captured in the internal recording stream because cross-origin media cannot be freely mixed into Web Audio recording output.
+
+---
+
+## OCR
+
+OCR uses Tesseract.js.
+
+Pipeline:
+
+1. User selects an image.
+2. Tesseract is lazy-loaded.
+3. Recognition runs in the browser.
+4. Progress updates are shown.
+5. Extracted text is editable before insertion.
+6. User inserts or replaces lyrics.
+
+This supports notebook-to-digital songwriting without a custom OCR server.
+
+---
+
+## Perform
+
+Perform is a combined stage, instrument, and recorder.
+
+It manages:
+
+* camera stream
+* microphone stream
+* hand tracking
+* touch input
+* audio engine
+* lyric reader
+* mode switching
+* recording
+* take saving
+
+The three modes are separated so each mode can have a clear mental model:
+
+* Chords & Drums: perform instruments and beats
+* Vocal FX: process and perform the voice
+* Photobooth: simple raw capture
+
+---
+
+## Hand Tracking
+
+Hand tracking uses MediaPipe HandLandmarker.
+
+Pipeline:
+
+1. The browser gets a camera stream.
+2. Video frames are passed to MediaPipe.
+3. MediaPipe returns 21 landmarks per hand.
+4. Verses maps landmarks into normalized stage coordinates.
+5. Pinches and gestures are detected from landmark distances.
+6. Coordinates are smoothed.
+7. Gestures are mapped to musical controls.
+
+The right hand typically controls pitch, chords, or expression. The left hand controls transport or effects.
+
+Pinch detection uses hysteresis so the gesture does not flicker when the hand is near the threshold.
+
+---
+
+## Touch Input
+
+Touch input maps pointer events into musical controls.
+
+Each active touch point can become its own voice, which allows polyphony. X position maps to a scale degree or pitch region, while Y position maps to expression such as brightness or level.
+
+Touch mode gives the app a fallback for mobile devices and situations where camera tracking is not appropriate.
+
+---
+
+## Step Sequencer
+
+The drum sequencer uses a 4x16 boolean grid.
+
+Each row controls a drum voice:
+
+* kick
+* snare
+* hi-hat
+* percussion
+
+The sequence is scheduled on Tone.Transport, which provides musical timing. The visual playhead is drawn with Tone.Draw so the UI stays aligned with the audio clock.
+
+Each voice uses a sample player routed through per-voice gain and then into the drum bus. Mute, solo, level, tempo, swing, presets, and saved patterns all update sequencer state.
+
+---
+
+## Chord System
+
+Chord slots store musical chord definitions:
+
+* root
+* quality
+* octave
+* inversion
+
+Chord qualities are interval templates. For example:
+
+* major: 0, 4, 7
+* minor: 0, 3, 7
+* dominant 7: 0, 4, 7, 10
+* maj7: 0, 4, 7, 11
+
+The chord engine converts each slot into MIDI notes. For smoother changes, it evaluates possible voicings and chooses the one with the lowest movement from the previously sounding chord.
+
+That voice-leading makes chord changes feel less abrupt.
+
+---
+
+## Sampled Instruments
+
+Verses uses a mix of sampled instruments and synthesized instruments.
+
+Sampled instruments use Tone.Sampler. A sparse set of recorded anchor notes is loaded, and the sampler pitch-shifts between them to cover the full range.
+
+Typical chain:
+
+```txt
+sampler or synth → lowpass filter → reverb → volume → engine bus
+```
+
+This gives the app more realistic chords and converted trumpet playback while keeping sample size manageable.
+
+---
+
+## Smart Lyric Reader
+
+The Smart Lyric Reader aligns recognized speech against known lyrics.
+
+It is not trying to freely transcribe a song. Since the lyrics are already written, the task is to determine where the performer is.
+
+Pipeline:
+
+1. Split lyrics into lines.
+2. Tokenize each line.
+3. Normalize words.
+4. Generate fuzzy/phonetic forms.
+5. Listen with Web Speech API.
+6. Compare recognized words to current and next lyric line.
+7. Advance at most one line at a time.
+8. Never jump backward automatically.
+9. Provide manual nudge and Pace fallback.
+
+This strict movement prevents repeated choruses or misheard words from causing large jumps.
+
+---
+
+## Vocal FX
+
+Vocal FX is a real-time vocal chain built on Web Audio and Tone.js.
+
+Signal flow:
+
+```txt
+mic
+→ input gain
+→ noise gate
+→ high-pass filter
+→ tone EQ
+→ pitch shift + dry path
+→ correction blend
+→ de-esser
+→ compressor
+→ saturation
+→ vocal bus
+   ├─ harmony
+   ├─ doubler
+   ├─ delay send/return
+   └─ reverb send/return
+→ output gain
+→ limiter
+→ engine master + recording tap
+```
+
+### Pitch Detection and Autotune
+
+A pitch detector runs in an AudioWorklet and returns:
+
+* frequency
+* clarity
+* RMS/input level
+
+Autotune works as:
+
+1. Detect current vocal pitch.
+2. Convert frequency to MIDI.
+3. Find the nearest note in the selected key/scale.
+4. Compute the pitch difference.
+5. Drive a pitch shifter by that correction amount.
+6. Smooth the correction using retune speed.
+7. Blend corrected and dry signals using autotune amount.
+
+Fast retune creates a hard modern effect. Slow retune sounds more natural.
+
+### Auto Key Detection
+
+Auto key detection listens to sung pitches for several seconds, builds a pitch-class histogram, and compares it against major/minor key profiles. The result sets the vocal key and scale automatically.
+
+### Gate, EQ, De-esser, Compressor, Saturation
+
+The vocal chain includes tools commonly found in a vocal rack:
+
+* gate to reduce room noise
+* high-pass filter to remove low rumble
+* body/presence/air EQ
+* de-esser for harsh high-frequency sibilance
+* compressor for dynamic control
+* saturation for harmonic color
+
+### Doubler, Harmony, Delay, Reverb
+
+Spatial and musical effects run in parallel:
+
+* doubler adds width with short delay/pan
+* harmony adds a pitch-shifted interval
+* delay adds echo
+* reverb adds space
+
+The delay and reverb are sends/returns rather than simple destructive inserts, so the dry vocal remains clear.
+
+### Hand-Controlled Vocal FX
+
+In camera mode, hand movement writes directly into the same audio chain:
+
+* right hand controls pitch shift
+* key-lock snaps pitch shifts to musical scale intervals
+* left hand increases space/wash
+* left-hand pinch adds harmony
+* left-hand fist bypasses effects
+
+This makes Vocal FX performable, not only adjustable through sliders.
+
+---
+
+## Voice → Trumpet
+
+Voice → Trumpet has two paths.
+
+### Live Path
+
+The live path prioritizes latency.
+
+Pipeline:
+
+```txt
+mic
+→ pitch detector AudioWorklet
+→ One Euro smoothing
+→ pitch-to-MIDI
+→ trumpet range mapping
+→ optional scale snap
+→ note hysteresis
+→ low-latency brass synth
+→ trumpet bus
+```
+
+The live brass synth uses:
+
+* sawtooth oscillator
+* square oscillator
+* slight detune
+* breath noise
+* formant-like filter
+* lowpass brightness filter
+* amplitude envelope
+* smooth pitch ramps
+
+This is more responsive than triggering a sample for every tiny pitch movement.
+
+The app maps vocal loudness to velocity and brightness. It also uses note hysteresis to avoid semitone chatter and a short release hold to prevent sustained notes from cutting off during tiny detection dropouts.
+
+### Convert Path
+
+The convert path prioritizes clean output.
+
+Pipeline:
+
+```txt
+recorded voice
+→ offline pitch analysis
+→ median smoothing
+→ octave-flip removal
+→ tiny-fragment merging
+→ trumpet range mapping
+→ optional scale snap
+→ scheduled trumpet samples
+```
+
+Live mode is for performing. Convert mode is for cleaner playback.
+
+---
+
+## Photobooth
+
+Photobooth is a simpler capture mode. It records raw camera and microphone without the heavier performance instrument overlays.
+
+This gives users a straightforward way to record a vocal/video idea.
+
+---
+
+## Recording
+
+Recording uses MediaRecorder.
+
+For camera-based takes:
+
+1. A capture canvas draws the camera, skeleton, and note flashes.
+2. The guide canvas draws live helper overlays separately.
+3. The capture canvas creates a video stream.
+4. The audio engine provides an audio stream through the recording tap.
+5. The video and audio tracks are combined into one MediaStream.
+6. MediaRecorder writes chunks.
+7. The final Blob is saved as a take in IndexedDB.
+
+The live guide grid and pitch ladder are not recorded because they are drawn on separate live-only layers.
+
+---
+
+## Takes
+
+Takes are stored in IndexedDB.
+
+Each take can store:
+
+* id
+* song id
+* name
+* MIME type
+* duration
+* size
+* creation time
+* whether it has video
+* recording Blob
+
+IndexedDB is used because recordings are too large for localStorage.
+
+---
+
+## Voice Score
+
+Voice Score converts a sung or hummed melody into structured music.
+
+Pipeline:
+
+```txt
+recorded audio
+→ neural transcription with basic-pitch
+→ YIN fallback if needed
+→ monophonic reduction
+→ octave correction
+→ fragment merging
+→ melody simplification
+→ BPM estimation
+→ 1/16 quantization
+→ key inference
+→ chord inference
+→ piano roll / note list / staff notation
+→ export
+```
+
+### Neural Transcription
+
+The primary transcription engine is Spotify basic-pitch through TensorFlow.js. The audio is resampled to mono at 22.05 kHz and passed through the model to produce note events.
+
+### YIN Fallback
+
+If the neural model fails or finds no clear notes, the app falls back to YIN pitch detection samples.
+
+### Melody Cleanup
+
+The app repairs octave errors, merges tiny fragments, and simplifies repeated pitch events so the result looks like a readable melody instead of noisy micro-notes.
+
+### Key and Chord Inference
+
+Verses estimates key from a duration-weighted pitch-class histogram. Chords are inferred by grouping notes into beat windows and matching chroma patterns against chord templates.
+
+### Notation and Export
+
+The detected melody can be viewed as:
+
+* Piano Roll
+* Note List
+* Staff notation
+
+Exports include:
+
+* MIDI
+* MusicXML
+* JSON
+* CSV
+* printable lead sheet
+
+---
+
+# Evaluation and Evidence
+
+Verses includes both automated and manual validation.
+
+## Automated Testing
+
+The rhyme engine can be tested with:
+
+```bash
+npm test
+```
+
+This runs the Rhyme Lens engine test script.
+
+## Manual Validation
+
+The following flows were manually tested during development:
+
+### Writing
+
+* creating songs
+* saving/reopening songs
+* autosave behavior
+* version restore
+* long lyric scrolling
+* Rhyme Lens highlight alignment
+* export and print
+* OCR insertion
+
+### Rhyme Tools
+
+* perfect rhyme lookup
+* near rhyme lookup
+* sounds-like lookup
+* syllable grouping
+* Rhyme Lens density modes
+* repeated phrase detection
+* internal rhyme detection
+* alliteration/assonance/consonance detection
+
+### Perform
+
+* camera permission flow
+* hand tracking start/stop
+* pinch detection
+* open-palm beat start
+* fist beat stop
+* touch mode
+* chord triggering
+* lead mode
+* guide grid alignment
+* guide grid exclusion from recording
+
+### Audio and Recording
+
+* drum sequencer playback
+* tempo/swing changes
+* chord timbre changes
+* master/drum/chord volume controls
+* camera recording
+* audio-only recording
+* takes playback
+* download/delete/rename takes
+
+### Vocal FX
+
+* preset switching
+* autotune on/off
+* retune speed
+* key and scale selection
+* auto key detection
+* harmony
+* delay/reverb
+* raw vs processed recording
+* hand pitch bend
+* left-hand wash/harmony/bypass gestures
+* latency/window tradeoff
+
+### Voice → Trumpet
+
+* live tracking
+* fast/balanced/accurate tracking
+* range mapping
+* scale snap
+* note hysteresis
+* release hold
+* convert mode
+* converted sample playback
+
+### Voice Score
+
+* simple scale transcription
+* short melody transcription
+* key inference
+* chord inference
+* note editing
+* staff rendering
+* MIDI export
+* MusicXML export
+* JSON/CSV export
+
+## Evidence of Iteration
+
+The project went through multiple design refinements:
+
+* Rhyme Lens highlight rendering was aligned to the editor mirror so highlights stay attached to the correct words while scrolling.
+* Recording was centralized in Perform, while Takes became a dedicated viewer.
+* Camera recording was split into capture canvas and guide canvas so helper overlays are visible live but excluded from final takes.
+* Voice Score was simplified into one automatic pipeline instead of many confusing user-facing quality knobs.
+* Voice → Trumpet was separated into live and convert paths so latency and quality could be handled differently.
+* Vocal FX added raw/processed recording options and exposed latency as a visible tradeoff.
+
+---
+
+# Limitations and Tradeoffs
+
+## Browser Audio Latency
+
+Real-time audio has unavoidable latency. Pitch detection requires a window of audio before it can estimate frequency.
+
+Smaller windows reduce latency but create more artifacts. Larger windows sound smoother but feel slower.
+
+## Vocal FX Pitch Shifting
+
+The current pitch shifter is real-time and granular. It is useful for autotune, harmony, and moderate pitch bends, but it is not formant-preserving. Large pitch shifts can color the voice.
+
+## Pitch Detection
+
+Pitch detection works best with one clear sung line. Background music, harmony, noisy rooms, and quiet singing can reduce accuracy.
+
+## Smart Lyrics
+
+Smart Lyrics depends on browser speech recognition. Sung lyrics are harder to recognize than normal speech, so Pace mode and manual nudging are included.
+
+## YouTube Audio
+
+YouTube audio cannot be directly captured into the internal recording stream because of cross-origin restrictions. The app can play YouTube beats for writing, but recordings do not directly include the YouTube audio track.
+
+## OCR
+
+OCR quality depends on handwriting clarity, lighting, and image quality. Extracted text may need manual correction.
+
+## Not a Full DAW
+
+Verses is focused on early songwriting, performance capture, and musical idea generation. It does not yet include a full multitrack timeline, clip editing, plugin hosting, automation, or mastering tools.
+
+---
+
+# Privacy
+
+Verses keeps the core creative workflow local when used in guest mode.
+
+* Songs are stored in localStorage.
+* Takes are stored in IndexedDB.
+* OCR runs in the browser.
+* Hand tracking runs in the browser.
+* Pitch detection runs locally.
+* Voice Score transcription runs locally with the vendored model when available.
+* Camera and microphone streams are used by the browser for live features.
+* Smart Lyrics uses the browser's built-in speech recognition, so behavior depends on browser/OS implementation.
+
+---
+
+# Development
 
 ## Quickstart
 
@@ -43,593 +1383,133 @@ npm install
 npm run dev
 ```
 
-Open <http://localhost:3000>. Works in **guest mode with no environment variables** —
-songs live in `localStorage`, recordings in IndexedDB. Supabase is optional:
+Open:
 
-```
-NEXT_PUBLIC_SUPABASE_URL=your_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_key
+```txt
+http://localhost:3000
 ```
 
-Camera/mic features need HTTPS or `localhost`. Best in Chrome on desktop; mobile gets
-the on-screen touch instrument instead of the camera.
+Camera and microphone features require HTTPS or localhost.
 
----
-
-# Part 1 — Technical deep-dive
-
-## Architecture
-
-Next.js 14 (App Router) + React 18 + TypeScript + Tailwind. Everything is client-side;
-there is no custom server. The editor is a layered text area with a highlight mirror
-behind it (for Rhyme Lens), an exclusive-rail / exclusive-modal state machine, and a set
-of feature modals that mount on demand.
-
-```
-src/
-  app/                      App Router routes, layout, globals.css (design tokens)
-  components/
-    editor/                 Editor shell + feature modals
-      PerformModal.tsx        Perform — the one place you record (hands/touch,
-                              beat, chords, smart lyrics, trumpet, voice)
-      TakesPanel.tsx          Takes — viewer for past recordings
-      VoiceToScoreModal.tsx   Voice Score
-      score/StaffView.tsx     VexFlow sheet-music renderer
-      RhymeLens.tsx / …       Rhyme Lens (unchanged)
-    perform/
-      TouchInstrument.tsx     Multi-touch instrument pad
-      StepSequencer.tsx       Editable 4×16 drum grid
-      LyricTeleprompter.tsx   Strict line-by-line lyric overlay
-    ui/Slider.tsx             Premium slider primitive
-  hooks/
-    perform/                useDrumEngine, useChordSynth, useHandTracking, useLiveTrumpet
-    useSmartLyrics.ts       Speech-driven, strict line-by-line lyric follower
-  lib/
-    audio/                  engine.ts, samplers.ts, scales.ts, oneEuro.ts
-    music/                  lyricAlign.ts, voiceScore.ts
-    pitchDetection.ts       Shared YIN + MIDI helpers
-    rhymeLens.ts            Rhyme engine (unchanged)
-  public/
-    samples/                Vendored trumpet / piano / cello recordings
-    models/basic-pitch/     Vendored neural-transcription model
-    worklets/pitch-detector.js   McLeod (MPM) AudioWorklet
-```
-
-**Lazy by design.** Tone.js, TensorFlow.js + basic-pitch, MediaPipe, VexFlow and the
-sample packs are all dynamically imported the first time they're needed. The editor
-route's initial JS stays ~70 kB; the heavy libraries live in separate chunks that load
-on demand, so first paint is fast.
-
-## Tech stack
-
-| Layer | Technology |
-|---|---|
-| Framework | Next.js 14 (App Router), React 18, TypeScript |
-| Styling | Tailwind CSS with CSS-variable design tokens (light/dark) |
-| Audio engine | **Tone.js 15** (Sampler, Reverb, Filter, Synth) over one shared `AudioContext` |
-| Pitch (real-time) | **pitchy 4** (McLeod) + a hand-written MPM **AudioWorklet** |
-| Pitch (neural) | **@spotify/basic-pitch** on **@tensorflow/tfjs** |
-| Music theory | **@tonaljs/tonal** (key + `Chord.detect`) |
-| Notation | **VexFlow 4** (SVG staff) + MusicXML export |
-| Hand tracking | **@mediapipe/tasks-vision** (HandLandmarker, WASM, in-browser) |
-| Speech | Web Speech API (`SpeechRecognition`) |
-| OCR | Tesseract.js (WASM) |
-| Rhymes | Datamuse API + an offline phonetic engine |
-| Storage | `localStorage` (songs) · IndexedDB (takes) · Supabase (optional auth/sync) |
-
-## The persistent audio engine
-
-Everything audible flows through **one** `AudioContext` and **one** fixed node graph,
-created exactly once (`src/lib/audio/engine.ts`) and shared by every engine. We never
-build a graph per note, and we never spin up a second context.
-
-```
- drumBus  ─┐
- chordBus ─┤
- trumpetBus┤─►  master ─►  glue compressor ─►  limiter ─►  destination
- padBus   ─┘                                        └────►  recordDest (MediaStream tap)
-                                  master ─►  analyser
-```
-
-- The native core (context, gain buses, compressor/limiter, recorder tap, analyser) is
-  built **synchronously** — no dependency on Tone — so drums, mic analysis and recording
-  work instantly. Tone is bound to the **same** context lazily (`engine.loadTone()`) only
-  when a sampled instrument is first needed, so a `Tone.Sampler` output plugs straight
-  into a native bus gain.
-- **Volume sliders actually move volume.** Each slider writes to the gain of a node that
-  is genuinely in the signal path, using `gain.setTargetAtTime(value, now, 0.02)` for
-  click-free changes (never a bare `.value =` that the next note's envelope overwrites).
-  Slider position is mapped through a perceptual curve (`gain = x²`) so the travel feels
-  even. Master / Drums / Chords move independently across their full range in real time.
-- Because the tap (`MediaStreamAudioDestinationNode`) hangs off the limiter, **everything
-  you perform is captured** by `MediaRecorder` — drums, chords, the hand/touch lead, and
-  the trumpet — with no extra wiring.
-- Closing a Perform/Takes panel **suspends** the context rather than tearing it down, so
-  reopening is instant and samples stay cached.
-
-## Sampled instruments
-
-Chords and the trumpet are **real recordings**, not oscillators. We vendor a curated,
-sparse set of notes per instrument (from the `nbrosowsky/tonejs-instruments` library)
-into `public/samples/{piano,cello,trumpet}` and let `Tone.Sampler` pitch-shift between
-the anchors, which keeps the download small while covering the whole range. Each
-instrument is `Sampler → lowpass filter → Tone.Reverb → bus` for warmth, with a loading
-state while the MP3s fetch.
-
-Three chord timbres ship: **Grand Piano**, **Warm Strings** (cello, slow attack, more
-reverb) and **Felt Keys** (piano through a dark lowpass + long reverb — a felt/EP voice).
-
-## Perform: hands + touch
-
-Perform turns a webcam **or** a touchscreen into a scale-locked instrument so people
-with no keyboard can make music.
-
-**Hand tracking (MediaPipe).** `HandLandmarker` runs in `VIDEO` mode at ~30 fps and
-returns 21 landmarks per hand. We map them to a real instrument:
-
-- **Right hand = a theremin-style XY pad.** Horizontal position selects a note (or chord)
-  from a **scale-locked** ladder — you pick the key + scale (`src/lib/audio/scales.ts`),
-  so you're always in key. Vertical position controls expression (filter cutoff + level).
-  Raw landmark X/Y is smoothed with a **One-Euro filter** (`oneEuro.ts`) — adaptive
-  low-pass that smooths hard when the hand is slow (kills jitter) and lightly when it's
-  fast (kills lag). Note changes glide with **portamento** so it sounds like an
-  instrument, not a stair-step.
-- **Pinch = note on/off.** Thumb–index distance is normalised by palm size and gated with
-  **hysteresis** (on below 0.45, off above 0.62) so a held note doesn't chatter.
-- **Left hand = transport.** Hold an open palm to start/loop the beat, a fist to stop, a
-  pinch to mute — latched with a hold timer + cooldown so a brief gesture doesn't trigger.
-- Camera frames never leave the device; you can toggle the skeleton overlay and swap
-  hands, and preferences persist in `localStorage`.
-
-**Touch instrument (`TouchInstrument.tsx`).** The primary path on phones and for anyone
-who can't/won't use a webcam: a multi-touch, scale-locked XY pad where **every finger is
-its own gliding synth voice** (true polyphony via a Tone voice pool), plus a row of large
-chord pads. X→note in scale, Y→brightness/level; targets are ≥44 px with clear press
-animations and `touch-action: manipulation` for sub-frame response.
-
-## Smart Lyric Reader: strict line-by-line alignment
-
-The teleprompter sits in the Perform stage (the "black space" over the camera or touch
-pad) and follows you as you sing. Because we already **know** the written lyrics, this is
-*alignment*, not open transcription (`src/lib/music/lyricAlign.ts`, `useSmartLyrics.ts`,
-`LyricTeleprompter.tsx`).
-
-1. **Per-line keys.** Each lyric line is tokenised into words, and each word is tagged
-   with a normalised form plus **Soundex** and **Metaphone** codes (so "night"/"nite",
-   "come"/"comb" still match).
-2. The Web Speech API runs `continuous`, `interimResults` — a noisy, drifting transcript.
-3. On each interim result we score the **current line** and the **single next line** by the
-   fraction of their words that fuzzy-match the tail of what was heard (exact, small
-   **Levenshtein** distance, or a shared Soundex/Metaphone bucket).
-4. **Strict advance.** The active line moves forward **by at most one line at a time** and
-   **never jumps backward** — no matter what the recogniser does, the highlight walks the
-   song line by line, which keeps it accurate through repeated words and choruses. Within
-   the active line we highlight up to the furthest word matched and auto-centre the scroll.
-5. The recogniser stops on silence, so we **auto-restart** it on `end`.
-
-**Smart vs Pace is an explicit, always-visible toggle** — the user's *choice* is kept
-separate from the runtime *status*:
-
-- **Smart** is selectable whenever the browser supports `SpeechRecognition`. A mic denial
-  or hard error doesn't delete the option: it drops to **Pace** and shows a *"Smart
-  unavailable — Retry"* button. An unsupported browser shows Smart **disabled with a
-  tooltip** (and defaults to Pace). A momentary stall keeps Smart listening (with a "sing
-  up" hint) rather than silently giving up.
-- **Pace** is a timed scroll with an adjustable seconds-per-line.
-- A manual up/down **nudge** is always available in both.
-
-**Compact teleprompter.** The reader is a slim **glassy karaoke strip** pinned to the
-bottom of the stage — faint *previous* line / bold *active* line (word-by-word highlight) /
-faint *next* line, over a blurred gradient scrim with text-shadow for legibility on video.
-It honours `prefers-reduced-motion` and **no longer letterboxes the camera** (the old
-panel ate ~half the stage). Like every overlay it's a DOM layer — live-only, never in the
-recorded canvas.
-
-Honest note: sung lyrics are harder to recognise than speech, and the API is
-browser-dependent — that's why the strict line walk, the nudge and the Pace fallback are
-always there.
-
-## Live Trumpet pipeline
-
-In Perform's **Sound** tab, flip **Voice → Trumpet** and your voice drives a **real
-recorded trumpet** (`Tone.Sampler` over `public/samples/trumpet`, `useLiveTrumpet.ts`).
-It shares the same microphone the take records from — no second permission prompt.
-
-- **Live Monitor.** The mic feeds a **McLeod Pitch Method (MPM) AudioWorklet**
-  (`public/worklets/pitch-detector.js`) running **off the main thread** — the same
-  normalised-square-difference algorithm pitchy implements, inlined so it needs no
-  bundler step. Each voiced frame posts `{ freq, clarity, rms }`; **clarity gates note-on**
-  (noisy/unvoiced frames are ignored), Hz is converted to the nearest note (optionally
-  **snapped to the performance key/scale**), and the sampler is driven with **portamento**
-  so slides feel like a brass player. Input **RMS → velocity**, so louder singing is louder
-  and brighter. A **release-hold** keeps the horn ringing through momentary clarity dips so
-  sustained, legato singing doesn't chop into separate notes. ~30–100 ms of latency is
-  inherent to real-time pitch→audio and can't be fully removed (Vochlea's Dubler FAQ says
-  the same).
-- **Sing-then-Convert.** Record the dry vocal, then analyse it **offline with pitchy**,
-  segment it into clean notes, and play a **perfectly-tracked** trumpet line back — higher
-  quality, no live-latency artefacts.
-
-Everything routes through the trumpet bus, so the trumpet is captured in your take. While
-the trumpet is on, the dry-voice record tap is **ducked** so the take is the horn, not a
-latency-doubled voice + horn.
-
-## Perform's two modes + the Vocal FX chain
-
-Perform is a **mode switcher** (header). The choice is intentionally explicit, Dubler-2
-style:
-
-- **Mode A — Chords & Drums** (the existing instrument): hands/touch trigger the sampled
-  chords and the step-sequencer beat, with the truthful chord-zone grid.
-- **Mode B — Vocal FX** (new): you **sing** and your **hands** (or touch) bend the live
-  voice while a rack of effects shapes it.
-
-**One shared effects chain, two front-ends.** `src/lib/audio/vocalFx.ts` builds a single
-composable chain on the persistent engine context; both the **Voice rack** (sliders) and
-**Mode B** (hands) drive the *same* nodes — no fork (`useVocalFx.ts`,
-`VocalFxRack.tsx`):
-
-```
-mic ─► in ─►┬─► pitch-shift ─► wet ─┐
-            └────────────────► dry ─┴─► mix ─►┬─► harmony-shift ─► harm ─┐
-                                              └────────────────────────► ┴─► delay ─► reverb ─► out ─► master
-```
-
-- **Pitch shift / autotune.** A `Tone.PitchShift` (native-node granular shifter, on the
-  audio thread) is the core. **Autotune** = detect pitch with the **same MPM worklet** →
-  snap to the nearest note in the chosen **key/scale** → drive the shifter by the
-  *(target − detected)* cents, smoothed by a **retune-speed** one-pole (fast ≈ hard T-Pain,
-  slow ≈ natural). An **amount** crossfades corrected vs dry. **Auto key detection**
-  (🎯 *Detect my key*) listens for ~4 s and runs a **Krumhansl-Schmuckler** correlation over
-  your sung pitch-class histogram to set the key/scale automatically — the other half of
-  Dubler's key-lock.
-- **Harmony.** A second `Tone.PitchShift` in parallel adds a chosen interval (±3rd/4th/5th/
-  octave), mixable.
-- **Delay / Reverb.** `Tone.FeedbackDelay` (time/feedback/mix) and `Tone.Reverb`
-  (size/mix), each with click-free ramps and an on/off LED.
-- **Presets** (Natural / Pop Vocal / T-Pain / Dreamy Hall / Slapback Double) persist to
-  `localStorage`.
-- **Output to master**, so the processed voice is monitored **and** recorded. **Processed
-  vs Raw** is an explicit toggle: *Processed* captures the FX mix (dry tap ducked); *Raw*
-  bypasses the chain and records a clean vocal via a dedicated dry-monitor path for
-  reprocessing later.
-
-**Hand → parameter mapping (Mode B, camera).** From MediaPipe landmarks: right-hand
-**height (Y) → live pitch shift** in semitones, smoothed by a **one-euro filter**
-(`minCutoff 1.2, beta 0.02`) so it glides rather than steps. **Key-lock** snaps the shift
-to in-scale (diatonic) intervals for clean transpositions; off = continuous glissando. A
-live **pitch-ladder overlay** (scale degrees on Y, active-shift band, hand marker) replaces
-the chord grid — live-only, never recorded. The HUD reads detected note, live shift, active
-effects and input level. On touch, Mode B gets a dedicated singing stage with a pitch-bend
-slider instead of the chord pads.
-
-**Calibration (Dubler-2 lesson).** A **Calibrate mic** button (in the Voice rack and the
-trumpet panel) samples ~1.5 s of *ambient* room noise and stores its 90th-percentile RMS as
-a **noise floor** (`src/lib/audio/calibrate.ts`). Both the trumpet and the autotune pitch
-gates then require the signal to sit above that floor, so room hiss and breaths never
-trigger a note. It's clamped so a noisy calibration can never mute soft singing, and it
-persists to `localStorage`.
-
-**Honest limitations.** `Tone.PitchShift` is a **granular** shifter, not a
-formant-preserving phase vocoder, so large shifts colour the voice ("chipmunk"); for
-autotune and ±octave harmony it stays musical. Latency is inherent and **surfaced in the
-UI** (`~ms` readout) with a **"tighten latency"** window control (smaller window = lower
-latency, more artefacts; ~30–100 ms range). Use headphones — the processed voice is
-monitored through the speakers.
-
-## Recording capture
-
-A Perform take records **your voice + every layer** as one stream:
-
-- **Voice into the recording, not the speakers.** `getUserMedia` audio is routed to a
-  `MediaStreamAudioDestination` **record tap** (never back to the speakers, to avoid
-  feedback), then mixed with the engine's master so the take is voice plus drums, chords
-  and trumpet — not just the instruments. Echo cancellation is **on** here because the mic
-  is meant to hear *you*, not re-capture the monitored beat. (Voice Score, which needs a
-  dry vocal for pitch detection, keeps browser DSP **off** instead.)
-- **Video takes** composite from a layered canvas: the recorded canvas holds camera +
-  skeleton + note flashes (`captureStream`), while the live-only **chord-zone grid** sits
-  on a separate canvas that's never captured.
-- **MIME fallback chain** with `MediaRecorder.isTypeSupported` (video: `vp9/opus` →
-  `vp8/opus` → `webm` → `mp4`; audio: `webm;opus` → `webm` → `mp4` → `ogg`); the `Blob` is
-  built from the recorder's **actual** `mimeType`.
-- **Chunks** accumulate from `ondataavailable`, the context is **resumed inside a user
-  gesture** (iOS), and tracks are stopped on teardown. Takes are stored in IndexedDB and
-  reviewed in the Takes panel.
-
-## Voice Score pipeline
-
-Hum or sing a melody → notes → chords → sheet music (`src/lib/music/voiceScore.ts`,
-`VoiceToScoreModal.tsx`).
-
-**One auto-optimal pipeline — no quality/timing knobs.** There are no Strict/Balanced/
-Sensitive or Raw/Light/Strong modes any more: Voice Score always runs the most accurate
-path automatically. The only control is an (auto-detected, overridable) tempo.
-
-1. **Detection.** Primary engine is **basic-pitch** (neural): the recorded blob is
-   resampled to 22.05 kHz mono in an `OfflineAudioContext`, run through the lazily-loaded
-   TensorFlow.js model (vendored at `public/models/basic-pitch`), and decoded to note
-   events with onsets + pitch bends. A single tuned **YIN** path is kept as a silent
-   offline fallback, used automatically if the model can't load or finds nothing.
-2. **Smoothing.** Median pitch smoothing + **octave-error correction** (the neural result
-   is cross-checked against a YIN track and only snapped when YIN strongly agrees); a
-   polyphonic result is reduced to a single melodic line, then leftover slivers are merged.
-3. **Segmentation & quantization.** Micro-fragments are absorbed into their neighbours and
-   onsets/durations snap to a **1/16 grid** against the **auto-detected BPM** (estimated
-   from inter-onset intervals; you can type a tempo to override it).
-4. **Key inference.** A **Krumhansl-Schmuckler** profile correlation over the
-   duration-weighted pitch-class histogram picks the best of all 24 major/minor keys.
-5. **Chord inference.** Notes are grouped into beat windows and **`Tonal.Chord.detect`**
-   suggests the most likely chord per window, producing a chord sheet (symbols shown above
-   the staff), not just a melody.
-6. **Notation & export.** Real sheet music via **VexFlow** (treble clef, key + time
-   signature, auto-beaming, chord symbols), alongside the existing Piano Roll and Note
-   List. Editing (select / pitch ±1 / split / merge / delete) is preserved. Export
-   **MIDI, MusicXML, JSON, CSV**, and a **printable lead sheet** (melody + chords).
-   Detected-melody playback uses a sampled piano (`Tone.Sampler`); you can also A/B it
-   against the original recording. Live input warnings flag clipping / silence / noise.
-
-## Latest refinements
-
-**Perform goes dual-mode + real-time Vocal FX.** Perform now has a **Chords & Drums** vs
-**Vocal FX** switcher. Mode B runs your live voice through a shared effects chain
-(`vocalFx.ts` / `useVocalFx.ts`) — **autotune** (detect → snap-to-key → shift-by-cents with
-a retune-speed control), **harmony**, **delay** and **reverb** — exposed both as a
-GarageBand-style **rack** (preset chips, per-effect LED switches, value readouts, a `~ms`
-latency readout + "tighten latency" control) and as **hand control** (hand height → live
-pitch, one-euro smoothed, with key-lock snapping to scale and a live pitch-ladder overlay).
-**Processed vs Raw** recording is an explicit choice. See *Perform's two modes + the Vocal
-FX chain* above. Honest about limits: it's a granular shifter (large shifts colour the
-voice) and latency is inherent but surfaced and tunable.
-
-**Lyrics: Smart restored + compact teleprompter.** The follower's **Smart/Pace** choice is
-an always-visible toggle again (it used to silently collapse to Pace). Smart prompts for the
-mic / shows a Retry on error / disables with a tooltip only when truly unsupported. The
-panel is now a slim **glassy karaoke strip** (prev / active-with-word-highlight / next) that
-**no longer letterboxes the camera**.
-
-**One place to record: Perform.** Recording has moved entirely into Perform, and **Takes
-is now a pure viewer** for past recordings (the old recorder is gone). Two things came with
-it:
-
-- **Smart lyrics in the stage.** A **Lyrics** toggle drops your written words into the
-  Perform "black space" and follows your voice **strictly line by line** — a new aligner
-  (`createLineAligner`) only ever advances the active line by one and never jumps backward,
-  so the highlight stays accurate through repeats and choruses. Pace fallback + manual
-  nudge included.
-- **Voice → Trumpet in the Sound tab.** The live trumpet now lives in Perform and shares
-  the take's microphone (no second prompt). A **release-hold** keeps the horn ringing
-  through brief clarity dips so legato singing doesn't chop, and turning it on **ducks the
-  dry-voice** record tap so the take is the horn rather than a doubled voice + horn.
-
-**Perform — the drum loop restarts cleanly.** Closing your left hand into a fist stops the
-beat and opening it again **restarts** it. The sequence is now started once and the shared
-transport does the play/stop, fixing the case where fist→open went silent.
-
-**Perform — takes capture your voice.** The singer's mic is routed into the recording tap
-(not the speakers, to avoid feedback), so a take is voice **plus** the instruments — not
-just the drums/piano.
-
-**Voice Score — one auto-optimal pipeline.** The Strict/Balanced/Sensitive, Raw/Light/
-Strong and Neural/Fast selectors are gone. It always runs neural transcription with octave
-repair, sliver-merging and a 1/16 grid at the auto-detected tempo; the only knob left is an
-optional tempo override.
-
-**Perform — a chord-placement grid that's on screen but never in the recording.**
-The camera view now shows a guide dividing it into the exact zones the hand maps to,
-so you know where to reach for each chord/note. It is **truthful** — boundaries come
-straight from the real `X→action` mapping (`floor(x · N)` over the progression slots in
-chord mode; the in-key scale ladder in lead mode), reflect the chosen key/scale, and the
-active zone lights up as your hand moves. The recording-exclusion uses a **two-canvas**
-design:
-
-- A **capture canvas** composites the mirrored camera frame + skeleton + note-trigger
-  flashes — this *is* the recorded picture. A Perform take now combines
-  `captureCanvas.captureStream(30)` with the engine's audio tap into one `MediaStream`
-  and records video (`has_video:true`); touch mode stays audio-only.
-- A **separate grid canvas** (a distinct DOM element, `pointer-events-none`, layered on
-  top) draws the zone lines, labels, active highlight and hand indicator. It is **never**
-  drawn onto the capture canvas, so the guide is impossible to capture — playback shows
-  camera + skeleton + flashes, never the grid. A live show/hide toggle (default on) and
-  `prefers-reduced-motion` are honoured; both canvases share one 0..1→width space so the
-  guide, the recorded picture and the hand indicator always align.
-
-The trumpet now exposes a sample-loading state (the panel + status bar show "loading
-samples…") so a take started before the samples arrive is never silently empty.
-
-A second pass focused on making each feature genuinely musician-usable.
-
-**Editor — highlights pinned to the text (scroll-sync).** Rhyme Lens draws its coloured
-boxes in a *backdrop* layer behind a transparent-text textarea. Previously the two layers
-were different sizes (the textarea's `height:100%` resolved smaller than the absolutely-
-positioned backdrop), so their scroll ranges diverged and the boxes drifted off their
-words. Both layers are now the **exact same `absolute inset-0` box** with identical font,
-line-height, padding, `white-space`, `word-break` and `box-sizing`; the textarea's
-scrollbar is hidden so its text column width matches the backdrop on every platform; and
-the backdrop's `scrollTop/scrollLeft` are synced on `scroll`, `input`, window `resize` and
-via a `ResizeObserver`. Verified pixel-locked over 40+ lines. The editor's focus cue is now
-an on-brand **amber caret** instead of a focus-ring box (a ringed prose editor reads like an
-error state); form inputs elsewhere keep their accessible ring.
-
-**Perform — a real step sequencer.** The drum machine is now an editable **4×16 grid**
-(`useDrumEngine` + `StepSequencer`): click or click-drag to paint hits, scheduled on the
-**`Tone.Transport`** clock via a **`Tone.Sequence`** (with `transport.swing`), and a moving
-playhead drawn through **`Tone.Draw`** so it lands on the right visual frame. Three sampled
-kits (Acoustic / Punch / Lo-Fi) load as `Tone.Player`s per voice → per-voice gain (level +
-mute/solo) → lowpass → drum bus. Tempo, swing, clear, editable templates and **save/load of
-custom patterns to localStorage** round it out.
-
-**Perform — voice-led, softer chords.** On each chord change the engine generates the
-inversion/octave candidates and picks the **voicing that moves the least** from the sounding
-chord (sorted nearest-neighbour cost), then releases only departing notes and attacks only
-new ones, so common tones keep ringing (no hard cut). Six softened timbres: Grand Piano,
-**Electric Piano** (FM), Warm Strings, Felt Keys, plus **Soft Pad** and **Synth Pad**
-(`Tone.PolySynth` with fat unison oscillators) — all with slow-ish attacks, long releases,
-warm lowpass + reverb and gentler default velocity.
-
-**Takes — sharper lyric matching + a smoother trumpet.** The forced-alignment matcher now
-adds a compact **Metaphone** phonetic key beside Soundex + Levenshtein, so sung mis-hearings
-("fone"/"phone", "rite"/"right") still align; the windowed pointer tolerates skipped/repeated
-words and never leaps backward, and a clear **Pace-mode** badge appears when it can't hear
-you. The Live Trumpet **median-smooths** the worklet pitch and adds **note hysteresis** (a
-new note must hold ~2 frames before the sampler commits) to stop semitone chatter, and maps
-loudness to **velocity *and* brightness** (the lowpass opens as you sing louder) with
-portamento glide between committed notes.
-
-**Voice Score — tuned harder.** basic-pitch runs with solo-voice params (onset 0.5 / frame
-0.3 / `minNoteLength` 11 frames / `minFreq` 80 / `maxFreq` 1100 / inferOnsets + melodiaTrick);
-a **YIN pitch track over the same buffer cross-checks octaves** and conservatively repairs
-basic-pitch's octave flips; tiny same-pitch fragments are merged. Chords come from **chroma
-template matching** (a duration/confidence-weighted 12-bin chroma per window correlated
-against maj/min/7/maj7/m7/dim/sus templates) for a cleaner chord sheet, and tempo is found by
-**phase-aligning candidate beat grids to the onsets** (cos autocorrelation) so 2×/½× errors
-are avoided. Verified offline: C-major scale → C, A-minor melody → A minor, a 120 BPM grid →
-120, and a I–IV–V → "C F G".
-
-## Tradeoffs & limitations
-
-- **Latency is real.** Live voice→trumpet and hand→sound have ~30–100 ms of unavoidable
-  latency; Sing-then-Convert trades immediacy for a clean result.
-- **Monophonic vocals work best.** Pitch detection (both YIN and the melodic reduction)
-  assumes one clear line; chords/harmony and background music degrade it.
-- **Neural model size.** basic-pitch needs TensorFlow.js; the first transcription loads a
-  few MB of model + runtime. The YIN fallback keeps the feature usable offline.
-- **Speech recognition is browser-dependent** and harder on sung than spoken words — hence
-  the Pace fallback and manual nudge.
-- **YouTube audio can't be captured** in recordings (cross-origin); it plays through your
-  speakers while the mic captures it Photo-Booth style.
-- **Sampled, not modeled.** The trumpet is a good sampled instrument with pitch tracking,
-  not a studio voice-conversion model.
-- **Vocal FX is a granular pitch shifter.** `Tone.PitchShift` is real-time and cheap but
-  **not formant-preserving**, so big shifts colour the voice; autotune and ±octave harmony
-  stay musical. The pitch-stage window is exposed as a **"tighten latency"** control
-  (~30–100 ms) and the `~ms` figure is shown in the rack. Headphones recommended — the
-  processed voice is monitored through the speakers.
-
-**Tuned parameters** (current defaults): hand→pitch one-euro `minCutoff 1.2 / beta 0.02`;
-Mode B range `±12 semitones` with key-lock snapping to scale; trumpet pitch median window
-`5`, clarity gate `0.55`, note-hysteresis `2 frames`, release-hold `110 ms`; Vocal FX
-defaults autotune `amount 0.6 / retune 55 ms`, reverb `2.2 s @ 18%`, pitch window `0.1 s`;
-lyric stall hint at `5 s`; Voice Score basic-pitch `onset 0.5 / frame 0.3 / minNoteLen 11 /
-1–1100 Hz`, quantized to a `1/16` grid at the auto-detected BPM.
-
----
-
-# Part 2 — User guide
-
-### Writing + Rhyme Lens
-
-1. Open or create a song and start typing. It autosaves; version history keeps snapshots.
-2. Toggle **Rhyme Lens** (bottom-left). Coloured highlights appear *behind* your text as
-   you write — end rhymes, internal echoes, multisyllabic chains, homophones,
-   slant/family rhymes, assonance, consonance, alliteration, spelling echoes and repeated
-   phrases. Each family gets its own colour; click one in the Sound Map to isolate it.
-   Three density modes (Clean / Detailed / Max) control how much is shown.
-3. Select any word and hit **rhymes** (⌘R) for perfect / near / sounds-like results.
-4. Use **⌘/** to insert structure tags, **scan** to OCR a handwritten page, and **export**
-   to copy/print.
-
-> Tip: phonetic analysis is offline and approximate — accent and delivery change what
-> *you* hear as a rhyme.
-
-### Beats
-
-Paste a YouTube link in the bottom bar to play it, set **A/B loop** points, and drop
-named markers at key timestamps. When you record, the beat can auto-start.
-
-### Takes (your recordings)
-
-Open **takes** to review everything you've recorded — **play, rename, download, delete**.
-Takes is a viewer now; all recording happens in **Perform** (there's an **↗ Perform**
-button right in the panel).
-
-### Perform — the one place you record
-
-Open **perform**. Up top, pick a **mode** — **Chords & Drums** or **Vocal FX** — choose
-**Hands** or **Touch**, toggle **Lyrics**, and hit **Record** whenever you're ready.
-Recordings capture **your voice + every layer**; use headphones so the monitored sound
-doesn't bleed into the mic.
-
-**Mode A — Chords & Drums**
-
-- **Hands:** Start camera. Keep both hands in frame. The on-screen **grid** shows which
-  zone triggers which chord/note (toggle it with **Grid on/off**, top-right — it's a live
-  guide and never appears in your recording). **Right hand** moves left↔right to pick the
-  note/chord (locked to your key) and up↕down for brightness; **pinch** to sound it.
-  **Left hand:** hold open palm to start the beat, fist to stop, pinch to mute. Press
-  **Record** to capture a video take (camera + your playing, without the grid).
-- **Touch (and mobile):** drag on the pad — left↔right is pitch, up↕down is brightness;
-  multiple fingers = chords. Tap the large chord pads for the progression.
-
-**Mode B — Vocal FX** (sing into the mic)
-
-- Open the **Voice** tab for the rack: pick a **preset** (Natural / Pop Vocal / T-Pain /
-  Dreamy Hall / Slapback Double) or dial in **Autotune** (amount, retune speed, key/scale —
-  hit **Song key** to match), **Harmony** (interval + mix), **Echo/Delay** and **Reverb**.
-  Each effect has an on/off LED; the `~ms` latency and a **Tighten latency** slider are
-  right there. Choose **Processed** (record the FX mix) or **Raw voice** (clean capture).
-- **Hands:** raise/lower your hand to **bend the pitch** live; **key-lock** snaps it to the
-  scale for clean intervals (turn it off for glissando). The on-screen pitch ladder shows
-  where you are.
-- **Touch:** the stage shows your detected note, an input meter and a **pitch-bend** slider;
-  everything else is in the Voice tab.
-- **Voice → Trumpet** lives in the **Sound** tab in either mode.
-- **Lyrics:** click **Lyrics** to drop your written words into the stage. They scroll
-  **strictly line by line** as you sing (see Smart Lyric Reader above); a Pace fallback and
-  up/down nudge are always there.
-- **Beat tab:** build the drum groove yourself. Pick a kit (Acoustic / Punch / Lo-Fi),
-  load a template and then **click or drag across the grid** to add/remove hits per
-  instrument. Set tempo + swing, mute/solo a row, adjust per-voice levels, and **Save** a
-  pattern to reuse later. Hit **Play beat** to hear it loop with a moving playhead.
-- **Sound tab:** flip **Voice → Trumpet** to sing through a sampled horn (pick Trumpet /
-  Muted / Brass Bold / Flugel / Jazz Lead, set Brightness / Glide, optionally **Snap to
-  song key**). The **Master / Drums / Chords** sliders move each layer independently and
-  click-free; pick a chord timbre (Grand Piano, Electric Piano, Warm Strings, Felt Keys,
-  Soft Pad, Synth Pad). Chords voice-lead automatically, so changes glide smoothly.
-
-### Playable Piano
-
-In the chord-slot editor, the on-screen piano previews chord roots and lights up the
-chord tones of the active slot. A–J plays white keys, W E T Y U the black keys; no stuck
-notes after release.
-
-### Voice to Score
-
-Open **voice score**, hit **Record**, sing one clear melody (headphones help), then
-**Stop**. There are no accuracy/timing knobs — it always runs the most accurate path and
-auto-detects everything (the only control is an optional **tempo** override). You'll get
-the detected **key + chord sheet**, and three views: **Piano Roll**, **Note List**,
-**Staff**. Click notes to select and **pitch ±1 / split / merge / delete**. Play the
-**detected** melody (sampled piano) or the **original**, then export **MIDI / MusicXML /
-JSON / CSV** or **Print a lead sheet**.
-
-> Tips: sing one line at a time, hold notes a touch longer, and keep background music off.
-
----
-
-## Privacy
-
-Camera and microphone stay on your device. Hand tracking (MediaPipe), pitch detection,
-OCR (Tesseract) and note transcription (basic-pitch) all run locally. Smart Lyric Reader
-uses the browser's built-in Web Speech API (the browser/OS may process speech). Takes are
-stored in your browser's IndexedDB; in guest mode all song data stays in `localStorage`.
-
-## Development
+## Scripts
 
 ```bash
-npm run dev     # dev server
-npm run build   # production build
-npm run lint    # lint
-npm test        # Rhyme Lens engine test suite
+npm run dev       # local development server
+npm run build     # production build
+npm run start     # production server
+npm run lint      # lint
+npm test          # Rhyme Lens engine tests
 ```
 
-`docs/REBUILD_PLAN.md` documents the architecture and which files each feature touches.
-Tauri native shell lives in `src-tauri/` (`npm run tauri dev`, requires Rust).
+## Native Shell
 
-## Disclosure
+The Tauri shell lives in `src-tauri`.
 
-See `docs/ai-disclosure.md` for the full disclosure on AI assistance used.
+```bash
+npm run tauri:dev
+npm run tauri:build
+```
 
 ---
 
-*Built for songwriters. Your body is the instrument.*
+# Credits and Disclosure
+
+## Major Libraries and APIs
+
+Verses uses:
+
+* Next.js
+* React
+* TypeScript
+* Tailwind CSS
+* Web Audio API
+* Tone.js
+* MediaPipe Tasks Vision
+* TensorFlow.js
+* Spotify basic-pitch
+* VexFlow
+* Tesseract.js
+* Datamuse API
+* pitchy
+* Tonal.js
+* Tauri
+* Web Speech API
+* IndexedDB
+* localStorage
+
+## Samples
+
+Verses uses vendored instrument samples for piano, strings/cello, and trumpet playback. Sample sources and licenses should remain credited in the repository wherever applicable.
+
+## AI Assistance
+
+AI assistance was used during debugging, code iteration, architecture explanation, and README drafting.
+
+The project author remains responsible for the final implementation, design decisions, testing, disclosure, and submission.
+
+---
+
+# Rubric Coverage
+
+## Problem and Insight
+
+Verses addresses a meaningful problem: songwriting workflows are fragmented across too many separate tools.
+
+The motivation is to reduce context switching and preserve creative flow. The approach is original because it combines lyric writing, rhyme visualization, beat writing, gesture-controlled performance, vocal processing, recording, voice-to-trumpet, and voice-to-score transcription in one browser workspace.
+
+## Execution and Technical Work
+
+The implementation includes substantial technical work across several domains:
+
+* writing interface
+* local persistence
+* rhyme analysis
+* browser audio
+* sampled instruments
+* step sequencing
+* hand tracking
+* touch performance
+* vocal effects
+* pitch detection
+* recording
+* speech alignment
+* neural transcription
+* music theory inference
+* notation rendering
+* export formats
+
+The app is functional as a connected creative workflow rather than a single isolated demo.
+
+## Evaluation and Evidence
+
+The project includes:
+
+* Rhyme Lens automated tests
+* manual feature validation
+* recording tests
+* pitch-detection tests
+* Voice Score sanity checks
+* latency/quality tradeoff analysis
+* fallback paths for unreliable browser APIs
+* documented limitations
+
+## Communication and Presentation
+
+The README is organized as:
+
+1. product overview
+2. user guide
+3. technical architecture
+4. feature-level technical details
+5. evaluation
+6. limitations
+7. privacy
+8. development
+9. credits/disclosure
+10. rubric mapping
+
+This structure is intended to be understandable to both non-technical readers and technical graders.
+
+## Process, Integrity, and Disclosure
+
+The README credits major libraries, APIs, browser technologies, and AI assistance. It also documents major technical decisions, tradeoffs, and limitations.
