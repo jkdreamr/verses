@@ -1835,11 +1835,77 @@ export function PerformModal({
               <div className="space-y-4">
                 {youtube && (
                   <div className="rounded-lg border border-line/60 bg-surface-2/50 p-3">
-                    <div className="mb-2 text-[9px] uppercase tracking-widest text-ink-mute/60">YouTube beat</div>
+                    <div className="mb-3 text-[9px] uppercase tracking-widest text-ink-mute/60">YouTube beat</div>
+                    
+                    {/* Timeline controls */}
+                    <div className="mb-3 flex items-center gap-2">
+                      <button
+                        onClick={toggleYtPlayback}
+                        disabled={!ytReady}
+                        className="flex-shrink-0 rounded border border-line px-2.5 py-1 text-sm text-ink-text transition-colors duration-150 hover:border-amber-gold/60 hover:text-amber-gold disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {ytPlaying ? "❚❚" : "▶"}
+                      </button>
+                      <div className="flex-1 flex items-center gap-2">
+                        <input
+                          type="range"
+                          min={0}
+                          max={Math.max(1, Math.floor(ytDuration))}
+                          value={Math.floor(ytTime)}
+                          onChange={(e) => ytSeek(Number(e.target.value))}
+                          disabled={!ytReady}
+                          className="flex-1 accent-amber-gold disabled:opacity-50"
+                        />
+                        <span className="flex-shrink-0 font-mono text-[10px] text-ink-mute tabular-nums">
+                          {fmtTime(ytTime)} / {fmtTime(ytDuration)}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    {/* Action buttons */}
+                    <div className="mb-3 flex flex-wrap items-center gap-1.5">
+                      <button
+                        onClick={ytBeginAddMarker}
+                        disabled={!ytReady}
+                        title="Mark this moment with a custom label"
+                        className="rounded border border-line px-2 py-1 text-[10px] text-ink-mute transition-colors duration-150 hover:border-amber-gold/60 hover:text-amber-gold disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        + mark
+                      </button>
+                      <button
+                        onClick={() => setYtLoopOn((v) => !v)}
+                        disabled={!ytReady}
+                        title={
+                          ytHasLoopRange
+                            ? "Loop between marked A and B"
+                            : "Loop the whole track (set A and B markers for a custom range)"
+                        }
+                        className={`rounded border px-2 py-1 text-[10px] transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed ${
+                          ytLoopOn
+                            ? "border-amber-gold/60 text-amber-gold"
+                            : "border-line text-ink-mute hover:text-ink-text"
+                        }`}
+                      >
+                        {ytLoopLabel}
+                      </button>
+                      <div className="flex items-center gap-1.5 ml-auto">
+                        <span className="text-[10px] text-ink-mute">vol</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          value={ytVolume}
+                          onChange={(e) => ytSetVolume(Number(e.target.value))}
+                          disabled={!ytReady}
+                          className="w-16 accent-amber-gold disabled:opacity-50"
+                          title="Volume"
+                        />
+                      </div>
+                    </div>
                     
                     {/* Markers */}
                     {ytMarkers.length > 0 || ytDraftLabel ? (
-                      <div className="mb-3 flex flex-wrap items-center gap-1.5 text-[11px]">
+                      <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
                         {ytMarkers.map((m) => {
                           const isA = ytLoopStart === m.time;
                           const isB = ytLoopEnd === m.time;
@@ -1855,22 +1921,22 @@ export function PerformModal({
                               <button
                                 onClick={() => ytSeek(m.time)}
                                 title={`Jump to ${fmtTime(m.time)}`}
-                                className="font-mono text-[10px]"
+                                className="font-mono text-[9px]"
                               >
                                 {fmtTime(m.time)}
                               </button>
                               <button
                                 onClick={() => ytSeek(m.time)}
                                 title={`Jump to ${fmtTime(m.time)}`}
-                                className="max-w-[12rem] truncate"
+                                className="max-w-[8rem] truncate"
                               >
                                 {m.label}
                               </button>
-                              <span className="ml-1 hidden gap-1 group-hover:inline-flex">
+                              <span className="ml-1 hidden gap-0.5 group-hover:inline-flex">
                                 <button
                                   onClick={() => ytSetLoopPoint("A", m.time)}
                                   title="Use as loop start"
-                                  className={`rounded border border-line px-1 text-[9px] uppercase tracking-wider hover:border-amber-gold/60 hover:text-amber-gold ${
+                                  className={`rounded border border-line px-1 text-[8px] uppercase tracking-wider hover:border-amber-gold/60 hover:text-amber-gold ${
                                     isA ? "border-amber-gold/60 text-amber-gold" : ""
                                   }`}
                                 >
@@ -1879,7 +1945,7 @@ export function PerformModal({
                                 <button
                                   onClick={() => ytSetLoopPoint("B", m.time)}
                                   title="Use as loop end"
-                                  className={`rounded border border-line px-1 text-[9px] uppercase tracking-wider hover:border-amber-gold/60 hover:text-amber-gold ${
+                                  className={`rounded border border-line px-1 text-[8px] uppercase tracking-wider hover:border-amber-gold/60 hover:text-amber-gold ${
                                     isB ? "border-amber-gold/60 text-amber-gold" : ""
                                   }`}
                                 >
@@ -1888,7 +1954,7 @@ export function PerformModal({
                                 <button
                                   onClick={() => ytRemoveMarker(m.id)}
                                   title="Remove marker"
-                                  className="rounded px-1 text-[10px] hover:text-ink-text"
+                                  className="rounded px-1 text-[9px] hover:text-ink-text"
                                 >
                                   ✕
                                 </button>
@@ -1904,7 +1970,7 @@ export function PerformModal({
                             }}
                             className="inline-flex items-center gap-1 rounded-full border border-amber-gold/60 bg-amber-gold/10 px-2 py-0.5"
                           >
-                            <span className="font-mono text-[10px] text-amber-gold">
+                            <span className="font-mono text-[9px] text-amber-gold">
                               {fmtTime(ytDraftLabel.time)}
                             </span>
                             <input
@@ -1921,7 +1987,7 @@ export function PerformModal({
                                 }
                               }}
                               placeholder="hook · verse 2 · drop…"
-                              className="w-32 bg-transparent text-[11px] text-amber-gold outline-none placeholder:text-amber-gold/50"
+                              className="w-24 bg-transparent text-[10px] text-amber-gold outline-none placeholder:text-amber-gold/50"
                             />
                           </form>
                         ) : null}
@@ -1929,70 +1995,13 @@ export function PerformModal({
                           <button
                             onClick={ytClearLoop}
                             title="Clear A↔B loop range"
-                            className="ml-1 rounded border border-line px-1.5 py-0.5 text-[10px] text-ink-mute hover:border-amber-gold/40 hover:text-ink-text"
+                            className="rounded border border-line px-1.5 py-0.5 text-[9px] text-ink-mute hover:border-amber-gold/40 hover:text-ink-text"
                           >
                             clear A↔B
                           </button>
                         ) : null}
                       </div>
                     ) : null}
-                    
-                    {/* Timeline controls */}
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={toggleYtPlayback}
-                        disabled={!ytReady}
-                        className="rounded border border-line px-3 py-1 text-sm text-ink-text transition-colors duration-150 hover:border-amber-gold/60 hover:text-amber-gold disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {ytPlaying ? "❚❚" : "▶"}
-                      </button>
-                      <input
-                        type="range"
-                        min={0}
-                        max={Math.max(1, Math.floor(ytDuration))}
-                        value={Math.floor(ytTime)}
-                        onChange={(e) => ytSeek(Number(e.target.value))}
-                        disabled={!ytReady}
-                        className="flex-1 accent-amber-gold disabled:opacity-50"
-                      />
-                      <span className="hidden font-mono text-[11px] text-ink-mute sm:inline">
-                        {fmtTime(ytTime)} / {fmtTime(ytDuration)}
-                      </span>
-                      <button
-                        onClick={ytBeginAddMarker}
-                        disabled={!ytReady}
-                        title="Mark this moment with a custom label"
-                        className="rounded border border-line px-2 py-1 text-[11px] text-ink-mute transition-colors duration-150 hover:border-amber-gold/60 hover:text-amber-gold disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        + mark
-                      </button>
-                      <button
-                        onClick={() => setYtLoopOn((v) => !v)}
-                        disabled={!ytReady}
-                        title={
-                          ytHasLoopRange
-                            ? "Loop between marked A and B"
-                            : "Loop the whole track (set A and B markers for a custom range)"
-                        }
-                        className={`rounded border px-2 py-1 text-[11px] transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed ${
-                          ytLoopOn
-                            ? "border-amber-gold/60 text-amber-gold"
-                            : "border-line text-ink-mute hover:text-ink-text"
-                        }`}
-                      >
-                        {ytLoopLabel}
-                      </button>
-                      <input
-                        type="range"
-                        min={0}
-                        max={100}
-                        value={ytVolume}
-                        onChange={(e) => ytSetVolume(Number(e.target.value))}
-                        disabled={!ytReady}
-                        className="w-20 accent-amber-gold disabled:opacity-50"
-                        title="Volume"
-                      />
-                    </div>
                     
                     {!ytReady && (
                       <div className="mt-2 text-[9px] text-ink-mute/50">
