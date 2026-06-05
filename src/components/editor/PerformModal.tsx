@@ -436,6 +436,8 @@ export function PerformModal({
   const micStreamRef = useRef<MediaStream | null>(null);
   const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const micRecGainRef = useRef<GainNode | null>(null);
+  // Raw mic stream for photobooth mode (bypasses Web Audio entirely)
+  const rawMicStreamRef = useRef<MediaStream | null>(null);
   
   // ── YouTube player for beat playback in Perform ──
   const ytPlayerRef = useRef<YouTubePlayer | null>(null);
@@ -1119,6 +1121,28 @@ export function PerformModal({
     }
   }, []);
 
+  // ── Raw mic for photobooth mode (bypasses Web Audio entirely) ──
+  const ensureRawMic = useCallback(async (): Promise<MediaStream | null> => {
+    if (rawMicStreamRef.current) return rawMicStreamRef.current;
+    try {
+      // Get raw mic with NO processing - just like phone/laptop video
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { 
+          echoCancellation: false, 
+          noiseSuppression: false, 
+          autoGainControl: false 
+        },
+        video: false,
+      });
+      rawMicStreamRef.current = stream;
+      setMicStream(stream);
+      return stream;
+    } catch (err) {
+      setMicError(`Mic unavailable — recordings won't include your voice. ${err instanceof Error ? err.message : ""}`);
+      return null;
+    }
+  }, []);
+
   const stopMic = useCallback(() => {
     try { micRecGainRef.current?.disconnect(); } catch { /* */ }
     try { dryMonitorRef.current?.disconnect(); } catch { /* */ }
@@ -1128,6 +1152,12 @@ export function PerformModal({
     micSourceRef.current = null;
     micRecGainRef.current = null;
     dryMonitorRef.current = null;
+    setMicStream(null);
+  }, []);
+
+  const stopRawMic = useCallback(() => {
+    rawMicStreamRef.current?.getTracks().forEach((t) => t.stop());
+    rawMicStreamRef.current = null;
     setMicStream(null);
   }, []);
 
@@ -1168,7 +1198,7 @@ export function PerformModal({
       setActiveSlot(null);
       setTab("voice");
     } else if (perfMode === "photobooth") {
-      void ensureMic();
+      void ensureRawMic();
       releaseChord();
       rightSoundingRef.current = false;
       setActiveSlot(null);
@@ -1197,55 +1227,107 @@ export function PerformModal({
 
   // ── Recording ──
   const startRecording = useCallback(async () => {
-    const engine = ensureEngine();
-    await resumeEngine();
-    await ensureMic(); // so the take captures the singer's voice + the instruments
-    const audioStream = engine.recordDest.stream;
-
-    // With the camera on we record the PERFORMANCE picture from the capture
-    // canvas (camera + skeleton + flashes) — never the grid overlay — combined
-    // with the audio tap. Otherwise (touch mode) it's an audio-only take.
-    const cap = captureCanvasRef.current;
-    const isVideo = inputMode === "camera" && camActive && !!cap;
-    let stream: MediaStream;
-    let mime: string;
-    if (isVideo && cap) {
-      const videoStream = cap.captureStream(30);
-      stream = new MediaStream([
-        ...videoStream.getVideoTracks(),
-        ...audioStream.getAudioTracks(),
-      ]);
-      mime = pickMime(VIDEO_MIME) ?? "video/webm";
-    } else {
-      stream = audioStream;
-      mime = pickMime(AUDIO_MIME) ?? "audio/webm";
-    }
-
-    const recorder = new MediaRecorder(stream, { mimeType: mime });
-    chunksRef.current = [];
-    recStartRef.current = Date.now();
-    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-    recorder.onstop = async () => {
-      const blob = new Blob(chunksRef.current, { type: recorder.mimeType || mime });
-      if (blob.size === 0) return;
-      const take: Take = {
-        id: newTakeId(),
-        song_id: songId,
-        label: `perform ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
-        mime: recorder.mimeType || mime,
-        duration: (Date.now() - recStartRef.current) / 1000,
-        size: blob.size,
-        has_video: isVideo,
-        created_at: new Date().toISOString(),
-        blob,
+    const isPhotobooth = perfMode === "photobooth";
+    
+    if (isPhotobooth) {
+      // Photobooth mode: use raw mic stream directly, bypass Web Audio entirely
+      await ensureRawMic();
+      const rawStream = rawMicStreamRef.current;
+      if (!rawStream) return;
+      
+      const cap = captureCanvasRef.current;
+      const isVideo = inputMode === "camera" && camActive && !!cap;
+      let stream: MediaStream;
+      let mime: string;
+      
+      if (isVideo && cap) {
+        const videoStream = cap.captureStream(30);
+        stream = new MediaStream([
+          ...videoStream.getVideoTracks(),
+          ...rawStream.getAudioTracks(),
+        ]);
+        mime = pickMime(VIDEO_MIME) ?? "video/webm";
+      } else {
+        stream = rawStream;
+        mime = pickMime(AUDIO_MIME) ?? "audio/webm";
+      }
+      
+      const recorder = new MediaRecorder(stream, { mimeType: mime });
+      chunksRef.current = [];
+      recStartRef.current = Date.now();
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      recorder.onstop = async () => {
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || mime });
+        if (blob.size === 0) return;
+        const take: Take = {
+          id: newTakeId(),
+          song_id: songId,
+          label: `photobooth ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
+          mime: recorder.mimeType || mime,
+          duration: (Date.now() - recStartRef.current) / 1000,
+          size: blob.size,
+          has_video: isVideo,
+          created_at: new Date().toISOString(),
+          blob,
+        };
+        await takesStore.put(take);
+        onTakeSaved();
       };
-      await takesStore.put(take);
-      onTakeSaved();
-    };
-    recorder.start(250);
-    recorderRef.current = recorder;
-    setRecording(true);
-  }, [onTakeSaved, songId, inputMode, camActive, ensureMic]);
+      recorder.start(250);
+      recorderRef.current = recorder;
+      setRecording(true);
+    } else {
+      // Normal mode: use Web Audio engine for processed audio
+      const engine = ensureEngine();
+      await resumeEngine();
+      await ensureMic(); // so the take captures the singer's voice + the instruments
+      const audioStream = engine.recordDest.stream;
+
+      // With the camera on we record the PERFORMANCE picture from the capture
+      // canvas (camera + skeleton + flashes) — never the grid overlay — combined
+      // with the audio tap. Otherwise (touch mode) it's an audio-only take.
+      const cap = captureCanvasRef.current;
+      const isVideo = inputMode === "camera" && camActive && !!cap;
+      let stream: MediaStream;
+      let mime: string;
+      if (isVideo && cap) {
+        const videoStream = cap.captureStream(30);
+        stream = new MediaStream([
+          ...videoStream.getVideoTracks(),
+          ...audioStream.getAudioTracks(),
+        ]);
+        mime = pickMime(VIDEO_MIME) ?? "video/webm";
+      } else {
+        stream = audioStream;
+        mime = pickMime(AUDIO_MIME) ?? "audio/webm";
+      }
+
+      const recorder = new MediaRecorder(stream, { mimeType: mime });
+      chunksRef.current = [];
+      recStartRef.current = Date.now();
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      recorder.onstop = async () => {
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || mime });
+        if (blob.size === 0) return;
+        const take: Take = {
+          id: newTakeId(),
+          song_id: songId,
+          label: `perform ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
+          mime: recorder.mimeType || mime,
+          duration: (Date.now() - recStartRef.current) / 1000,
+          size: blob.size,
+          has_video: isVideo,
+          created_at: new Date().toISOString(),
+          blob,
+        };
+        await takesStore.put(take);
+        onTakeSaved();
+      };
+      recorder.start(250);
+      recorderRef.current = recorder;
+      setRecording(true);
+    }
+  }, [onTakeSaved, songId, inputMode, camActive, ensureMic, ensureRawMic, perfMode]);
 
   const stopRecording = useCallback(() => {
     if (recorderRef.current && recorderRef.current.state !== "inactive") {
@@ -1270,6 +1352,7 @@ export function PerformModal({
     setRecElapsed(0);
     stopCamera();
     stopMic();
+    stopRawMic();
     stopDrums();
     releaseChord();
     smartStop();
@@ -1279,7 +1362,7 @@ export function PerformModal({
     setBeatPlaying(false);
     setPerfMode("chords");
     void suspendBus();
-  }, [suspendBus, releaseChord, stopCamera, stopMic, stopDrums, smartStop]);
+  }, [suspendBus, releaseChord, stopCamera, stopMic, stopRawMic, stopDrums, smartStop]);
 
   // Keep a stable ref to the latest cleanup so the close/unmount effects depend
   // only on the `open` primitive — never on `cleanup` itself (which changes when
