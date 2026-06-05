@@ -252,7 +252,7 @@ export function TouchInstrument({
         <div className="pointer-events-none absolute bottom-2 left-3 text-[10px] uppercase tracking-wider text-ink-mute/40">
           mellow
         </div>
-        <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-wider text-ink-mute/30">
+        <div className="pointer-events-none absolute bottom-2 right-3 text-[10px] uppercase tracking-wider text-ink-mute/30">
           low ← pitch → high
         </div>
         {!audioReady && (

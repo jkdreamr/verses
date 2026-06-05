@@ -1051,19 +1051,19 @@ export function PerformModal({
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-bg print:hidden">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-line/60 px-5 py-3">
-        <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between gap-2 border-b border-line/60 px-3 py-3 sm:px-5">
+        <div className="flex items-center gap-2 sm:gap-3">
           <span className="hidden font-serif text-base tracking-tight text-ink-text sm:inline">Perform</span>
           {/* Performance mode — the headline switcher */}
           <div role="group" aria-label="Performance mode" className="flex overflow-hidden rounded-lg border border-line/70">
             <button
               onClick={() => setPerfMode("chords")} aria-pressed={perfMode === "chords"}
-              className={`px-3 py-1 text-[11px] font-medium transition-colors ${perfMode === "chords" ? "bg-accent/15 text-accent" : "text-ink-mute hover:text-ink-text"}`}
-            >Chords &amp; Drums</button>
+              className={`whitespace-nowrap px-3 py-1 text-[11px] font-medium transition-colors ${perfMode === "chords" ? "bg-accent/15 text-accent" : "text-ink-mute hover:text-ink-text"}`}
+            ><span className="sm:hidden">Chords</span><span className="hidden sm:inline">Chords &amp; Drums</span></button>
             <button
               onClick={() => setPerfMode("vocal")} aria-pressed={perfMode === "vocal"}
-              className={`px-3 py-1 text-[11px] font-medium transition-colors ${perfMode === "vocal" ? "bg-accent/15 text-accent" : "text-ink-mute hover:text-ink-text"}`}
-            >Vocal FX</button>
+              className={`whitespace-nowrap px-3 py-1 text-[11px] font-medium transition-colors ${perfMode === "vocal" ? "bg-accent/15 text-accent" : "text-ink-mute hover:text-ink-text"}`}
+            ><span className="sm:hidden">Vocal</span><span className="hidden sm:inline">Vocal FX</span></button>
           </div>
           {recording && (
             <span className="flex items-center gap-1.5 rounded-full bg-danger/15 px-2.5 py-0.5 font-mono text-[10px] text-danger">
