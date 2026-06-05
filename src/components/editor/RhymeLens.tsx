@@ -121,6 +121,33 @@ export type CharHighlight = HighlightLayer[];
 // Build character-offset highlight map from analysis result
 // ---------------------------------------------------------------------------
 
+// Types that render as secondary layers (underline, dashed etc.) rather than
+// replacing the primary fill. These may coexist on the same characters as a
+// stronger primary family.
+const SECONDARY_LAYER_TYPES = new Set<RhymeType>([
+  "assonance", "consonance", "alliteration", "eye", "repetition",
+  "slant", "family", "rich",
+]);
+
+// Priority weight for choosing the dominant (fill) layer per character position
+function familyPriority(f: RhymeFamily): number {
+  switch (f.type) {
+    case "end": case "chain": return 100;
+    case "multi": case "compound": case "mosaic": return 90;
+    case "perfect": return 85;
+    case "rich": return 80;
+    case "internal": return 70;
+    case "cross": return 60;
+    case "repetition": return 50;
+    case "slant": return 40;
+    case "family": return 35;
+    case "consonance": case "assonance": return 30;
+    case "alliteration": return 20;
+    case "eye": return 10;
+    default: return 5;
+  }
+}
+
 export function buildCharHighlights(
   analysis: RhymeLensResult | null,
   focusFamilyId?: string | null
@@ -128,11 +155,9 @@ export function buildCharHighlights(
   const map = new Map<number, CharHighlight>();
   if (!analysis) return map;
 
-  // Sort families so stronger ones overwrite weaker ones last (stronger wins)
-  const sorted = [...analysis.families].sort((a, b) => {
-    const str = (s: string) => (s === "strong" ? 3 : s === "medium" ? 2 : 1);
-    return str(a.strength) - str(b.strength);
-  });
+  // Sort families: primary-fill families first (highest priority last so
+  // they end up as the first/dominant layer), secondary types at the end.
+  const sorted = [...analysis.families].sort((a, b) => familyPriority(a) - familyPriority(b));
 
   // If focus mode, only show the focused family
   const families = focusFamilyId
@@ -140,10 +165,16 @@ export function buildCharHighlights(
     : sorted;
 
   for (const family of families) {
+    const isSecondary = SECONDARY_LAYER_TYPES.has(family.type);
     for (const span of family.spans) {
       for (let c = span.start; c < span.end; c++) {
         const layers = map.get(c) ?? [];
         if (layers.some((layer) => layer.familyId === family.id)) continue;
+
+        // For secondary types, only add the layer if it doesn't already have
+        // the same type from another family at this position (avoid spam)
+        if (isSecondary && layers.some((l) => l.type === family.type)) continue;
+
         layers.push({
           colorIndex: family.colorIndex,
           familyId: family.id,

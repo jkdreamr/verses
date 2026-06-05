@@ -53,7 +53,6 @@ export type RhymeType =
   | "repetition"
   | "cross"
   | "chain"
-  | "dense"
   | "weak";
 
 export type DensityMode = "clean" | "detailed" | "max";
@@ -179,7 +178,7 @@ export const MAX_OPTIONS: RhymeLensOptions = {
   enabledTypes: new Set<RhymeType>([
     "end", "internal", "multi", "compound", "mosaic",
     "rich", "slant", "family", "assonance", "consonance", "alliteration",
-    "eye", "repetition", "cross", "chain", "dense",
+    "eye", "repetition", "cross", "chain",
   ]),
   strongOnly: false,
   maxFamilies: 120,
@@ -191,17 +190,21 @@ export const MAX_OPTIONS: RhymeLensOptions = {
 
 const STOP_WORDS = new Set([
   "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for", "of",
-  "with", "by", "from", "up", "about", "into", "through", "after", "is", "are",
+  "with", "by", "from", "up", "about", "into", "after", "is", "are",
   "was", "were", "be", "been", "have", "has", "had", "do", "did", "will",
-  "would", "could", "should", "may", "might", "shall", "can", "need", "i",
-  "me", "my", "we", "our", "you", "your", "he", "she", "it", "they", "his",
-  "her", "its", "their", "this", "that", "these", "those", "not", "no", "so",
+  "would", "could", "should", "may", "might", "shall", "can", "need",
+  "me", "my", "we", "our", "your", "he", "she", "it", "they", "his",
+  "her", "its", "their", "this", "that", "these", "those", "not",
   "as", "if", "then", "than", "just", "all", "each", "some", "any",
-  "now", "here", "there", "when", "where", "how", "what", "who",
-  "very", "too", "also", "only", "still", "even", "ever", "never",
-  "out", "off", "over", "under", "again", "once", "much", "more",
+  "when", "where", "what", "who",
+  "very", "also", "only", "still", "even", "ever", "never",
+  "out", "over", "under", "again", "once", "much", "more",
   "most", "such", "own", "other", "another", "both", "few", "many",
-  "get", "got", "go", "went", "come", "came", "let", "keep", "put",
+  "get", "got", "went", "come", "came", "let", "keep", "put",
+  // Note: "i", "you", "no", "so", "go", "too", "me", "we", "he", "she",
+  // "through", "here", "there", "now", "how", "off" are intentionally NOT in
+  // stop words — they are handled by STRONG_SHORT_RHYME_ANCHORS so they can
+  // participate in rhyme families when they are line endings or part of chains.
 ]);
 
 // ---------------------------------------------------------------------------
@@ -225,10 +228,23 @@ const FILLER_PHRASES = new Set([
 ]);
 
 const STRONG_SHORT_RHYME_ANCHORS = new Set([
-  "hi", "bye", "my", "why", "cry", "fly", "sky", "eye", "i",
-  "you", "too", "through", "blue", "who", "do",
-  "me", "see", "be", "free", "we", "he", "she",
-  "no", "go", "show", "flow", "though", "so",
+  // AY family
+  "hi", "bye", "my", "why", "cry", "fly", "sky", "eye", "i", "die", "lie",
+  "pie", "tie", "high",
+  // UW family
+  "you", "too", "through", "blue", "who", "do", "two", "true", "new", "knew",
+  "crew", "grew", "flew", "blew",
+  // IY family
+  "me", "see", "sea", "be", "free", "we", "he", "she", "tree", "three",
+  "key", "tea",
+  // OW family
+  "no", "go", "show", "flow", "glow", "blow", "snow", "grow", "throw",
+  "though", "dough", "owe", "low", "slow", "know", "so", "oh", "yo",
+  "row", "toe", "foe", "woe",
+  // AW family  
+  "cow", "now", "how", "wow", "brow", "bough", "down", "town",
+  // short content words that work as end rhymes
+  "off", "on", "up", "out",
 ]);
 
 function isStrongRhymeAnchor(word: string, isLineEnd = false): boolean {
@@ -520,40 +536,55 @@ function scoreEndRhyme(a: PhoneticShape, b: PhoneticShape): number {
 
 function scoreSlantRhyme(a: PhoneticShape, b: PhoneticShape): number {
   if (a.normalized === b.normalized) return 0;
-  if (!a.token.finalVowel || a.token.finalVowel !== b.token.finalVowel) return 0;
+  // Bail if this would be a strong true rhyme — handled by end/internal
+  if (scoreEndRhyme(a, b) > 0.6) return 0;
+
   let score = 0;
 
-  score += 0.35;
-  if (a.token.familyKey && a.token.familyKey === b.token.familyKey) {
-    score += 0.25;
+  // Same final vowel is the base requirement for classic slant
+  const sameVowel = a.token.finalVowel && a.token.finalVowel === b.token.finalVowel;
+  if (sameVowel) {
+    score += 0.35;
+    if (a.token.familyKey && a.token.familyKey === b.token.familyKey) {
+      score += 0.25;
+    }
+    const aFinal = a.token.finalConsonants.split("-").filter(Boolean);
+    const bFinal = b.token.finalConsonants.split("-").filter(Boolean);
+    if (aFinal.length && bFinal.length && aFinal.some((p) => bFinal.includes(p))) {
+      score += 0.15;
+    }
+    // Ending shape partial match
+    const endA3 = a.endingShape.slice(-3);
+    const endB3 = b.endingShape.slice(-3);
+    if (endA3 === endB3 && endA3.length >= 2) score += 0.25;
   }
-  const aFinal = a.token.finalConsonants.split("-").filter(Boolean);
-  const bFinal = b.token.finalConsonants.split("-").filter(Boolean);
-  if (aFinal.length && bFinal.length && aFinal.some((p) => bFinal.includes(p))) {
-    score += 0.15;
+
+  // Additive/subtractive: one word is the other + a final consonant
+  // e.g. time/times, dream/dreams, light/lighting
+  if (!sameVowel || score < 0.3) {
+    const aPk = a.token.perfectKey;
+    const bPk = b.token.perfectKey;
+    if (aPk && bPk) {
+      const shorter = aPk.length < bPk.length ? aPk : bPk;
+      const longer  = aPk.length < bPk.length ? bPk : aPk;
+      if (shorter.length >= 2 && longer.startsWith(shorter)) {
+        // longer is an additive extension of shorter
+        score = Math.max(score, 0.50);
+      }
+    }
   }
 
   // Partial vowel skeleton overlap
   const vA = a.vowelSkeleton;
   const vB = b.vowelSkeleton;
-  if (vA && vB) {
+  if (vA && vB && sameVowel) {
     const shorter = vA.length < vB.length ? vA : vB;
     const longer = vA.length < vB.length ? vB : vA;
     const lastN = Math.min(shorter.length, 2);
     if (longer.slice(-lastN) === shorter.slice(-lastN) && lastN >= 1) {
-      score += 0.3;
+      score += 0.1;
     }
   }
-  // Similar final consonant
-  if (a.finalConsonantCluster && b.finalConsonantCluster) {
-    if (a.finalConsonantCluster[0] === b.finalConsonantCluster[0]) score += 0.2;
-  }
-  // Ending shape partial match (last 2-3 chars)
-  const endA3 = a.endingShape.slice(-3);
-  const endB3 = b.endingShape.slice(-3);
-  if (endA3 === endB3 && endA3.length >= 2) score += 0.25;
-  // Different from perfect rhyme (these should have lower score)
-  if (scoreEndRhyme(a, b) > 0.6) return 0; // strong rhyme, not slant
 
   return Math.min(score, 0.7);
 }
@@ -1586,6 +1617,13 @@ export function analyzeRhymeLens(
     return sb - sa;
   });
 
+  // Types that are "layerable" — they can coexist as secondary annotations
+  // even when a stronger family has already claimed the same range.
+  const LAYERABLE_TYPES = new Set<RhymeType>([
+    "repetition", "eye", "alliteration", "slant", "family",
+    "assonance", "consonance", "rich",
+  ]);
+
   for (const fam of familiesByStrength) {
     const keptSpans: RhymeSpan[] = [];
     for (const span of fam.spans) {
@@ -1594,14 +1632,14 @@ export function analyzeRhymeLens(
       const myStrength = typeStrength(fam.type) + (fam.confidence * 2);
 
       if (!existing || myStrength > existing.strength) {
+        // Primary claim: this span's range is taken by this family
         keptSpans.push(span);
         claimedRanges.set(rangeKey, { familyIdx: resolvedFamilies.length, strength: myStrength });
-      } else if (
-        (fam.type === "repetition" || fam.type === "eye" || fam.type === "alliteration" ||
-          fam.type === "slant" || fam.type === "family") &&
-        existing
-      ) {
-        // Layerable annotations can coexist with the primary sound-family fill.
+      } else if (LAYERABLE_TYPES.has(fam.type)) {
+        // Secondary layer: always allow these types to coexist as overlaid annotations
+        keptSpans.push(span);
+      } else if (myStrength >= existing.strength - 1) {
+        // Near-equal strength — allow the span (e.g. internal vs cross)
         keptSpans.push(span);
       }
     }
