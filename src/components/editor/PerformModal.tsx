@@ -1166,7 +1166,7 @@ export function PerformModal({
               {showLyrics && <LyricTeleprompter smart={smart} onClose={toggleLyrics} />}
             </div>
           ) : perfMode === "vocal" ? (
-            <div className="relative flex flex-1 flex-col items-center justify-center gap-7 overflow-y-auto p-6 text-center">
+            <div className={`relative flex flex-1 flex-col items-center justify-center gap-7 overflow-y-auto p-6 text-center ${showLyrics ? "pb-[46%]" : ""}`}>
               {showLyrics && <LyricTeleprompter smart={smart} onClose={toggleLyrics} />}
               <div>
                 <div className="text-[10px] uppercase tracking-[0.2em] text-ink-mute/50">You&apos;re singing</div>
