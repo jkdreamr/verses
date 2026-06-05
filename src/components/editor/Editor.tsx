@@ -651,6 +651,7 @@ export function Editor({ songId }: { songId: string }) {
           songId={song.id}
           lyrics={song.content}
           youtube={youtube}
+          onYoutubeChange={setYoutube}
           onTakeSaved={() => setTakesReloadKey((k) => k + 1)}
         />
       )}

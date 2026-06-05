@@ -409,6 +409,7 @@ export function PerformModal({
   songId,
   lyrics,
   youtube,
+  onYoutubeChange,
   onTakeSaved,
 }: {
   open: boolean;
@@ -416,9 +417,12 @@ export function PerformModal({
   songId: string;
   lyrics?: string;
   youtube?: YoutubeSession | null;
+  onYoutubeChange?: (s: YoutubeSession | null) => void;
   onTakeSaved: () => void;
 }) {
   const isMobile = useIsMobile();
+  
+  const fmtTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
   // ── Camera / MediaPipe refs ──
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -444,6 +448,16 @@ export function PerformModal({
   const ytContainerId = useRef(`yt-perf-${Math.random().toString(36).slice(2, 8)}`);
   const [ytPlaying, setYtPlaying] = useState(false);
   const [ytReady, setYtReady] = useState(false);
+  const [ytTime, setYtTime] = useState(0);
+  const [ytDuration, setYtDuration] = useState(0);
+  const [ytVolume, setYtVolume] = useState(60);
+  const [ytLoopOn, setYtLoopOn] = useState(false);
+  const [ytDraftLabel, setYtDraftLabel] = useState<{ time: number; label: string } | null>(null);
+  
+  const ytMarkers = useMemo(() => [...(youtube?.markers ?? [])].sort((a, b) => a.time - b.time), [youtube?.markers]);
+  const ytLoopStart = youtube?.loop_start ?? null;
+  const ytLoopEnd = youtube?.loop_end ?? null;
+  const ytHasLoopRange = ytLoopStart !== null && ytLoopEnd !== null && typeof ytLoopStart === "number" && typeof ytLoopEnd === "number" && ytLoopEnd > ytLoopStart;
   
   // Load YouTube player when youtube session is available
   useEffect(() => {
@@ -470,11 +484,18 @@ export function PerformModal({
           onReady: () => {
             setYtReady(true);
             ytPlayerRef.current = player;
+            player.setVolume(ytVolume);
+            setYtDuration(player.getDuration());
           },
           onStateChange: (e: { data: number }) => {
             if (window.YT) {
               if (e.data === window.YT.PlayerState.PLAYING) setYtPlaying(true);
               else if (e.data === window.YT.PlayerState.PAUSED || e.data === window.YT.PlayerState.ENDED) setYtPlaying(false);
+              if (e.data === window.YT.PlayerState.ENDED && ytLoopOn) {
+                const start = ytLoopStart ?? 0;
+                player.seekTo(start, true);
+                player.playVideo();
+              }
             }
           },
         },
@@ -489,7 +510,30 @@ export function PerformModal({
       setYtReady(false);
       setYtPlaying(false);
     };
-  }, [youtube]);
+  }, [youtube, ytVolume, ytLoopOn, ytLoopStart]);
+  
+  // Poll time and handle loop
+  useEffect(() => {
+    if (!ytReady) return;
+    const interval = setInterval(() => {
+      const p = ytPlayerRef.current;
+      if (!p) return;
+      try {
+        const now = p.getCurrentTime();
+        setYtTime(now);
+        const d = p.getDuration();
+        if (d && d !== ytDuration) setYtDuration(d);
+        if (ytLoopOn && ytHasLoopRange) {
+          if (now >= (ytLoopEnd as number) - 0.05) {
+            p.seekTo(ytLoopStart as number, true);
+          }
+        }
+      } catch {
+        // player not ready
+      }
+    }, 250);
+    return () => clearInterval(interval);
+  }, [ytReady, ytLoopOn, ytHasLoopRange, ytLoopStart, ytLoopEnd, ytDuration]);
   
   const toggleYtPlayback = useCallback(() => {
     if (!ytPlayerRef.current || !ytReady) return;
@@ -500,11 +544,68 @@ export function PerformModal({
     }
   }, [ytPlaying, ytReady]);
   
-  const stopYtPlayback = useCallback(() => {
+  const ytSeek = useCallback((time: number) => {
     if (!ytPlayerRef.current || !ytReady) return;
-    ytPlayerRef.current.pauseVideo();
-    ytPlayerRef.current.seekTo(0);
+    ytPlayerRef.current.seekTo(time, true);
   }, [ytReady]);
+  
+  const ytSetVolume = useCallback((vol: number) => {
+    if (!ytPlayerRef.current || !ytReady) return;
+    ytPlayerRef.current.setVolume(vol);
+    setYtVolume(vol);
+  }, [ytReady]);
+  
+  const ytBeginAddMarker = useCallback(() => {
+    if (!ytPlayerRef.current || !ytReady) return;
+    const time = ytPlayerRef.current.getCurrentTime();
+    setYtDraftLabel({ time, label: "" });
+  }, [ytReady]);
+  
+  const ytCommitMarker = useCallback(() => {
+    if (!ytDraftLabel || !youtube || !onYoutubeChange) return;
+    const newMarker = {
+      id: `marker-${Date.now()}`,
+      time: ytDraftLabel.time,
+      label: ytDraftLabel.label || `mark ${fmtTime(ytDraftLabel.time)}`,
+    };
+    const next: YoutubeSession = {
+      ...youtube,
+      markers: [...(youtube.markers ?? []), newMarker],
+    };
+    onYoutubeChange(next);
+    setYtDraftLabel(null);
+  }, [ytDraftLabel, youtube, onYoutubeChange]);
+  
+  const ytCancelMarker = useCallback(() => {
+    setYtDraftLabel(null);
+  }, []);
+  
+  const ytRemoveMarker = useCallback((id: string) => {
+    if (!youtube || !onYoutubeChange) return;
+    const next: YoutubeSession = {
+      ...youtube,
+      markers: (youtube.markers ?? []).filter((m) => m.id !== id),
+    };
+    onYoutubeChange(next);
+  }, [youtube, onYoutubeChange]);
+  
+  const ytSetLoopPoint = useCallback((which: "A" | "B", time: number) => {
+    if (!youtube || !onYoutubeChange) return;
+    const next: YoutubeSession = {
+      ...youtube,
+      loop_start: which === "A" ? time : youtube.loop_start ?? null,
+      loop_end: which === "B" ? time : youtube.loop_end ?? null,
+    };
+    onYoutubeChange(next);
+  }, [youtube, onYoutubeChange]);
+  
+  const ytClearLoop = useCallback(() => {
+    if (!youtube || !onYoutubeChange) return;
+    onYoutubeChange({ ...youtube, loop_start: null, loop_end: null });
+    setYtLoopOn(false);
+  }, [youtube, onYoutubeChange]);
+  
+  const ytLoopLabel = ytHasLoopRange ? `loop ${fmtTime(ytLoopStart as number)}↔${fmtTime(ytLoopEnd as number)}` : "loop";
   
   const rightHandRef = useRef<Hand>({ present: false, x: 0.5, y: 0.5, pinch: false, gesture: null });
   const showGridRef = useRef(true);
@@ -1378,8 +1479,6 @@ export function PerformModal({
 
   const handleClose = useCallback(() => onClose(), [onClose]);
 
-  const fmtTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-
   if (!open) return null;
 
   return (
@@ -1737,25 +1836,164 @@ export function PerformModal({
                 {youtube && (
                   <div className="rounded-lg border border-line/60 bg-surface-2/50 p-3">
                     <div className="mb-2 text-[9px] uppercase tracking-widest text-ink-mute/60">YouTube beat</div>
-                    <div className="text-[10px] text-ink-mute/70 mb-2">
-                      {youtube.youtube_url}
-                    </div>
+                    
+                    {/* Markers */}
+                    {ytMarkers.length > 0 || ytDraftLabel ? (
+                      <div className="mb-3 flex flex-wrap items-center gap-1.5 text-[11px]">
+                        {ytMarkers.map((m) => {
+                          const isA = ytLoopStart === m.time;
+                          const isB = ytLoopEnd === m.time;
+                          return (
+                            <span
+                              key={m.id}
+                              className={`group inline-flex items-center gap-1 rounded-full border px-2 py-0.5 transition-colors duration-150 ${
+                                isA || isB
+                                  ? "border-amber-gold/60 bg-amber-gold/10 text-amber-gold"
+                                  : "border-line text-ink-mute hover:border-amber-gold/40 hover:text-ink-text"
+                              }`}
+                            >
+                              <button
+                                onClick={() => ytSeek(m.time)}
+                                title={`Jump to ${fmtTime(m.time)}`}
+                                className="font-mono text-[10px]"
+                              >
+                                {fmtTime(m.time)}
+                              </button>
+                              <button
+                                onClick={() => ytSeek(m.time)}
+                                title={`Jump to ${fmtTime(m.time)}`}
+                                className="max-w-[12rem] truncate"
+                              >
+                                {m.label}
+                              </button>
+                              <span className="ml-1 hidden gap-1 group-hover:inline-flex">
+                                <button
+                                  onClick={() => ytSetLoopPoint("A", m.time)}
+                                  title="Use as loop start"
+                                  className={`rounded border border-line px-1 text-[9px] uppercase tracking-wider hover:border-amber-gold/60 hover:text-amber-gold ${
+                                    isA ? "border-amber-gold/60 text-amber-gold" : ""
+                                  }`}
+                                >
+                                  A
+                                </button>
+                                <button
+                                  onClick={() => ytSetLoopPoint("B", m.time)}
+                                  title="Use as loop end"
+                                  className={`rounded border border-line px-1 text-[9px] uppercase tracking-wider hover:border-amber-gold/60 hover:text-amber-gold ${
+                                    isB ? "border-amber-gold/60 text-amber-gold" : ""
+                                  }`}
+                                >
+                                  B
+                                </button>
+                                <button
+                                  onClick={() => ytRemoveMarker(m.id)}
+                                  title="Remove marker"
+                                  className="rounded px-1 text-[10px] hover:text-ink-text"
+                                >
+                                  ✕
+                                </button>
+                              </span>
+                            </span>
+                          );
+                        })}
+                        {ytDraftLabel ? (
+                          <form
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              ytCommitMarker();
+                            }}
+                            className="inline-flex items-center gap-1 rounded-full border border-amber-gold/60 bg-amber-gold/10 px-2 py-0.5"
+                          >
+                            <span className="font-mono text-[10px] text-amber-gold">
+                              {fmtTime(ytDraftLabel.time)}
+                            </span>
+                            <input
+                              autoFocus
+                              value={ytDraftLabel.label}
+                              onChange={(e) =>
+                                setYtDraftLabel({ ...ytDraftLabel, label: e.target.value })
+                              }
+                              onBlur={ytCommitMarker}
+                              onKeyDown={(e) => {
+                                if (e.key === "Escape") {
+                                  e.preventDefault();
+                                  ytCancelMarker();
+                                }
+                              }}
+                              placeholder="hook · verse 2 · drop…"
+                              className="w-32 bg-transparent text-[11px] text-amber-gold outline-none placeholder:text-amber-gold/50"
+                            />
+                          </form>
+                        ) : null}
+                        {ytHasLoopRange ? (
+                          <button
+                            onClick={ytClearLoop}
+                            title="Clear A↔B loop range"
+                            className="ml-1 rounded border border-line px-1.5 py-0.5 text-[10px] text-ink-mute hover:border-amber-gold/40 hover:text-ink-text"
+                          >
+                            clear A↔B
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    
+                    {/* Timeline controls */}
                     <div className="flex items-center gap-2">
                       <button
                         onClick={toggleYtPlayback}
                         disabled={!ytReady}
-                        className="flex-1 rounded-md bg-accent/15 px-3 py-1.5 text-[11px] text-accent transition-colors hover:bg-accent/25 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="rounded border border-line px-3 py-1 text-sm text-ink-text transition-colors duration-150 hover:border-amber-gold/60 hover:text-amber-gold disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {ytPlaying ? "Pause" : "Play"}
+                        {ytPlaying ? "❚❚" : "▶"}
+                      </button>
+                      <input
+                        type="range"
+                        min={0}
+                        max={Math.max(1, Math.floor(ytDuration))}
+                        value={Math.floor(ytTime)}
+                        onChange={(e) => ytSeek(Number(e.target.value))}
+                        disabled={!ytReady}
+                        className="flex-1 accent-amber-gold disabled:opacity-50"
+                      />
+                      <span className="hidden font-mono text-[11px] text-ink-mute sm:inline">
+                        {fmtTime(ytTime)} / {fmtTime(ytDuration)}
+                      </span>
+                      <button
+                        onClick={ytBeginAddMarker}
+                        disabled={!ytReady}
+                        title="Mark this moment with a custom label"
+                        className="rounded border border-line px-2 py-1 text-[11px] text-ink-mute transition-colors duration-150 hover:border-amber-gold/60 hover:text-amber-gold disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        + mark
                       </button>
                       <button
-                        onClick={stopYtPlayback}
+                        onClick={() => setYtLoopOn((v) => !v)}
                         disabled={!ytReady}
-                        className="rounded-md bg-surface-2 px-3 py-1.5 text-[11px] text-ink-mute transition-colors hover:text-ink-text disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={
+                          ytHasLoopRange
+                            ? "Loop between marked A and B"
+                            : "Loop the whole track (set A and B markers for a custom range)"
+                        }
+                        className={`rounded border px-2 py-1 text-[11px] transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed ${
+                          ytLoopOn
+                            ? "border-amber-gold/60 text-amber-gold"
+                            : "border-line text-ink-mute hover:text-ink-text"
+                        }`}
                       >
-                        Stop
+                        {ytLoopLabel}
                       </button>
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        value={ytVolume}
+                        onChange={(e) => ytSetVolume(Number(e.target.value))}
+                        disabled={!ytReady}
+                        className="w-20 accent-amber-gold disabled:opacity-50"
+                        title="Volume"
+                      />
                     </div>
+                    
                     {!ytReady && (
                       <div className="mt-2 text-[9px] text-ink-mute/50">
                         Loading YouTube player…
