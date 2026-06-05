@@ -675,6 +675,48 @@ export function PerformModal({
   const [scaleId, setScaleId] = useState<ScaleId>("majorPentatonic");
   const [chordSlots, setChordSlots] = useState<ChordSlot[]>(SLOT_PRESETS["Pop"]);
   const [activeSlot, setActiveSlot] = useState<number | null>(null);
+  const [chordPresetName, setChordPresetName] = useState("");
+  const [savedChordPresets, setSavedChordPresets] = useState<{ id: string; name: string; slots: ChordSlot[] }[]>([]);
+  
+  // Load saved chord presets from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem("verses:chordPresets");
+    if (saved) {
+      try {
+        setSavedChordPresets(JSON.parse(saved));
+      } catch {
+        // ignore
+      }
+    }
+  }, []);
+  
+  // Save chord presets to localStorage
+  useEffect(() => {
+    localStorage.setItem("verses:chordPresets", JSON.stringify(savedChordPresets));
+  }, [savedChordPresets]);
+  
+  const saveChordPreset = useCallback(() => {
+    const name = chordPresetName.trim();
+    if (!name) return;
+    const newPreset = {
+      id: `chord-${Date.now()}`,
+      name,
+      slots: chordSlots,
+    };
+    setSavedChordPresets(prev => [...prev, newPreset]);
+    setChordPresetName("");
+  }, [chordPresetName, chordSlots]);
+  
+  const loadChordPreset = useCallback((id: string) => {
+    const preset = savedChordPresets.find(p => p.id === id);
+    if (preset) {
+      setChordSlots(preset.slots);
+    }
+  }, [savedChordPresets]);
+  
+  const deleteChordPreset = useCallback((id: string) => {
+    setSavedChordPresets(prev => prev.filter(p => p.id !== id));
+  }, []);
   const [leadNote, setLeadNote] = useState<string>("—");
   const [masterVol, setMasterVol] = useState(0.85);
   const [drumVol, setDrumVol] = useState(0.75);
@@ -2070,11 +2112,34 @@ export function PerformModal({
                   <div className="flex flex-wrap gap-1.5">
                     {Object.keys(SLOT_PRESETS).map((preset) => (
                       <button key={preset} onClick={() => setChordSlots(SLOT_PRESETS[preset])}
-                        className={`rounded-lg px-2.5 py-1.5 text-[11px] transition-colors ${chordSlots === SLOT_PRESETS[preset] ? "bg-accent/15 text-accent ring-1 ring-accent/40" : "bg-surface-2 text-ink-mute hover:text-ink-text"}`}>
+                        className={`rounded-lg px-2.5 py-1.5 text-[11px] transition-colors ${JSON.stringify(chordSlots) === JSON.stringify(SLOT_PRESETS[preset]) ? "bg-accent/15 text-accent ring-1 ring-accent/40" : "bg-surface-2 text-ink-mute hover:text-ink-text"}`}>
                         {preset}
                       </button>
                     ))}
                   </div>
+                </div>
+
+                <div>
+                  <div className="mb-1.5 text-[9px] uppercase tracking-widest text-ink-mute/60">My progressions</div>
+                  <div className="flex gap-1.5">
+                    <input
+                      value={chordPresetName}
+                      onChange={(e) => setChordPresetName(e.target.value)}
+                      placeholder="name this progression…"
+                      className="min-w-0 flex-1 rounded-md border border-line bg-bg/40 px-2 py-1 text-[12px] text-ink-text outline-none placeholder:text-ink-mute/40"
+                    />
+                    <button onClick={saveChordPreset} className="btn-primary text-[11px]">Save</button>
+                  </div>
+                  {savedChordPresets.length > 0 && (
+                    <ul className="mt-2 space-y-1">
+                      {savedChordPresets.map((p) => (
+                        <li key={p.id} className="flex items-center gap-2 rounded-md bg-surface-2/60 px-2 py-1">
+                          <button onClick={() => loadChordPreset(p.id)} className="flex-1 truncate text-left text-[12px] text-ink-text hover:text-accent">{p.name}</button>
+                          <button onClick={() => deleteChordPreset(p.id)} aria-label={`Delete ${p.name}`} className="text-ink-mute/40 hover:text-danger">✕</button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
 
                 <div className="space-y-1.5">
