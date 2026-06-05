@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { takesStore, newTakeId } from "@/lib/takes";
-import type { Take } from "@/lib/types";
+import type { Take, YoutubeSession } from "@/lib/types";
 import { useDrumEngine } from "@/hooks/perform/useDrumEngine";
 import { usePerformAudioBus } from "@/hooks/perform/usePerformAudioBus";
 import {
@@ -369,12 +369,14 @@ export function PerformModal({
   onClose,
   songId,
   lyrics,
+  youtube,
   onTakeSaved,
 }: {
   open: boolean;
   onClose: () => void;
   songId: string;
   lyrics?: string;
+  youtube?: YoutubeSession | null;
   onTakeSaved: () => void;
 }) {
   const isMobile = useIsMobile();
@@ -470,8 +472,8 @@ export function PerformModal({
   useEffect(() => { trumpetOnRef.current = trumpetOn; }, [trumpetOn]);
   const trumpet = useLiveTrumpet({ micStream, enabled: trumpetOn });
 
-  // ── Performance mode: Chords & Drums (A) vs Vocal FX (B) ──
-  const [perfMode, setPerfMode] = useState<"chords" | "vocal">("chords");
+  // ── Performance mode: Chords & Drums (A) vs Vocal FX (B) vs Photobooth (C) ──
+  const [perfMode, setPerfMode] = useState<"chords" | "vocal" | "photobooth">("chords");
   const [recordMode, setRecordMode] = useState<"processed" | "raw">("processed");
   const perfModeRef = useRef(perfMode);
   const recordModeRef = useRef(recordMode);
@@ -479,6 +481,7 @@ export function PerformModal({
   useEffect(() => { recordModeRef.current = recordMode; }, [recordMode]);
   const dryMonitorRef = useRef<GainNode | null>(null);
   // Vocal FX runs the processed voice through the chain; "raw" mode bypasses it.
+  // Photobooth mode always uses raw voice (no processing).
   const vfx = useVocalFx({ micStream, enabled: perfMode === "vocal" && recordMode === "processed" });
   const livePitchRef = useRef(0);
   const [liveShift, setLiveShift] = useState(0); // throttled HUD copy of livePitchRef
@@ -830,9 +833,10 @@ export function PerformModal({
     if (perfModeRef.current === "chords") {
       handleRight(nr);
       handleLeft(nl);
-    } else {
+    } else if (perfModeRef.current === "vocal") {
       handleVocalHands(nr, nl);
     }
+    // photobooth mode: no hand tracking, just raw voice + video
   }, [handleLeft, handleRight, handleVocalHands, releaseChord]);
 
   // ── Detection + draw loop ──
@@ -921,6 +925,7 @@ export function PerformModal({
         } else if (showGridRef.current && perfModeRef.current === "vocal") {
           drawPitchLadder(gctx, cw, ch, livePitchRef.current, VOCAL_PITCH_RANGE, scaleRef.current, vocalKeyLockRef.current, rightHandRef.current);
         } else {
+          // photobooth mode: no grid
           gctx.clearRect(0, 0, grid.width, grid.height);
         }
       }
@@ -985,15 +990,17 @@ export function PerformModal({
       const g = engine.ctx.createGain();
       // Dry record tap (→ recordDest only, never the speakers). Ducked whenever
       // a processed voice (trumpet or Vocal FX) is what should land in the take.
-      g.gain.value = (trumpetOnRef.current || perfModeRef.current === "vocal") ? 0 : 1;
+      // Photobooth mode always records raw voice (no ducking).
+      g.gain.value = (trumpetOnRef.current || perfModeRef.current === "vocal") && perfModeRef.current !== "photobooth" ? 0 : 1;
       src.connect(g);
       g.connect(engine.recordDest);
       micSourceRef.current = src;
       micRecGainRef.current = g;
       // Dry monitor (→ master, so it's heard AND recorded). Only live in Vocal FX
       // "raw" capture, where you want to hear + record the clean voice.
+      // Photobooth mode also allows dry monitoring.
       const dm = engine.ctx.createGain();
-      dm.gain.value = (perfModeRef.current === "vocal" && recordModeRef.current === "raw") ? 1 : 0;
+      dm.gain.value = (perfModeRef.current === "vocal" && recordModeRef.current === "raw") || perfModeRef.current === "photobooth" ? 1 : 0;
       src.connect(dm);
       dm.connect(engine.master);
       dryMonitorRef.current = dm;
@@ -1034,17 +1041,18 @@ export function PerformModal({
   }, [ensureMic]);
 
   // Route the dry voice: record-tap ducked when a processed voice (trumpet or
-  // Vocal FX) is the take; dry monitor live only for Vocal-FX "raw" capture.
+  // Vocal FX) is the take; dry monitor live only for Vocal-FX "raw" capture
+  // or photobooth mode.
   useEffect(() => {
     const e = ensureEngine();
     const rec = micRecGainRef.current;
     const dm = dryMonitorRef.current;
-    const processedVoice = trumpetOn || perfMode === "vocal";
+    const processedVoice = (trumpetOn || perfMode === "vocal") && perfMode !== "photobooth";
     if (rec) rec.gain.setTargetAtTime(processedVoice ? 0 : 1, e.ctx.currentTime, 0.05);
-    if (dm) dm.gain.setTargetAtTime(perfMode === "vocal" && recordMode === "raw" ? 1 : 0, e.ctx.currentTime, 0.05);
+    if (dm) dm.gain.setTargetAtTime((perfMode === "vocal" && recordMode === "raw") || perfMode === "photobooth" ? 1 : 0, e.ctx.currentTime, 0.05);
   }, [trumpetOn, perfMode, recordMode]);
 
-  // Entering Vocal FX: get the mic, drop any held chord, and show the Voice tab.
+  // Entering Vocal FX or Photobooth: get the mic, drop any held chord, and show the appropriate tab.
   useEffect(() => {
     if (perfMode === "vocal") {
       void ensureMic();
@@ -1052,6 +1060,12 @@ export function PerformModal({
       rightSoundingRef.current = false;
       setActiveSlot(null);
       setTab("voice");
+    } else if (perfMode === "photobooth") {
+      void ensureMic();
+      releaseChord();
+      rightSoundingRef.current = false;
+      setActiveSlot(null);
+      setTab("beat");
     } else {
       setTab((t) => (t === "voice" ? "beat" : t));
     }
@@ -1156,6 +1170,7 @@ export function PerformModal({
     setTrumpetOn(false);
     beatLatchRef.current = "stopped";
     setBeatPlaying(false);
+    setPerfMode("chords");
     void suspendBus();
   }, [suspendBus, releaseChord, stopCamera, stopMic, stopDrums, smartStop]);
 
@@ -1193,6 +1208,10 @@ export function PerformModal({
               onClick={() => setPerfMode("vocal")} aria-pressed={perfMode === "vocal"}
               className={`whitespace-nowrap px-3 py-1 text-[11px] font-medium transition-colors ${perfMode === "vocal" ? "bg-accent/15 text-accent" : "text-ink-mute hover:text-ink-text"}`}
             ><span className="sm:hidden">Vocal</span><span className="hidden sm:inline">Vocal FX</span></button>
+            <button
+              onClick={() => setPerfMode("photobooth")} aria-pressed={perfMode === "photobooth"}
+              className={`whitespace-nowrap px-3 py-1 text-[11px] font-medium transition-colors ${perfMode === "photobooth" ? "bg-accent/15 text-accent" : "text-ink-mute hover:text-ink-text"}`}
+            >Photobooth</button>
           </div>
           {recording && (
             <span className="flex items-center gap-1.5 rounded-full bg-danger/15 px-2.5 py-0.5 font-mono text-[10px] text-danger">
@@ -1342,7 +1361,7 @@ export function PerformModal({
             </div>
           )}
 
-          {/* Bottom display — chord/lead (Mode A) or Vocal-FX HUD (Mode B) */}
+          {/* Bottom display — chord/lead (Mode A) or Vocal-FX HUD (Mode B) or Photobooth (Mode C) */}
           {perfMode === "chords" ? (
             <div className="flex items-center gap-4 border-t border-line/50 bg-surface/40 px-5 py-3">
               <div className="min-w-0 flex-1">
@@ -1358,7 +1377,7 @@ export function PerformModal({
                 />
               </div>
             </div>
-          ) : (
+          ) : perfMode === "vocal" ? (
             <div className="flex items-center gap-4 border-t border-line/50 bg-surface/40 px-5 py-3">
               <div className="min-w-0">
                 <div className="text-[9px] uppercase tracking-wider text-ink-mute/50">Voice</div>
@@ -1390,13 +1409,24 @@ export function PerformModal({
                 </div>
               </div>
             </div>
+          ) : (
+            <div className="flex items-center gap-4 border-t border-line/50 bg-surface/40 px-5 py-3">
+              <div className="min-w-0 flex-1">
+                <div className="text-[9px] uppercase tracking-wider text-ink-mute/50">Photobooth</div>
+                <div className="truncate font-serif text-2xl font-semibold text-ink-text">Raw voice + video</div>
+              </div>
+              <div className="flex flex-1 flex-wrap items-center justify-end gap-1.5">
+                <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] text-accent">No effects</span>
+                <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] text-accent">Dry recording</span>
+              </div>
+            </div>
           )}
         </div>
 
         {/* Controls */}
         <div className="flex w-full flex-shrink-0 flex-col border-t border-line/60 bg-surface/30 lg:w-80 lg:border-l lg:border-t-0">
           <div className="flex border-b border-line/50">
-            {(perfMode === "vocal" ? (["voice", "sound", "guide"] as const) : (["beat", "sound", "chords", "guide"] as const)).map((t) => (
+            {(perfMode === "vocal" ? (["voice", "sound", "guide"] as const) : perfMode === "photobooth" ? (["beat", "guide"] as const) : (["beat", "sound", "chords", "guide"] as const)).map((t) => (
               <button key={t} onClick={() => setTab(t)}
                 className={`flex-1 px-3 py-2.5 text-[10px] uppercase tracking-[0.15em] transition-colors ${tab === t ? "bg-surface-2/60 text-accent" : "text-ink-mute hover:text-ink-text"}`}>
                 {t}
@@ -1510,7 +1540,22 @@ export function PerformModal({
               </div>
             )}
 
-            {tab === "beat" && <StepSequencer seq={drum} />}
+            {tab === "beat" && (
+              <div className="space-y-4">
+                {youtube && (
+                  <div className="rounded-lg border border-line/60 bg-surface-2/50 p-3">
+                    <div className="mb-2 text-[9px] uppercase tracking-widest text-ink-mute/60">YouTube beat</div>
+                    <div className="text-[10px] text-ink-mute/70 mb-2">
+                      {youtube.youtube_url}
+                    </div>
+                    <div className="text-[9px] text-ink-mute/50">
+                      Beat playback is available in the main editor. Use the YouTube bar at the bottom to control playback while performing.
+                    </div>
+                  </div>
+                )}
+                <StepSequencer seq={drum} />
+              </div>
+            )}
 
             {tab === "chords" && (
               <div className="space-y-5">

@@ -650,6 +650,7 @@ export function Editor({ songId }: { songId: string }) {
           onClose={closeModal}
           songId={song.id}
           lyrics={song.content}
+          youtube={youtube}
           onTakeSaved={() => setTakesReloadKey((k) => k + 1)}
         />
       )}
