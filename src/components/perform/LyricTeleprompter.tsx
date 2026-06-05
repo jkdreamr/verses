@@ -28,24 +28,26 @@ function renderLine(line: string, upTo: number) {
 const FOCUS = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7aa2f7] focus-visible:ring-offset-1 focus-visible:ring-offset-bg";
 
 /**
- * Compact karaoke-style teleprompter. Shows a 3-line window (faint previous /
- * bold active with word highlight / faint next) in a slim glassy strip pinned to
- * the bottom of the stage, so the camera/performance stays the hero. Live-only —
- * it's a DOM overlay, never part of the captured canvas, so recordings are clean.
+ * Compact "read-ahead" teleprompter in a slim glassy strip pinned to the bottom
+ * of the stage, so the camera/performance stays the hero. The UPCOMING line is
+ * the largest (you read ahead while you sing); the line you're on stays small
+ * with a word highlight so you keep your place. Live-only — a DOM overlay, never
+ * part of the captured canvas, so recordings are clean.
  */
 export function LyricTeleprompter({ smart, onClose }: { smart: Smart; onClose: () => void }) {
   const { lines, activeLine, activeWord, mode, status, supported, smartError } = smart;
 
-  // nearest non-empty neighbours, for context without clutter
-  const { prevIdx, nextIdx } = useMemo(() => {
-    let p = activeLine - 1;
-    while (p >= 0 && lines[p]?.trim() === "") p--;
+  // nearest non-empty upcoming lines (the next line is the hero)
+  const { nextIdx, afterIdx } = useMemo(() => {
     let n = activeLine + 1;
     while (n < lines.length && lines[n]?.trim() === "") n++;
-    return { prevIdx: p, nextIdx: n };
+    let a = n + 1;
+    while (a < lines.length && lines[a]?.trim() === "") a++;
+    return { nextIdx: n, afterIdx: a };
   }, [activeLine, lines]);
 
   const hasLyrics = lines.some((l) => l.trim() !== "");
+  const blank = " ";
 
   const statusDot =
     smartError ? "bg-danger"
@@ -127,21 +129,22 @@ export function LyricTeleprompter({ smart, onClose }: { smart: Smart; onClose: (
           </div>
         </div>
 
-        {/* 3-line karaoke window */}
+        {/* Read-ahead window: the UPCOMING line is the hero (largest); the line
+            you're on stays small with a word highlight so you keep your place. */}
         <div
           aria-live="off"
           className="pointer-events-none select-none text-center font-serif leading-snug [text-shadow:0_1px_10px_rgba(0,0,0,0.7)]"
         >
           {hasLyrics ? (
             <>
-              <div className="truncate text-[13px] text-ink-text/35 transition-opacity duration-300 motion-reduce:transition-none">
-                {prevIdx >= 0 ? lines[prevIdx] : " "}
+              <div className="truncate text-[13px] text-ink-text/45 transition-all duration-300 motion-reduce:transition-none">
+                {activeWord >= 0 ? renderLine(lines[activeLine] || "", activeWord) : (lines[activeLine]?.trim() ? lines[activeLine] : blank)}
               </div>
-              <div className="truncate text-xl font-semibold text-ink-text transition-all duration-300 motion-reduce:transition-none sm:text-2xl">
-                {activeWord >= 0 ? renderLine(lines[activeLine] || "", activeWord) : (lines[activeLine]?.trim() ? lines[activeLine] : " ")}
+              <div className="truncate text-2xl font-bold text-ink-text transition-all duration-300 motion-reduce:transition-none sm:text-3xl">
+                {nextIdx < lines.length ? lines[nextIdx] : blank}
               </div>
-              <div className="truncate text-[13px] text-ink-text/35 transition-opacity duration-300 motion-reduce:transition-none">
-                {nextIdx < lines.length ? lines[nextIdx] : " "}
+              <div className="truncate text-sm text-ink-text/30 transition-opacity duration-300 motion-reduce:transition-none">
+                {afterIdx < lines.length ? lines[afterIdx] : blank}
               </div>
             </>
           ) : (
