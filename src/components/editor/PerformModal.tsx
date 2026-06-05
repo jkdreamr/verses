@@ -246,29 +246,97 @@ function drawPitchLadder(
 
 // ─── Piano display (chord tones) ─────────────────────────────────────────────
 
-function PianoKeyboard({ activeNotes }: { activeNotes: number[] }) {
+function PianoKeyboard({
+  activeNotes,
+  onNoteOn,
+  onNoteOff,
+  octave = 4,
+}: {
+  activeNotes: number[];
+  onNoteOn?: (midi: number) => void;
+  onNoteOff?: (midi: number) => void;
+  octave?: number;
+}) {
   const whiteKeys = ["C", "D", "E", "F", "G", "A", "B"];
   const blackKeys = ["C#", "D#", null, "F#", "G#", "A#"];
   const isActive = (note: string | null) => !!note && activeNotes.some((n) => NOTE_NAMES[n % 12] === note);
+
+  // Convert note name to MIDI number for the current octave
+  const noteToMidi = (note: string) => {
+    const noteIndex = NOTE_NAMES.indexOf(note);
+    if (noteIndex === -1) return null;
+    return octave * 12 + noteIndex;
+  };
+
+  const [pressedNotes, setPressedNotes] = useState<Set<number>>(new Set());
+
+  const handleNoteDown = (midi: number) => {
+    if (!pressedNotes.has(midi)) {
+      setPressedNotes(prev => new Set([...prev, midi]));
+      onNoteOn?.(midi);
+    }
+  };
+
+  const handleNoteUp = (midi: number) => {
+    if (pressedNotes.has(midi)) {
+      setPressedNotes(prev => {
+        const next = new Set(prev);
+        next.delete(midi);
+        return next;
+      });
+      onNoteOff?.(midi);
+    }
+  };
+
+  const isPressed = (note: string | null) => {
+    const midi = note ? noteToMidi(note) : null;
+    return midi !== null && pressedNotes.has(midi);
+  };
+
   return (
-    <div className="relative h-14 w-full overflow-hidden rounded-lg border border-line/60">
+    <div className="relative h-14 w-full overflow-hidden rounded-lg border border-line/60 select-none">
+      {/* White keys */}
       <div className="absolute inset-0 flex gap-px bg-line/40">
-        {whiteKeys.map((note) => (
-          <div key={note} className={`flex flex-1 items-end justify-center pb-1 transition-colors duration-75 ${
-            isActive(note) ? "bg-accent/40" : "bg-[#f5f3ef]"}`}>
-            <span className={`font-mono text-[7px] ${isActive(note) ? "text-amber-700" : "text-neutral-400"}`}>{note}</span>
-          </div>
-        ))}
+        {whiteKeys.map((note) => {
+          const midi = noteToMidi(note);
+          const active = isActive(note) || isPressed(note);
+          return (
+            <div
+              key={note}
+              className={`flex flex-1 items-end justify-center pb-1 transition-colors duration-75 cursor-pointer ${
+                active ? "bg-accent/40" : "bg-[#f5f3ef] hover:bg-[#ebe8e3]"
+              }`}
+              onPointerDown={() => midi && handleNoteDown(midi)}
+              onPointerUp={() => midi && handleNoteUp(midi)}
+              onPointerLeave={() => midi && handleNoteUp(midi)}
+              onPointerCancel={() => midi && handleNoteUp(midi)}
+            >
+              <span className={`font-mono text-[7px] select-none ${active ? "text-amber-700" : "text-neutral-400"}`}>{note}</span>
+            </div>
+          );
+        })}
       </div>
-      <div className="absolute inset-x-0 top-0 flex px-[7%]">
-        {blackKeys.map((note, i) => (
-          <div key={i} className="relative flex-1">
-            {note && (
-              <div className={`absolute left-1/2 top-0 h-9 w-[65%] -translate-x-1/2 rounded-b shadow-md transition-colors duration-75 ${
-                isActive(note) ? "bg-accent/80" : "bg-[#1a1a1a]"}`} />
-            )}
-          </div>
-        ))}
+      {/* Black keys */}
+      <div className="absolute inset-x-0 top-0 flex px-[7%] pointer-events-none">
+        {blackKeys.map((note, i) => {
+          const midi = note ? noteToMidi(note) : null;
+          const active = isActive(note) || isPressed(note);
+          return (
+            <div key={i} className="relative flex-1 pointer-events-auto">
+              {note && (
+                <div
+                  className={`absolute left-1/2 top-0 h-9 w-[65%] -translate-x-1/2 rounded-b shadow-md transition-colors duration-75 cursor-pointer ${
+                    active ? "bg-accent/80" : "bg-[#1a1a1a] hover:bg-[#333333]"
+                  }`}
+                  onPointerDown={() => midi && handleNoteDown(midi)}
+                  onPointerUp={() => midi && handleNoteUp(midi)}
+                  onPointerLeave={() => midi && handleNoteUp(midi)}
+                  onPointerCancel={() => midi && handleNoteUp(midi)}
+                />
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -323,6 +391,12 @@ export function PerformModal({
   const rxFilterRef = useRef(new OneEuroFilter({ minCutoff: 1.4, beta: 0.03 }));
   const ryFilterRef = useRef(new OneEuroFilter({ minCutoff: 1.4, beta: 0.03 }));
   const rightPinchRef = useRef(false);
+
+  // ── Piano click synth (for clickable piano keyboard) ──
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pianoSynthRef = useRef<any>(null);
+  const pianoReadyRef = useRef(false);
+  const activePianoNotesRef = useRef<Set<number>>(new Set());
 
   // ── Left-hand transport latch ──
   const beatLatchRef = useRef<"stopped" | "playing" | "muted">("stopped");
@@ -496,6 +570,43 @@ export function PerformModal({
       leadFilterRef.current = filter;
     }
     leadReadyRef.current = true;
+  }, []);
+
+  // ── Piano click synth setup ──
+  const ensurePianoSynth = useCallback(async () => {
+    if (pianoReadyRef.current) return;
+    const engine = ensureEngine();
+    await resumeEngine();
+    const Tone = await engine.loadTone();
+    if (!pianoSynthRef.current) {
+      const synth = new Tone.PolySynth(Tone.Synth);
+      synth.set({
+        oscillator: { type: "triangle" },
+        envelope: { attack: 0.005, decay: 0.1, sustain: 0.3, release: 0.2 },
+      });
+      synth.maxPolyphony = 8;
+      // Add a bit of reverb for piano-like sound
+      const reverb = new Tone.Reverb({ decay: 1.5, wet: 0.3 });
+      synth.connect(reverb);
+      reverb.connect(engine.master);
+      pianoSynthRef.current = synth;
+    }
+    pianoReadyRef.current = true;
+  }, []);
+
+  const playPianoNote = useCallback(async (midi: number) => {
+    await ensurePianoSynth();
+    if (!activePianoNotesRef.current.has(midi)) {
+      activePianoNotesRef.current.add(midi);
+      pianoSynthRef.current?.triggerAttack(midiToFreq(midi));
+    }
+  }, [ensurePianoSynth]);
+
+  const releasePianoNote = useCallback((midi: number) => {
+    if (activePianoNotesRef.current.has(midi)) {
+      activePianoNotesRef.current.delete(midi);
+      pianoSynthRef.current?.triggerRelease(midiToFreq(midi));
+    }
   }, []);
 
   // ── Right-hand instrument logic ──
@@ -1218,7 +1329,14 @@ export function PerformModal({
                 <div className="text-[9px] uppercase tracking-wider text-ink-mute/50">{rightMode === "lead" ? "Note" : "Chord"}</div>
                 <div className="truncate font-serif text-2xl font-semibold text-ink-text">{leadNote}</div>
               </div>
-              <div className="hidden w-44 sm:block"><PianoKeyboard activeNotes={chord.activeNotes} /></div>
+              <div className="hidden w-44 sm:block">
+                <PianoKeyboard
+                  activeNotes={chord.activeNotes}
+                  onNoteOn={playPianoNote}
+                  onNoteOff={releasePianoNote}
+                  octave={Math.floor(keyToPc(rootKey) / 12) + 4}
+                />
+              </div>
             </div>
           ) : (
             <div className="flex items-center gap-4 border-t border-line/50 bg-surface/40 px-5 py-3">
