@@ -281,7 +281,9 @@ export function useLiveTrumpet({ micStream, enabled }: UseLiveTrumpetConfig) {
           });
           if (cancelled) { inst.dispose(); setLoading(false); setPitchStatus("idle"); return; }
           trumpetRef.current = inst;
-          await inst.ready;
+          // Don't await sampler loading — the live brass synth is ready immediately.
+          // Sampler readiness only matters for Sing-then-Convert playback.
+          inst.ready.catch(() => {});
         }
         setLoading(false);
 
