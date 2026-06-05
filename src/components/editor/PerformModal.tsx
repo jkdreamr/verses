@@ -317,7 +317,7 @@ function PianoKeyboard({
         })}
       </div>
       {/* Black keys */}
-      <div className="absolute inset-x-0 top-0 flex px-[7%] pointer-events-none">
+      <div className="absolute inset-x-0 top-0 flex px-[7%] pointer-events-none z-10">
         {blackKeys.map((note, i) => {
           const midi = note ? noteToMidi(note) : null;
           const active = isActive(note) || isPressed(note);
@@ -328,10 +328,22 @@ function PianoKeyboard({
                   className={`absolute left-1/2 top-0 h-9 w-[65%] -translate-x-1/2 rounded-b shadow-md transition-colors duration-75 cursor-pointer ${
                     active ? "bg-accent/80" : "bg-[#1a1a1a] hover:bg-[#333333]"
                   }`}
-                  onPointerDown={() => midi && handleNoteDown(midi)}
-                  onPointerUp={() => midi && handleNoteUp(midi)}
-                  onPointerLeave={() => midi && handleNoteUp(midi)}
-                  onPointerCancel={() => midi && handleNoteUp(midi)}
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    if (midi) handleNoteDown(midi);
+                  }}
+                  onPointerUp={(e) => {
+                    e.stopPropagation();
+                    if (midi) handleNoteUp(midi);
+                  }}
+                  onPointerLeave={(e) => {
+                    e.stopPropagation();
+                    if (midi) handleNoteUp(midi);
+                  }}
+                  onPointerCancel={(e) => {
+                    e.stopPropagation();
+                    if (midi) handleNoteUp(midi);
+                  }}
                 />
               )}
             </div>
