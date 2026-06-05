@@ -298,7 +298,22 @@ function PianoKeyboard({
 }) {
   const whiteKeys = ["C", "D", "E", "F", "G", "A", "B"];
   const blackKeys = ["C#", "D#", null, "F#", "G#", "A#"];
-  const isActive = (note: string | null) => !!note && activeNotes.some((n) => NOTE_NAMES[n % 12] === note);
+  
+  // Normalize note name to handle both sharp (#) and flat (b) notation
+  const normalizeNote = (note: string) => {
+    return note
+      .replace("Db", "C#")
+      .replace("Eb", "D#")
+      .replace("Gb", "F#")
+      .replace("Ab", "G#")
+      .replace("Bb", "A#");
+  };
+  
+  const isActive = (note: string | null) => {
+    if (!note) return false;
+    const normalized = normalizeNote(note);
+    return activeNotes.some((n) => normalizeNote(NOTE_NAMES[n % 12]) === normalized);
+  };
 
   // Convert note name to MIDI number for the current octave
   // Handle both sharp (#) and flat (b) notation
