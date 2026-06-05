@@ -553,36 +553,34 @@ export function PerformModal({
       return;
     }
     const g = hand.gesture;
-    if (g === leftTimerRef.current.gesture) {
-      const held = Date.now() - leftTimerRef.current.startMs;
-      const cooled = Date.now() - leftCooldownRef.current > LATCH_COOLDOWN_MS;
-      if (held >= LATCH_HOLD_MS && cooled) {
-        if (g === "open" && beatLatchRef.current !== "playing") {
-          playDrumsFn();
-          beatLatchRef.current = "playing";
-          setBeatPlaying(true);
-          leftCooldownRef.current = Date.now();
-          leftTimerRef.current = { gesture: null, startMs: 0 };
-        } else if (g === "fist" && beatLatchRef.current === "playing") {
-          stopDrums();
-          beatLatchRef.current = "stopped";
-          setBeatPlaying(false);
-          leftCooldownRef.current = Date.now();
-          leftTimerRef.current = { gesture: null, startMs: 0 };
-        } else if (g === "pinch") {
-          if (beatLatchRef.current === "muted") {
-            beatLatchRef.current = "playing";
-            busSetDrum(drumVol);
-          } else if (beatLatchRef.current === "playing") {
-            beatLatchRef.current = "muted";
-            busSetDrum(0);
-          }
-          leftCooldownRef.current = Date.now();
-          leftTimerRef.current = { gesture: null, startMs: 0 };
-        }
-      }
-    } else {
+    // Require the gesture to settle briefly (debounce flicker through transitions).
+    if (g !== leftTimerRef.current.gesture) {
       leftTimerRef.current = { gesture: g, startMs: Date.now() };
+      return;
+    }
+    if (Date.now() - leftTimerRef.current.startMs < LATCH_HOLD_MS) return;
+
+    // Open palm and fist are IDEMPOTENT state transitions (no cooldown), so
+    // fist → open → fist reliably stops and restarts the beat every time.
+    if (g === "open") {
+      if (beatLatchRef.current !== "playing") {
+        playDrumsFn();
+        beatLatchRef.current = "playing";
+        setBeatPlaying(true);
+      }
+    } else if (g === "fist") {
+      if (beatLatchRef.current !== "stopped") {
+        stopDrums();
+        beatLatchRef.current = "stopped";
+        setBeatPlaying(false);
+      }
+    } else if (g === "pinch") {
+      // Mute is a toggle on a sustained gesture, so it keeps a cooldown.
+      if (Date.now() - leftCooldownRef.current > LATCH_COOLDOWN_MS) {
+        if (beatLatchRef.current === "muted") { beatLatchRef.current = "playing"; busSetDrum(drumVol); }
+        else if (beatLatchRef.current === "playing") { beatLatchRef.current = "muted"; busSetDrum(0); }
+        leftCooldownRef.current = Date.now();
+      }
     }
   }, [busSetDrum, drumVol, playDrumsFn, stopDrums]);
 
