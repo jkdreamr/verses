@@ -300,6 +300,13 @@ the chord grid — live-only, never recorded. The HUD reads detected note, live 
 effects and input level. On touch, Mode B gets a dedicated singing stage with a pitch-bend
 slider instead of the chord pads.
 
+**Calibration (Dubler-2 lesson).** A **Calibrate mic** button (in the Voice rack and the
+trumpet panel) samples ~1.5 s of *ambient* room noise and stores its 90th-percentile RMS as
+a **noise floor** (`src/lib/audio/calibrate.ts`). Both the trumpet and the autotune pitch
+gates then require the signal to sit above that floor, so room hiss and breaths never
+trigger a note. It's clamped so a noisy calibration can never mute soft singing, and it
+persists to `localStorage`.
+
 **Honest limitations.** `Tone.PitchShift` is a **granular** shifter, not a
 formant-preserving phase vocoder, so large shifts colour the voice ("chipmunk"); for
 autotune and ±octave harmony it stays musical. Latency is inherent and **surfaced in the

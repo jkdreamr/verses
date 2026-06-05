@@ -48,6 +48,7 @@ function EffectCard({ name, on, onToggle, children }: { name: string; on: boolea
 
 export function VocalFxRack({
   vfx, recordMode, setRecordMode, songKey, songScale, keyLock, setKeyLock, isCameraMode,
+  onCalibrate, calibrating, calibrated,
 }: {
   vfx: Vfx;
   recordMode: "processed" | "raw";
@@ -57,6 +58,9 @@ export function VocalFxRack({
   keyLock: boolean;
   setKeyLock: (b: boolean) => void;
   isCameraMode: boolean;
+  onCalibrate: () => void;
+  calibrating: boolean;
+  calibrated: boolean;
 }) {
   const p = vfx.params;
   const retuneSpeed = (140 - p.retuneMs) / 137; // 0 natural … 1 hard
@@ -72,7 +76,14 @@ export function VocalFxRack({
           <button type="button" onClick={() => setRecordMode("processed")} aria-pressed={recordMode === "processed"} className={seg(recordMode === "processed")}>Processed</button>
           <button type="button" onClick={() => setRecordMode("raw")} aria-pressed={recordMode === "raw"} className={seg(recordMode === "raw")}>Raw voice</button>
         </div>
-        <span className="ml-auto font-mono text-[10px] text-ink-mute" title="Approximate added latency of the pitch stage. Lower the window to tighten it.">
+        <button
+          type="button" onClick={onCalibrate} disabled={calibrating}
+          title="Sample ~1.5s of room noise so silence/breath never trigger the effects"
+          className={`ml-auto rounded-md px-2 py-1 text-[10px] transition-colors ${FOCUS} ${calibrated ? "bg-success/15 text-success" : "bg-surface-2 text-ink-mute hover:text-ink-text"} disabled:opacity-50`}
+        >
+          {calibrating ? "calibrating…" : calibrated ? "✓ calibrated" : "Calibrate mic"}
+        </button>
+        <span className="font-mono text-[10px] text-ink-mute" title="Approximate added latency of the pitch stage. Lower the window to tighten it.">
           ~{vfx.latencyMs} ms
         </span>
       </div>

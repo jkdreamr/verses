@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ensureEngine, resumeEngine } from "@/lib/audio/engine";
 import { createVocalFxChain, autotuneCorrection, type VocalFxChain } from "@/lib/audio/vocalFx";
+import { aboveNoiseFloor } from "@/lib/audio/calibrate";
 import { midiToLabel, type ScaleId } from "@/lib/audio/scales";
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -143,7 +144,7 @@ export function useVocalFx({ micStream, enabled }: { micStream: MediaStream | nu
           const c = chainRef.current;
           const p = paramsRef.current;
           if (!c) return;
-          const voiced = clarity >= CLARITY_GATE && freq >= MIN_FREQ && freq <= MAX_FREQ;
+          const voiced = clarity >= CLARITY_GATE && freq >= MIN_FREQ && freq <= MAX_FREQ && aboveNoiseFloor(rms);
           if (voiced) {
             const detectedMidi = Math.round(69 + 12 * Math.log2(freq / 440));
             setDetectedNote(midiToLabel(detectedMidi));

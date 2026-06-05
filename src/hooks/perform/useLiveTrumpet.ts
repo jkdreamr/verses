@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ensureEngine, resumeEngine } from "@/lib/audio/engine";
 import { createTrumpetInstrument, type TrumpetInstrument } from "@/lib/audio/samplers";
+import { aboveNoiseFloor } from "@/lib/audio/calibrate";
 import { snapToScale, keyToPc, midiToFreq, midiToLabel, type ScaleId } from "@/lib/audio/scales";
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -73,6 +74,7 @@ export function useLiveTrumpet({ micStream, enabled }: UseLiveTrumpetConfig) {
   const [isActive, setIsActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [latencyMs, setLatencyMs] = useState<number | null>(null);
 
   // ── convert ──
   const [captureState, setCaptureState] = useState<CaptureState>("idle");
@@ -173,7 +175,7 @@ export function useLiveTrumpet({ micStream, enabled }: UseLiveTrumpetConfig) {
           const trumpet = trumpetRef.current;
           if (!trumpet || modeRef.current !== "live") { setIsActive(false); return; }
 
-          if (clarity >= CLARITY_GATE && freq >= MIN_FREQ && freq <= MAX_FREQ) {
+          if (clarity >= CLARITY_GATE && freq >= MIN_FREQ && freq <= MAX_FREQ && aboveNoiseFloor(rms)) {
             // 1) median-smooth the raw pitch (kills single-frame outliers / octave flips)
             const hist = pitchHistRef.current;
             hist.push(freq);
@@ -219,6 +221,9 @@ export function useLiveTrumpet({ micStream, enabled }: UseLiveTrumpetConfig) {
           }
         };
         setError(null);
+        // Honest latency: device I/O round-trip + the MPM analysis block (~25 ms).
+        const io = (engine.ctx.baseLatency || 0) + (engine.ctx.outputLatency || 0);
+        setLatencyMs(Math.round(io * 1000) + 25);
       } catch (e) {
         if (!cancelled) {
           console.warn("[useLiveTrumpet] setup failed:", e);
@@ -320,7 +325,7 @@ export function useLiveTrumpet({ micStream, enabled }: UseLiveTrumpetConfig) {
 
   return {
     // detected
-    detectedNote, detectedFreq, confidence, inputLevel, isActive, error, loading,
+    detectedNote, detectedFreq, confidence, inputLevel, isActive, error, loading, latencyMs,
     // mode
     mode, setMode,
     // params

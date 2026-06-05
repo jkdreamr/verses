@@ -35,6 +35,7 @@ import { useSmartLyrics } from "@/hooks/useSmartLyrics";
 import { useLiveTrumpet, TRUMPET_PRESETS } from "@/hooks/perform/useLiveTrumpet";
 import { useVocalFx } from "@/hooks/perform/useVocalFx";
 import { VocalFxRack } from "@/components/perform/VocalFxRack";
+import { calibrateNoiseFloor } from "@/lib/audio/calibrate";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -393,6 +394,10 @@ export function PerformModal({
   const pitchEuroRef = useRef(new OneEuroFilter({ minCutoff: 1.2, beta: 0.02 }));
   const vfxActiveRef = useRef(false);
   const [touchBend, setTouchBend] = useState(0); // touch pitch-bend in Mode B
+
+  // ── Mic calibration (noise floor → gates note-on for trumpet + Vocal FX) ──
+  const [calibrating, setCalibrating] = useState(false);
+  const [calibrated, setCalibrated] = useState(false);
 
   // Zone labels for the live chord/note grid — derived from the REAL X→action
   // mapping so the guide is truthful (chord mode: progression slots; lead mode:
@@ -862,6 +867,15 @@ export function PerformModal({
     if (ok) setTrumpetOn(true);
   }, [trumpetOn, ensureMic]);
 
+  // Calibrate to the room: sample ~1.5s of ambient noise → note-on gate.
+  const calibrateMic = useCallback(async () => {
+    const stream = await ensureMic();
+    if (!stream) return;
+    setCalibrating(true);
+    try { await calibrateNoiseFloor(stream, 1500); setCalibrated(true); }
+    finally { setCalibrating(false); }
+  }, [ensureMic]);
+
   // Route the dry voice: record-tap ducked when a processed voice (trumpet or
   // Vocal FX) is the take; dry monitor live only for Vocal-FX "raw" capture.
   useEffect(() => {
@@ -1216,6 +1230,9 @@ export function PerformModal({
                 keyLock={vocalKeyLock}
                 setKeyLock={setVocalKeyLock}
                 isCameraMode={inputMode === "camera"}
+                onCalibrate={() => void calibrateMic()}
+                calibrating={calibrating}
+                calibrated={calibrated}
               />
             )}
             {tab === "sound" && (
@@ -1248,7 +1265,19 @@ export function PerformModal({
                         <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-bg/60">
                           <div className="h-full rounded-full bg-accent/70 transition-[width] duration-75" style={{ width: `${Math.round(Math.min(1, trumpet.inputLevel) * 100)}%` }} />
                         </div>
+                        {trumpet.latencyMs != null && (
+                          <span className="font-mono text-[10px] text-ink-mute/70" title="Live monitoring latency — inherent to real-time pitch→audio">~{trumpet.latencyMs} ms</span>
+                        )}
                       </div>
+
+                      {/* calibrate */}
+                      <button
+                        type="button" onClick={() => void calibrateMic()} disabled={calibrating}
+                        title="Sample ~1.5s of room noise so silence/breath never trigger the horn"
+                        className={`w-full rounded-lg px-2 py-1.5 text-[11px] transition-colors ${calibrated ? "bg-success/15 text-success" : "bg-surface-2 text-ink-mute hover:text-ink-text"} disabled:opacity-50`}
+                      >
+                        {calibrating ? "calibrating…" : calibrated ? "✓ mic calibrated" : "Calibrate mic to the room"}
+                      </button>
 
                       {/* presets */}
                       <div className="flex flex-wrap gap-1.5">
