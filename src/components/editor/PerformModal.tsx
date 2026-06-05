@@ -422,7 +422,10 @@ export function PerformModal({
 }) {
   const isMobile = useIsMobile();
   
-  const fmtTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  const fmtTime = (s: number) => {
+    const rounded = Math.round(s);
+    return `${Math.floor(rounded / 60)}:${String(rounded % 60).padStart(2, "0")}`;
+  };
 
   // ── Camera / MediaPipe refs ──
   const videoRef = useRef<HTMLVideoElement>(null);
