@@ -24,7 +24,6 @@ Repository: **https://github.com/jkdreamr/verses**
 7. [Privacy](#privacy)
 8. [Development](#development)
 9. [Credits and Disclosure](#credits-and-disclosure)
-10. [Rubric Coverage](#rubric-coverage)
 
 ---
 
@@ -1338,68 +1337,3 @@ Verses uses vendored instrument samples for piano, strings/cello, and trumpet pl
 AI assistance was used during debugging, code iteration, architecture explanation, and README drafting.
 
 The project author remains responsible for the final implementation, design decisions, testing, disclosure, and submission.
-
-# Rubric Coverage
-
-## Problem and Insight
-
-Verses addresses a meaningful problem: songwriting workflows are fragmented across too many separate tools.
-
-The motivation is to reduce context switching and preserve creative flow. The approach is original because it combines lyric writing, rhyme visualization, beat writing, gesture-controlled performance, vocal processing, recording, voice-to-trumpet, and voice-to-score transcription in one browser workspace.
-
-## Execution and Technical Work
-
-The implementation includes substantial technical work across several domains:
-
-* writing interface
-* local persistence
-* rhyme analysis
-* browser audio
-* sampled instruments
-* step sequencing
-* hand tracking
-* touch performance
-* vocal effects
-* pitch detection
-* recording
-* speech alignment
-* neural transcription
-* music theory inference
-* notation rendering
-* export formats
-
-The app is functional as a connected creative workflow rather than a single isolated demo.
-
-## Evaluation and Evidence
-
-The project includes:
-
-* Rhyme Lens automated tests
-* manual feature validation
-* recording tests
-* pitch-detection tests
-* Voice Score sanity checks
-* latency/quality tradeoff analysis
-* fallback paths for unreliable browser APIs
-* documented limitations
-
-## Communication and Presentation
-
-The README is organized as:
-
-1. product overview
-2. user guide
-3. technical architecture
-4. feature-level technical details
-5. evaluation
-6. limitations
-7. privacy
-8. development
-9. credits/disclosure
-10. rubric mapping
-
-This structure is intended to be understandable to both non-technical readers and technical graders.
-
-## Process, Integrity, and Disclosure
-
-The README credits major libraries, APIs, browser technologies, and AI assistance. It also documents major technical decisions, tradeoffs, and limitations.
