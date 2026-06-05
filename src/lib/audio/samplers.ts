@@ -214,8 +214,8 @@ export async function createChordInstrument(
 }
 
 export type TrumpetInstrument = {
-  /** Glide to a target frequency (Hz); starts the note if silent. */
-  noteOn: (freqHz: number, velocity?: number, portamentoSec?: number) => void;
+  /** Drive the live brass synth to freq; re-articulates only when note changes. */
+  noteOn: (freqHz: number, velocity?: number, legato?: boolean) => void;
   noteOff: () => void;
   setVolumeDb: (db: number) => void;
   /** Brightness = lowpass cutoff in Hz. */
@@ -228,19 +228,170 @@ export type TrumpetInstrument = {
   ready: Promise<void>;
 };
 
+const freqToMidiLocal  = (f: number) => 69 + 12 * Math.log2(f / 440);
+
+// ─── Live Brass Synth ───────────────────────────────────────────────────────
+// A lightweight subtractive brass voice for real-time following. Uses two
+// oscillators (square + sawtooth) for a buzzy lip-reed timbre, a formant
+// bandpass near 1.2 kHz, a lowpass brightness filter, and a soft noise layer
+// for breath. Pitch is ramped continuously so there's no click on note changes.
+// We keep the sampler for Sing-then-Convert playback where quality matters more.
+function createBrassSynth(ctx: AudioContext, outputNode: AudioNode, brightnessHz: number) {
+  const now = () => ctx.currentTime;
+
+  // ── Oscillators ──
+  const osc1 = ctx.createOscillator(); osc1.type = "sawtooth";
+  const osc2 = ctx.createOscillator(); osc2.type = "square";
+  const osc1Gain = ctx.createGain(); osc1Gain.gain.value = 0.55;
+  const osc2Gain = ctx.createGain(); osc2Gain.gain.value = 0.35;
+  osc1.start(); osc2.start();
+
+  // ── Noise layer (breath) ──
+  const bufLen = ctx.sampleRate * 2;
+  const noiseBuffer = ctx.createBuffer(1, bufLen, ctx.sampleRate);
+  const nd = noiseBuffer.getChannelData(0);
+  for (let i = 0; i < bufLen; i++) nd[i] = Math.random() * 2 - 1;
+  const noiseNode = ctx.createBufferSource();
+  noiseNode.buffer = noiseBuffer;
+  noiseNode.loop = true;
+  noiseNode.start();
+  const noiseFilter = ctx.createBiquadFilter();
+  noiseFilter.type = "bandpass";
+  noiseFilter.frequency.value = 3000;
+  noiseFilter.Q.value = 0.6;
+  const noiseGain = ctx.createGain(); noiseGain.gain.value = 0;
+
+  // ── Amplitude envelope (VCA) ──
+  const vca = ctx.createGain(); vca.gain.value = 0;
+
+  // ── Formant bandpass (simulates bell/cup resonance ~1.2 kHz) ──
+  const formant = ctx.createBiquadFilter();
+  formant.type = "peaking";
+  formant.frequency.value = 1200;
+  formant.Q.value = 2.5;
+  formant.gain.value = 6;
+
+  // ── Brightness lowpass ──
+  const lpf = ctx.createBiquadFilter();
+  lpf.type = "lowpass";
+  lpf.frequency.value = brightnessHz;
+  lpf.Q.value = 0.5;
+
+  // ── Output gain (per-voice) ──
+  const outGain = ctx.createGain(); outGain.gain.value = 0.7;
+
+  // Wiring
+  osc1.connect(osc1Gain); osc1Gain.connect(vca);
+  osc2.connect(osc2Gain); osc2Gain.connect(vca);
+  noiseNode.connect(noiseFilter); noiseFilter.connect(noiseGain); noiseGain.connect(vca);
+  vca.connect(formant); formant.connect(lpf); lpf.connect(outGain);
+  outGain.connect(outputNode);
+
+  let playing = false;
+  let currentMidi = 0;
+  // Detune osc2 slightly for width/chorusing (cents)
+  osc2.detune.value = 7;
+
+  function setFreq(hz: number, rampSec = 0.015) {
+    const t = now();
+    osc1.frequency.cancelScheduledValues(t);
+    osc2.frequency.cancelScheduledValues(t);
+    osc1.frequency.setTargetAtTime(hz, t, rampSec);
+    osc2.frequency.setTargetAtTime(hz * 1.003, t, rampSec); // slight detune
+  }
+
+  function attack(hz: number, velocity: number, legato: boolean) {
+    const t = now();
+    setFreq(hz, legato ? 0.025 : 0.006);
+    if (!legato || !playing) {
+      // Short tongue articulation: quick dip then ramp
+      vca.gain.cancelScheduledValues(t);
+      if (!legato) {
+        vca.gain.setValueAtTime(0, t);
+        vca.gain.linearRampToValueAtTime(velocity * 0.9, t + 0.012);
+      } else {
+        vca.gain.setTargetAtTime(velocity * 0.9, t, 0.018);
+      }
+      // Noise burst on attack (breath)
+      noiseGain.gain.cancelScheduledValues(t);
+      noiseGain.gain.setValueAtTime(velocity * 0.08, t);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+    }
+    playing = true;
+  }
+
+  function release() {
+    const t = now();
+    vca.gain.cancelScheduledValues(t);
+    vca.gain.setTargetAtTime(0, t, 0.04);
+    noiseGain.gain.cancelScheduledValues(t);
+    noiseGain.gain.setTargetAtTime(0, t, 0.02);
+    playing = false;
+  }
+
+  return {
+    noteOn(hz: number, velocity: number, legato: boolean) {
+      const midi = Math.round(freqToMidiLocal(hz));
+      if (playing && midi === currentMidi) {
+        // Same note sustaining — just update dynamics smoothly
+        vca.gain.setTargetAtTime(velocity * 0.9, now(), 0.05);
+        return;
+      }
+      currentMidi = midi;
+      attack(hz, velocity, legato);
+    },
+    noteOff: release,
+    setFreq,
+    setVolumeGain(g: number) { outGain.gain.setTargetAtTime(g, now(), 0.03); },
+    setBrightnessHz(hz: number) { lpf.frequency.setTargetAtTime(Math.max(400, Math.min(14000, hz)), now(), 0.05); },
+    get isPlaying() { return playing; },
+    get currentMidi() { return currentMidi; },
+    dispose() {
+      try { osc1.stop(); osc1.disconnect(); osc1Gain.disconnect(); } catch { /* */ }
+      try { osc2.stop(); osc2.disconnect(); osc2Gain.disconnect(); } catch { /* */ }
+      try { noiseNode.stop(); noiseNode.disconnect(); noiseFilter.disconnect(); noiseGain.disconnect(); } catch { /* */ }
+      try { vca.disconnect(); formant.disconnect(); lpf.disconnect(); outGain.disconnect(); } catch { /* */ }
+    },
+  };
+}
+
 /**
- * Sampled trumpet with monophonic portamento, wired into the trumpet bus.
- * Used by both Live Monitor and Sing-then-Convert in Takes.
+ * Trumpet instrument with:
+ *  - Live mode: low-latency brass synth (continuous pitch ramp, articulation model)
+ *  - Convert mode: real sampler for clean scheduled playback
+ * Both route through filter → reverb → volume → limiter → trumpet bus.
  */
 export async function createTrumpetInstrument(
   engine: AudioEngine,
   opts: { brightnessHz?: number; reverbWet?: number; volumeDb?: number } = {},
 ): Promise<TrumpetInstrument> {
   const Tone = await engine.loadTone();
-  const reverb = new Tone.Reverb({ decay: 1.4, wet: opts.reverbWet ?? 0.16 });
+  const ctx  = engine.ctx;
+
+  const reverb = new Tone.Reverb({ decay: 1.2, wet: opts.reverbWet ?? 0.14 });
   const filter = new Tone.Filter({ type: "lowpass", frequency: opts.brightnessHz ?? 4200, Q: 0.4 });
   const volume = new Tone.Volume(opts.volumeDb ?? -6);
+
+  // Safety limiter so the trumpet can never blast the master
+  const limiterNode = ctx.createDynamicsCompressor();
+  limiterNode.threshold.value = -3;
+  limiterNode.knee.value       = 2;
+  limiterNode.ratio.value      = 16;
+  limiterNode.attack.value     = 0.001;
+  limiterNode.release.value    = 0.05;
+
   await reverb.ready;
+
+  // Native intermediate gain node as bridging point for the synth voice
+  const synthBus = ctx.createGain(); synthBus.gain.value = 1;
+  synthBus.connect(limiterNode);
+  limiterNode.connect(engine.trumpetBus);
+
+  // Connect Tone chain also to trumpetBus (for sampler)
+  // Tone: sampler → filter → reverb → volume → (native) limiter → trumpetBus
+  volume.connect(limiterNode);
+  filter.connect(reverb);
+  reverb.connect(volume);
 
   let loaded = false;
   let resolveReady: () => void = () => {};
@@ -249,66 +400,69 @@ export async function createTrumpetInstrument(
   const sampler = new Tone.Sampler({
     urls: TRUMPET_URLS,
     baseUrl: "/samples/trumpet/",
-    attack: 0.02,
-    release: 0.4,
-    onload: () => {
-      loaded = true;
-      resolveReady();
-    },
+    attack: 0.015,
+    release: 0.5,
+    onload: () => { loaded = true; resolveReady(); },
   });
-
   sampler.connect(filter);
-  filter.connect(reverb);
-  reverb.connect(volume);
-  volume.connect(engine.trumpetBus);
 
-  let sounding = false;
-  let currentFreq = 0;
+  // Brightness filter (Tone Filter) tracks the same hz as the synth lpf
+  const bHz = opts.brightnessHz ?? 4200;
+
+  // Live brass synth voice
+  const synth = createBrassSynth(ctx, synthBus, bHz);
+
+  // Articulation state
+  let synthSounding = false;
+  let synthLastMidi  = 0;
 
   return {
     sampler,
     ready,
-    noteOn(freqHz, velocity = 0.85, portamentoSec = 0.06) {
-      if (!loaded || freqHz <= 0) return;
-      const now = engine.ctx.currentTime;
-      if (!sounding) {
-        sampler.triggerAttack(freqHz, now, velocity);
-        sounding = true;
-        currentFreq = freqHz;
-      } else if (Math.abs(freqHz - currentFreq) > 0.5) {
-        // Glide: Tone.Sampler has no native portamento, so emulate by
-        // retriggering with a short crossfade only on larger pitch moves.
-        const ratio = freqHz / (currentFreq || freqHz);
-        if (ratio > 1.06 || ratio < 0.94) {
-          sampler.triggerRelease(currentFreq, now + portamentoSec);
-          sampler.triggerAttack(freqHz, now + portamentoSec * 0.5, velocity);
-        }
-        currentFreq = freqHz;
-      }
+
+    noteOn(freqHz, velocity = 0.8, legato = true) {
+      if (freqHz <= 0) return;
+      const midi = Math.round(freqToMidiLocal(freqHz));
+      synth.noteOn(freqHz, velocity, legato && synthSounding);
+      synthSounding = true;
+      synthLastMidi  = midi;
     },
+
     noteOff() {
-      if (!sounding) return;
-      try { sampler.triggerRelease(currentFreq, engine.ctx.currentTime); } catch { /* */ }
-      sounding = false;
-      currentFreq = 0;
+      if (!synthSounding) return;
+      synth.noteOff();
+      synthSounding = false;
+      synthLastMidi  = 0;
     },
+
     setVolumeDb(db) {
       volume.volume.rampTo(db, 0.05);
+      // Also scale synth bus to match (convert dB → linear)
+      const g = Math.pow(10, Math.max(-40, Math.min(6, db)) / 20);
+      synthBus.gain.setTargetAtTime(g, ctx.currentTime, 0.05);
     },
+
     setBrightnessHz(hz) {
-      filter.frequency.rampTo(Math.max(400, Math.min(12000, hz)), 0.06);
+      const clamped = Math.max(400, Math.min(14000, hz));
+      filter.frequency.rampTo(clamped, 0.06);
+      synth.setBrightnessHz(clamped);
     },
+
     scheduleNote(freqHz, startTime, duration, velocity = 0.85) {
       if (!loaded || freqHz <= 0) return;
-      try {
-        sampler.triggerAttackRelease(freqHz, duration, startTime, velocity);
-      } catch { /* */ }
+      try { sampler.triggerAttackRelease(freqHz, duration, startTime, velocity); } catch { /* */ }
     },
+
     dispose() {
+      synth.dispose();
+      try { synthBus.disconnect(); } catch { /* */ }
+      try { limiterNode.disconnect(); } catch { /* */ }
       try { sampler.dispose(); } catch { /* */ }
       try { filter.dispose(); } catch { /* */ }
       try { reverb.dispose(); } catch { /* */ }
       try { volume.dispose(); } catch { /* */ }
+      // suppress unused warning
+      void synthLastMidi;
     },
   };
 }

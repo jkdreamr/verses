@@ -1,49 +1,120 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ensureEngine, resumeEngine } from "@/lib/audio/engine";
 import { createTrumpetInstrument, type TrumpetInstrument } from "@/lib/audio/samplers";
-import { aboveNoiseFloor } from "@/lib/audio/calibrate";
+import { aboveNoiseFloor, getNoiseFloor } from "@/lib/audio/calibrate";
 import { snapToScale, keyToPc, midiToFreq, midiToLabel, type ScaleId } from "@/lib/audio/scales";
+import { OneEuroFilter } from "@/lib/audio/oneEuro";
 
 // ───────────────────────────────────────────────────────────────────────────
-// Live (and Sing-then-Convert) voice → sampled trumpet.
+// Voice → Trumpet — upgraded pipeline.
 //
-//  • Live Monitor: mic → McLeod-pitch AudioWorklet (off main thread). Each
-//    voiced frame (gated by clarity) drives a real recorded-trumpet Tone.Sampler
-//    with portamento; loudness → velocity. ~30–100 ms latency is inherent and
-//    documented — it is impossible to eliminate entirely.
-//  • Sing-then-Convert: capture the dry vocal, run pitchy offline, then play a
-//    perfectly-tracked trumpet line back — cleaner, no live-latency artefacts.
+// Live Play: mic → McLeod pitch worklet (off main thread) → OneEuroFilter
+//   smoothing → octave-range mapping → articulation model → brass synth voice.
+//   Prioritises low latency; worklet config adapts to chosen tracking preset.
 //
-// Everything routes through the engine trumpet bus, so Takes capture it.
+// Sing-then-Convert: record a phrase → offline pitchy analysis → improved
+//   segmentation (octave-flip removal, tiny-fragment merging, vibrato smoothing,
+//   scale snap) → scheduled sampler playback. Prioritises clean results.
+//
+// Both routes through engine.trumpetBus so Takes capture them.
 // ───────────────────────────────────────────────────────────────────────────
 
+// ── Trumpet sound presets ─────────────────────────────────────────────────
 export type TrumpetPreset = {
   name: string;
   blurb: string;
   brightness: number; // 0..1 → lowpass cutoff
-  portamento: number; // 0..1 → glide seconds
   outputGain: number; // 0..1
   reverbWet: number; // 0..1
 };
 
 export const TRUMPET_PRESETS: TrumpetPreset[] = [
-  { name: "Trumpet", blurb: "Bright, open horn", brightness: 0.6, portamento: 0.18, outputGain: 0.8, reverbWet: 0.16 },
-  { name: "Muted", blurb: "Dark harmon-mute", brightness: 0.28, portamento: 0.28, outputGain: 0.72, reverbWet: 0.12 },
-  { name: "Brass Bold", blurb: "Punchy section", brightness: 0.78, portamento: 0.08, outputGain: 0.82, reverbWet: 0.1 },
-  { name: "Flugel", blurb: "Warm, mellow", brightness: 0.4, portamento: 0.32, outputGain: 0.76, reverbWet: 0.24 },
-  { name: "Jazz Lead", blurb: "Intimate, expressive", brightness: 0.5, portamento: 0.36, outputGain: 0.78, reverbWet: 0.2 },
+  { name: "Trumpet",    blurb: "Bright, open horn",       brightness: 0.62, outputGain: 0.80, reverbWet: 0.14 },
+  { name: "Muted",      blurb: "Dark harmon-mute",        brightness: 0.26, outputGain: 0.72, reverbWet: 0.10 },
+  { name: "Brass Bold", blurb: "Punchy brass section",    brightness: 0.82, outputGain: 0.84, reverbWet: 0.08 },
+  { name: "Flugel",     blurb: "Warm, mellow flugel",     brightness: 0.42, outputGain: 0.76, reverbWet: 0.22 },
+  { name: "Jazz Lead",  blurb: "Intimate, expressive",    brightness: 0.52, outputGain: 0.78, reverbWet: 0.18 },
 ];
 
-const CLARITY_GATE = 0.55;
-const MIN_FREQ = 75;
-const MAX_FREQ = 1100;
-// Keep the horn ringing briefly through momentary clarity dips so sustained,
-// legato singing doesn't chop into separate notes.
-const RELEASE_HOLD_MS = 110;
+// ── Pitch tracking presets (worklet configuration) ─────────────────────────
+export type TrackingPreset = "fast" | "balanced" | "accurate";
 
-const freqToMidi = (f: number) => Math.round(69 + 12 * Math.log2(f / 440));
-const brightnessToHz = (b: number) => 1500 + Math.max(0, Math.min(1, b)) * 5500;
-const lin01ToDb = (x: number) => (x <= 0.001 ? -60 : 20 * Math.log10(x));
+type WorkletConfig = {
+  windowSize: number;   // samples
+  hop: number;          // samples
+  attackThresh: number; // clarity to open gate
+  releaseThresh: number;// clarity to stay open
+  rmsGate: number;      // absolute silence floor
+  lowCpuMode: boolean;
+};
+
+const TRACKING_PRESETS: Record<TrackingPreset, WorkletConfig & { label: string; blurb: string; latencyMs: number }> = {
+  fast: {
+    label: "Fast", blurb: "Lowest latency — best for fast phrases",
+    windowSize: 1024, hop: 256, attackThresh: 0.52, releaseThresh: 0.38, rmsGate: 0.006, lowCpuMode: false,
+    latencyMs: 22,
+  },
+  balanced: {
+    label: "Balanced", blurb: "Good all-round — default",
+    windowSize: 2048, hop: 512, attackThresh: 0.55, releaseThresh: 0.42, rmsGate: 0.005, lowCpuMode: false,
+    latencyMs: 43,
+  },
+  accurate: {
+    label: "Accurate", blurb: "Smoother, more stable — higher latency",
+    windowSize: 4096, hop: 1024, attackThresh: 0.60, releaseThresh: 0.46, rmsGate: 0.004, lowCpuMode: false,
+    latencyMs: 85,
+  },
+};
+
+// ── Octave / range modes ───────────────────────────────────────────────────
+export type RangeMode = "auto" | "same" | "+12" | "+24" | "-12";
+
+const TRUMPET_LOW_MIDI  = 46; // Bb3 — comfortable low (includes Bb3 on Bb instrument)
+const TRUMPET_HIGH_MIDI = 84; // C6  — top of practical range
+const TRUMPET_SWEET_LOW = 58; // Bb4
+const TRUMPET_SWEET_HIGH = 79; // G5
+
+/**
+ * Map a raw MIDI (from the singer's voice, any octave) into the trumpet range.
+ * "auto" = intelligently transpose into the sweet range using the nearest octave.
+ * This is exported so it can be unit-tested independently.
+ */
+export function mapToTrumpetRange(rawMidi: number, mode: RangeMode): number {
+  switch (mode) {
+    case "+12": return clampMidi(rawMidi + 12);
+    case "+24": return clampMidi(rawMidi + 24);
+    case "-12": return clampMidi(rawMidi - 12);
+    case "same": return clampMidi(rawMidi);
+    case "auto": {
+      // Find which octave shift puts rawMidi closest to the sweet spot centre
+      const sweetMid = (TRUMPET_SWEET_LOW + TRUMPET_SWEET_HIGH) / 2;
+      let best = rawMidi;
+      let bestDist = Infinity;
+      for (const shift of [-24, -12, 0, 12, 24]) {
+        const m = rawMidi + shift;
+        if (m < TRUMPET_LOW_MIDI || m > TRUMPET_HIGH_MIDI) continue;
+        const d = Math.abs(m - sweetMid);
+        if (d < bestDist) { bestDist = d; best = m; }
+      }
+      return best;
+    }
+  }
+}
+
+function clampMidi(m: number): number {
+  return Math.max(TRUMPET_LOW_MIDI, Math.min(TRUMPET_HIGH_MIDI, Math.round(m)));
+}
+
+// ── Pitch status ───────────────────────────────────────────────────────────
+export type PitchStatus =
+  | "idle"          // trumpet not enabled
+  | "loading"       // instrument loading
+  | "too_quiet"     // below noise floor
+  | "no_pitch"      // rms ok but no clear pitch found
+  | "out_of_range"  // pitch found but outside vocal range
+  | "tracking"      // active note playing
+  | "held"          // just stopped singing, tail ringing
+  | "uncalibrated"; // no calibration data, showing warning
 
 export type CaptureState = "idle" | "capturing" | "converting" | "ready";
 
@@ -54,75 +125,144 @@ export type UseLiveTrumpetConfig = {
 
 type ConvNote = { midi: number; start: number; duration: number; velocity: number };
 
+// ── Smoothing — OneEuroFilter config per tracking preset ───────────────────
+const OEF_PARAMS: Record<TrackingPreset, { minCutoff: number; beta: number }> = {
+  fast:     { minCutoff: 4.0, beta: 0.10 },
+  balanced: { minCutoff: 2.0, beta: 0.06 },
+  accurate: { minCutoff: 1.2, beta: 0.03 },
+};
+
+const lin01ToDb = (x: number) => (x <= 0.001 ? -60 : 20 * Math.log10(x));
+const brightnessToHz = (b: number) => 1400 + Math.max(0, Math.min(1, b)) * 5800;
+const freqToMidiF = (f: number) => 69 + 12 * Math.log2(f / 440);
+
+// ─────────────────────────────────────────────────────────────────────────────
 export function useLiveTrumpet({ micStream, enabled }: UseLiveTrumpetConfig) {
-  // ── params ──
-  const [mode, setMode] = useState<"live" | "convert">("live");
-  const [brightness, setBrightness] = useState(0.6);
-  const [portamento, setPortamento] = useState(0.18);
-  const [outputGain, setOutputGain] = useState(0.8);
-  const [reverbWet] = useState(0.16);
-  const [snapEnabled, setSnapEnabled] = useState(false);
-  const [snapKey, setSnapKey] = useState("C");
-  const [snapScale, setSnapScale] = useState<ScaleId>("major");
-  const [rawVoiceMonitor, setRawVoiceMonitor] = useState(false);
 
-  // ── detected ──
-  const [detectedNote, setDetectedNote] = useState<string | null>(null);
-  const [detectedFreq, setDetectedFreq] = useState(0);
-  const [confidence, setConfidence] = useState(0);
-  const [inputLevel, setInputLevel] = useState(0);
-  const [isActive, setIsActive] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [latencyMs, setLatencyMs] = useState<number | null>(null);
+  // ── Sound params ──
+  const [brightness, setBrightness] = useState(0.62);
+  const [outputGain, setOutputGain]  = useState(0.80);
+  const [reverbWet]                  = useState(0.14);
 
-  // ── convert ──
-  const [captureState, setCaptureState] = useState<CaptureState>("idle");
+  // ── Feature params ──
+  const [trackingPreset, setTrackingPreset] = useState<TrackingPreset>("balanced");
+  const [rangeMode,      setRangeMode]      = useState<RangeMode>("auto");
+  const [snapEnabled,    setSnapEnabled]    = useState(true);
+  const [snapKey,        setSnapKey]        = useState("C");
+  const [snapScale,      setSnapScale]      = useState<ScaleId>("major");
+
+  // ── Status ──
+  const [pitchStatus,    setPitchStatus]    = useState<PitchStatus>("idle");
+  const [rawNote,        setRawNote]        = useState<string | null>(null);    // note detected from voice
+  const [outputNote,     setOutputNote]     = useState<string | null>(null);   // note played on trumpet
+  const [detectedNote,   setDetectedNote]   = useState<string | null>(null);   // alias (compat)
+  const [confidence,     setConfidence]     = useState(0);   // 0..1
+  const [inputLevel,     setInputLevel]     = useState(0);   // 0..1
+  const [isActive,       setIsActive]       = useState(false);
+  const [error,          setError]          = useState<string | null>(null);
+  const [loading,        setLoading]        = useState(false);
+  const [latencyMs,      setLatencyMs]      = useState<number | null>(null);
+  const [isCalibrated,   setIsCalibrated]   = useState(getNoiseFloor() > 0);
+
+  // ── Mode / convert ──
+  const [mode,           setMode]           = useState<"live" | "convert">("live");
+  const [captureState,   setCaptureState]   = useState<CaptureState>("idle");
   const [convertNoteCount, setConvertNoteCount] = useState(0);
 
-  // ── refs ──
-  const trumpetRef = useRef<TrumpetInstrument | null>(null);
-  const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const workletRef = useRef<AudioWorkletNode | null>(null);
-  const sinkRef = useRef<GainNode | null>(null);
-  const monitorGainRef = useRef<GainNode | null>(null);
+  // ── Refs ──
+  const trumpetRef      = useRef<TrumpetInstrument | null>(null);
+  const micSourceRef    = useRef<MediaStreamAudioSourceNode | null>(null);
+  const workletRef      = useRef<AudioWorkletNode | null>(null);
+  const sinkRef         = useRef<GainNode | null>(null);
   const convRecorderRef = useRef<MediaRecorder | null>(null);
-  const convChunksRef = useRef<Blob[]>([]);
-  const convNotesRef = useRef<ConvNote[]>([]);
+  const convChunksRef   = useRef<Blob[]>([]);
+  const convNotesRef    = useRef<ConvNote[]>([]);
 
-  // pitch smoothing (median + note hysteresis to stop semitone chatter)
-  const pitchHistRef = useRef<number[]>([]);
+  // Pitch processing state (all in refs to avoid re-render churn)
+  const oefRef          = useRef(new OneEuroFilter({ ...OEF_PARAMS.balanced, freq: 50 }));
   const committedMidiRef = useRef(0);
-  const candidateRef = useRef<{ midi: number; count: number }>({ midi: 0, count: 0 });
-  const lastVoicedRef = useRef(0);
+  const candidateRef    = useRef<{ midi: number; count: number }>({ midi: 0, count: 0 });
+  const lastVoicedRef   = useRef(0); // performance.now() of last voiced frame
+  const lastMsgRef      = useRef(0);
+  // Throttle React state updates to avoid re-render every worklet frame
+  const lastUiUpdateRef = useRef(0);
+  const pendingUiRef    = useRef<{ rawNote?: string; outputNote?: string; confidence?: number; inputLevel?: number; isActive?: boolean; pitchStatus?: PitchStatus }>({});
 
-  const brightnessRef = useRef(brightness);
-  const portamentoRef = useRef(portamento);
-  const snapRef = useRef({ enabled: snapEnabled, key: snapKey, scale: snapScale });
-  const modeRef = useRef(mode);
-  useEffect(() => { brightnessRef.current = brightness; trumpetRef.current?.setBrightnessHz(brightnessToHz(brightness)); }, [brightness]);
-  useEffect(() => { portamentoRef.current = portamento; }, [portamento]);
+  // Mirror-refs for params used in the worklet closure
+  const brightnessRef     = useRef(brightness);
+  const outputGainRef     = useRef(outputGain);
+  const trackingPresetRef = useRef(trackingPreset);
+  const rangeModeRef      = useRef(rangeMode);
+  const snapRef           = useRef({ enabled: snapEnabled, key: snapKey, scale: snapScale });
+  const modeRef           = useRef(mode);
+
+  // ── Param sync to refs + live chain ──
+  useEffect(() => {
+    brightnessRef.current = brightness;
+    trumpetRef.current?.setBrightnessHz(brightnessToHz(brightness));
+  }, [brightness]);
+
+  useEffect(() => {
+    outputGainRef.current = outputGain;
+    trumpetRef.current?.setVolumeDb(lin01ToDb(outputGain));
+  }, [outputGain]);
+
+  useEffect(() => { rangeModeRef.current = rangeMode; }, [rangeMode]);
   useEffect(() => { snapRef.current = { enabled: snapEnabled, key: snapKey, scale: snapScale }; }, [snapEnabled, snapKey, snapScale]);
   useEffect(() => { modeRef.current = mode; }, [mode]);
-  useEffect(() => { trumpetRef.current?.setVolumeDb(lin01ToDb(outputGain)); }, [outputGain]);
+
   useEffect(() => {
-    if (monitorGainRef.current) {
-      const e = ensureEngine();
-      monitorGainRef.current.gain.setTargetAtTime(rawVoiceMonitor ? 0.35 : 0, e.ctx.currentTime, 0.03);
-    }
-  }, [rawVoiceMonitor]);
+    trackingPresetRef.current = trackingPreset;
+    // Reconfigure worklet when preset changes
+    const cfg = TRACKING_PRESETS[trackingPreset];
+    workletRef.current?.port.postMessage({
+      windowSize:    cfg.windowSize,
+      hop:           cfg.hop,
+      attackThresh:  cfg.attackThresh,
+      releaseThresh: cfg.releaseThresh,
+      rmsGate:       cfg.rmsGate,
+      lowCpuMode:    cfg.lowCpuMode,
+    });
+    // Reset OEF for new preset
+    oefRef.current = new OneEuroFilter({ ...OEF_PARAMS[trackingPreset], freq: 50 });
+    // Update latency display
+    const engine = typeof window !== "undefined" ? (window as Window & { __audioEngine?: { ctx?: AudioContext } }).__audioEngine : undefined;
+    void engine; // suppress
+    setLatencyMs(TRACKING_PRESETS[trackingPreset].latencyMs);
+  }, [trackingPreset]);
+
+  // ── Calibration state sync ──
+  useEffect(() => {
+    setIsCalibrated(getNoiseFloor() > 0);
+  }, []);
 
   const applyPreset = useCallback((p: TrumpetPreset) => {
     setBrightness(p.brightness);
-    setPortamento(p.portamento);
     setOutputGain(p.outputGain);
   }, []);
+
+  // ── Throttled UI flush (max 25 fps for status/note readouts) ──
+  function flushUi(patch: typeof pendingUiRef.current) {
+    Object.assign(pendingUiRef.current, patch);
+    const now = performance.now();
+    if (now - lastUiUpdateRef.current < 40) return; // 25 fps
+    lastUiUpdateRef.current = now;
+    const p = pendingUiRef.current;
+    if (p.rawNote    !== undefined) { setRawNote(p.rawNote);       setDetectedNote(p.rawNote); }
+    if (p.outputNote !== undefined) setOutputNote(p.outputNote);
+    if (p.confidence !== undefined) setConfidence(p.confidence);
+    if (p.inputLevel !== undefined) setInputLevel(p.inputLevel);
+    if (p.isActive   !== undefined) setIsActive(p.isActive);
+    if (p.pitchStatus !== undefined) setPitchStatus(p.pitchStatus);
+    pendingUiRef.current = {};
+  }
 
   // ── Live pipeline ──
   useEffect(() => {
     let cancelled = false;
     if (!enabled || !micStream) {
       teardownLive();
+      setPitchStatus("idle");
       return;
     }
 
@@ -130,21 +270,21 @@ export function useLiveTrumpet({ micStream, enabled }: UseLiveTrumpetConfig) {
       try {
         const engine = ensureEngine();
         await resumeEngine();
-        // sampled trumpet (load once)
+        setPitchStatus("loading");
+        setLoading(true);
+
         if (!trumpetRef.current) {
-          setLoading(true);
           const inst = await createTrumpetInstrument(engine, {
             brightnessHz: brightnessToHz(brightnessRef.current),
             reverbWet,
-            volumeDb: lin01ToDb(outputGain),
+            volumeDb: lin01ToDb(outputGainRef.current),
           });
-          if (cancelled) { inst.dispose(); setLoading(false); return; }
+          if (cancelled) { inst.dispose(); setLoading(false); setPitchStatus("idle"); return; }
           trumpetRef.current = inst;
           await inst.ready;
-          setLoading(false);
         }
+        setLoading(false);
 
-        // worklet pitch detector
         await engine.ctx.audioWorklet.addModule("/worklets/pitch-detector.js").catch(() => {});
         if (cancelled) return;
 
@@ -153,7 +293,18 @@ export function useLiveTrumpet({ micStream, enabled }: UseLiveTrumpetConfig) {
 
         const worklet = new AudioWorkletNode(engine.ctx, "pitch-detector");
         workletRef.current = worklet;
-        // keep the worklet pumping without making sound
+
+        // Configure worklet immediately with current preset
+        const cfg = TRACKING_PRESETS[trackingPresetRef.current];
+        worklet.port.postMessage({
+          windowSize:    cfg.windowSize,
+          hop:           cfg.hop,
+          attackThresh:  cfg.attackThresh,
+          releaseThresh: cfg.releaseThresh,
+          rmsGate:       cfg.rmsGate,
+          lowCpuMode:    cfg.lowCpuMode,
+        });
+
         const sink = engine.ctx.createGain();
         sink.gain.value = 0;
         sinkRef.current = sink;
@@ -161,73 +312,106 @@ export function useLiveTrumpet({ micStream, enabled }: UseLiveTrumpetConfig) {
         worklet.connect(sink);
         sink.connect(engine.ctx.destination);
 
-        // raw-voice monitor path
-        const monitor = engine.ctx.createGain();
-        monitor.gain.value = rawVoiceMonitor ? 0.35 : 0;
-        monitorGainRef.current = monitor;
-        micSource.connect(monitor);
-        monitor.connect(engine.trumpetBus);
+        // Compute honest latency
+        const io = (engine.ctx.baseLatency ?? 0) + (engine.ctx.outputLatency ?? 0);
+        setLatencyMs(Math.round(io * 1000) + TRACKING_PRESETS[trackingPresetRef.current].latencyMs);
+
+        // Gate: hold the horn ringing briefly through momentary clarity dips
+        const RELEASE_HOLD_MS = 120;
 
         worklet.port.onmessage = (ev: MessageEvent) => {
-          const { freq, clarity, rms } = ev.data as { freq: number; clarity: number; rms: number };
-          setInputLevel(Math.min(1, rms * 6));
-          setConfidence(clarity);
+          const { freq, clarity, rms, pitchStatus: wStatus } =
+            ev.data as { freq: number; clarity: number; rms: number; pitchStatus: string };
+
           const trumpet = trumpetRef.current;
-          if (!trumpet || modeRef.current !== "live") { setIsActive(false); return; }
+          if (!trumpet || modeRef.current !== "live") {
+            flushUi({ isActive: false, pitchStatus: "idle" });
+            return;
+          }
 
-          if (clarity >= CLARITY_GATE && freq >= MIN_FREQ && freq <= MAX_FREQ && aboveNoiseFloor(rms)) {
-            // 1) median-smooth the raw pitch (kills single-frame outliers / octave flips)
-            const hist = pitchHistRef.current;
-            hist.push(freq);
-            if (hist.length > 5) hist.shift();
-            const sorted = [...hist].sort((a, b) => a - b);
-            const med = sorted[Math.floor(sorted.length / 2)];
+          // ── Throttled input level ──
+          const lvl = Math.min(1, rms * 7);
 
-            // 2) target note (optionally snapped to a key/scale)
-            let targetMidi = freqToMidi(med);
-            if (snapRef.current.enabled) {
-              targetMidi = snapToScale(targetMidi, keyToPc(snapRef.current.key), snapRef.current.scale);
-            }
+          // ── Voiced / unvoiced gating ──
+          const isVoiced = wStatus === "tracking" && freq > 0 && aboveNoiseFloor(rms);
+          const now = performance.now();
 
-            // 3) hysteresis — only commit to a new note once it's held ~2 frames,
-            //    so we don't chatter back and forth across a semitone boundary.
-            if (targetMidi === committedMidiRef.current) {
-              candidateRef.current = { midi: targetMidi, count: 0 };
-            } else if (candidateRef.current.midi === targetMidi) {
-              if (++candidateRef.current.count >= 2) committedMidiRef.current = targetMidi;
+          if (isVoiced) {
+            // 1) OneEuro-smooth the raw frequency (kills jitter without killing fast changes)
+            const tNow = now;
+            const dt = lastMsgRef.current ? (tNow - lastMsgRef.current) : 20;
+            lastMsgRef.current = tNow;
+            const smoothedFreq = oefRef.current.filter(freq, tNow);
+
+            // 2) Convert to MIDI, apply range mapping
+            const rawMidiF   = freqToMidiF(smoothedFreq);
+            const rawMidi    = Math.round(rawMidiF);
+            const mappedMidi = mapToTrumpetRange(rawMidi, rangeModeRef.current);
+
+            // 3) Optionally snap to scale
+            const snapped = snapRef.current.enabled
+              ? snapToScale(mappedMidi, keyToPc(snapRef.current.key), snapRef.current.scale)
+              : mappedMidi;
+
+            // 4) Note hysteresis — commit after 2 stable frames to avoid
+            //    semi-tone chatter, but don't add lag on big jumps.
+            const cand = candidateRef.current;
+            const semitoneJump = Math.abs(snapped - (committedMidiRef.current || snapped));
+            if (cand.midi === snapped) {
+              cand.count++;
             } else {
-              candidateRef.current = { midi: targetMidi, count: 1 };
+              cand.midi  = snapped;
+              cand.count = semitoneJump > 3 ? 2 : 1; // big jumps commit instantly
             }
-            const playMidi = committedMidiRef.current || targetMidi;
-            const f = midiToFreq(playMidi);
+            if (cand.count >= 2) committedMidiRef.current = snapped;
+            const playMidi = committedMidiRef.current || snapped;
 
-            // 4) dynamics: loudness → velocity AND brightness (open the lowpass)
-            const expr = Math.min(1, rms * 7);
-            const velocity = Math.max(0.35, expr);
-            trumpet.setBrightnessHz(brightnessToHz(brightnessRef.current) + expr * 3200);
-            const port = 0.01 + portamentoRef.current * 0.3;
-            trumpet.noteOn(f, velocity, port);
-            lastVoicedRef.current = performance.now();
-            setDetectedFreq(f);
-            setDetectedNote(midiToLabel(playMidi));
-            setIsActive(true);
-          } else if (performance.now() - lastVoicedRef.current > RELEASE_HOLD_MS) {
-            // only release once we've been unvoiced past the hold window
-            trumpet.noteOff();
-            pitchHistRef.current = [];
-            committedMidiRef.current = 0;
-            candidateRef.current = { midi: 0, count: 0 };
-            setIsActive(false);
+            // 5) Dynamics
+            const expr     = Math.min(1, rms * 8);
+            const velocity = Math.max(0.3, Math.min(1, expr));
+            const legato   = committedMidiRef.current > 0; // legato unless first note
+
+            // 6) Play — uses articulation model inside the brass synth
+            trumpet.setBrightnessHz(brightnessToHz(brightnessRef.current) + expr * 2800);
+            trumpet.noteOn(midiToFreq(playMidi), velocity, legato);
+            lastVoicedRef.current = now;
+
+            flushUi({
+              inputLevel:  lvl,
+              confidence:  clarity,
+              rawNote:     midiToLabel(rawMidi),
+              outputNote:  midiToLabel(playMidi),
+              isActive:    true,
+              pitchStatus: "tracking",
+            });
+            void dt; // suppress unused warning
+          } else {
+            // ── Unvoiced ──
+            flushUi({ inputLevel: lvl, confidence: clarity });
+
+            const elapsed = now - lastVoicedRef.current;
+            if (elapsed > RELEASE_HOLD_MS && committedMidiRef.current > 0) {
+              trumpet.noteOff();
+              committedMidiRef.current = 0;
+              candidateRef.current     = { midi: 0, count: 0 };
+              oefRef.current.reset();
+              flushUi({ isActive: false, outputNote: undefined, pitchStatus: mapWorkletStatus(wStatus, rms, isCalibrated) });
+            } else if (committedMidiRef.current > 0) {
+              flushUi({ pitchStatus: "held" });
+            } else {
+              flushUi({ pitchStatus: mapWorkletStatus(wStatus, rms, isCalibrated) });
+            }
           }
         };
+
         setError(null);
-        // Honest latency: device I/O round-trip + the MPM analysis block (~25 ms).
-        const io = (engine.ctx.baseLatency || 0) + (engine.ctx.outputLatency || 0);
-        setLatencyMs(Math.round(io * 1000) + 25);
+        setPitchStatus(isCalibrated ? "no_pitch" : "uncalibrated");
       } catch (e) {
         if (!cancelled) {
           console.warn("[useLiveTrumpet] setup failed:", e);
           setError("Could not start the trumpet. Check mic permissions.");
+          setPitchStatus("idle");
+          setLoading(false);
         }
       }
     })();
@@ -241,22 +425,21 @@ export function useLiveTrumpet({ micStream, enabled }: UseLiveTrumpetConfig) {
     try { workletRef.current?.disconnect(); } catch { /* */ }
     try { sinkRef.current?.disconnect(); } catch { /* */ }
     try { micSourceRef.current?.disconnect(); } catch { /* */ }
-    try { monitorGainRef.current?.disconnect(); } catch { /* */ }
     try { trumpetRef.current?.noteOff(); } catch { /* */ }
-    workletRef.current = null;
-    sinkRef.current = null;
+    workletRef.current  = null;
+    sinkRef.current     = null;
     micSourceRef.current = null;
-    monitorGainRef.current = null;
+    committedMidiRef.current = 0;
+    candidateRef.current     = { midi: 0, count: 0 };
+    oefRef.current.reset();
     setIsActive(false);
+    setLoading(false);
   }
 
-  // dispose the sampled instrument fully on unmount
-  useEffect(() => {
-    return () => {
-      teardownLive();
-      try { trumpetRef.current?.dispose(); } catch { /* */ }
-      trumpetRef.current = null;
-    };
+  useEffect(() => () => {
+    teardownLive();
+    try { trumpetRef.current?.dispose(); } catch { /* */ }
+    trumpetRef.current = null;
   }, []);
 
   // ── Sing-then-Convert ──
@@ -273,7 +456,7 @@ export function useLiveTrumpet({ micStream, enabled }: UseLiveTrumpetConfig) {
     setCaptureState("capturing");
   }, [micStream]);
 
-  const finishCapture = useCallback(async () => {
+  const finishCapture = useCallback(async (opts?: { smoothing?: ConvertSmoothing; scaleSnap?: boolean }) => {
     const rec = convRecorderRef.current;
     if (!rec) return;
     setCaptureState("converting");
@@ -284,17 +467,19 @@ export function useLiveTrumpet({ micStream, enabled }: UseLiveTrumpetConfig) {
     const blob = await done;
     try {
       const engine = ensureEngine();
-      const arr = await blob.arrayBuffer();
+      const arr    = await blob.arrayBuffer();
       const audioBuf = await engine.ctx.decodeAudioData(arr.slice(0));
-      const notes = await analyzeToNotes(audioBuf);
+      const notes = await analyzeToNotes(audioBuf, {
+        smoothing: opts?.smoothing ?? "natural",
+        scaleSnap: opts?.scaleSnap ? { key: snapRef.current.key, scale: snapRef.current.scale } : undefined,
+      });
       convNotesRef.current = notes;
       setConvertNoteCount(notes.length);
-      // ensure trumpet exists for playback even if live never ran
       if (!trumpetRef.current) {
         trumpetRef.current = await createTrumpetInstrument(engine, {
           brightnessHz: brightnessToHz(brightnessRef.current),
           reverbWet,
-          volumeDb: lin01ToDb(outputGain),
+          volumeDb: lin01ToDb(outputGainRef.current),
         });
         await trumpetRef.current.ready;
       }
@@ -304,14 +489,14 @@ export function useLiveTrumpet({ micStream, enabled }: UseLiveTrumpetConfig) {
       setError("Could not convert the recording.");
       setCaptureState("idle");
     }
-  }, [outputGain, reverbWet]);
+  }, [reverbWet]);
 
   const playConverted = useCallback(async () => {
     const trumpet = trumpetRef.current;
     if (!trumpet || convNotesRef.current.length === 0) return;
     await resumeEngine();
     const engine = ensureEngine();
-    const t0 = engine.ctx.currentTime + 0.1;
+    const t0 = engine.ctx.currentTime + 0.08;
     for (const n of convNotesRef.current) {
       trumpet.scheduleNote(midiToFreq(n.midi), t0 + n.start, n.duration, n.velocity);
     }
@@ -323,72 +508,190 @@ export function useLiveTrumpet({ micStream, enabled }: UseLiveTrumpetConfig) {
     setCaptureState("idle");
   }, []);
 
-  return {
-    // detected
-    detectedNote, detectedFreq, confidence, inputLevel, isActive, error, loading, latencyMs,
+  // Notify parent that calibration happened
+  const onCalibrated = useCallback(() => {
+    setIsCalibrated(getNoiseFloor() > 0);
+    if (pitchStatus === "uncalibrated") setPitchStatus("no_pitch");
+  }, [pitchStatus]);
+
+  return useMemo(() => ({
+    // status
+    pitchStatus, rawNote, outputNote,
+    detectedNote, /* backward-compat alias for rawNote */
+    confidence, inputLevel, isActive, error, loading, latencyMs, isCalibrated,
     // mode
     mode, setMode,
-    // params
-    brightness, setBrightness, portamento, setPortamento, outputGain, setOutputGain,
-    snapEnabled, setSnapEnabled, snapKey, setSnapKey, snapScale, setSnapScale,
-    rawVoiceMonitor, setRawVoiceMonitor,
+    // sound params
+    brightness, setBrightness, outputGain, setOutputGain,
     applyPreset,
+    // feature params
+    trackingPreset, setTrackingPreset,
+    rangeMode, setRangeMode,
+    snapEnabled, setSnapEnabled, snapKey, setSnapKey, snapScale, setSnapScale,
     // convert
     captureState, convertNoteCount, startCapture, finishCapture, playConverted, clearConvert,
-  };
+    // misc
+    onCalibrated,
+    TRACKING_PRESETS,
+  }), [
+    pitchStatus, rawNote, outputNote, detectedNote,
+    confidence, inputLevel, isActive, error, loading, latencyMs, isCalibrated,
+    mode, setMode,
+    brightness, setBrightness, outputGain, setOutputGain, applyPreset,
+    trackingPreset, setTrackingPreset,
+    rangeMode, setRangeMode,
+    snapEnabled, setSnapEnabled, snapKey, setSnapKey, snapScale, setSnapScale,
+    captureState, convertNoteCount, startCapture, finishCapture, playConverted, clearConvert,
+    onCalibrated,
+  ]);
 }
 
-// ── Offline analysis (pitchy McLeod) → quantised note events ──
-async function analyzeToNotes(audioBuf: AudioBuffer): Promise<ConvNote[]> {
+// ── Helpers ───────────────────────────────────────────────────────────────
+function mapWorkletStatus(wStatus: string, rms: number, calibrated: boolean): PitchStatus {
+  if (!calibrated && rms < 0.01)  return "uncalibrated";
+  if (wStatus === "too_quiet")     return "too_quiet";
+  if (wStatus === "out_of_range")  return "out_of_range";
+  return "no_pitch";
+}
+
+// ── Sing-then-Convert: offline analysis ───────────────────────────────────
+export type ConvertSmoothing = "natural" | "tight" | "very_smooth";
+
+/**
+ * Analyze an AudioBuffer offline, producing clean note events suitable for
+ * sampled-trumpet playback. Improvements over the old version:
+ *  - Merges tiny fragments (< minDurSec)
+ *  - Removes octave flips (adjacent notes differing by 12 semitones)
+ *  - Smooths short vibrato into one note
+ *  - Auto-transposes into trumpet range
+ *  - Optionally scale-snaps using song key
+ */
+export async function analyzeToNotes(
+  audioBuf: AudioBuffer,
+  opts: { smoothing?: ConvertSmoothing; scaleSnap?: { key: string; scale: ScaleId } } = {},
+): Promise<ConvNote[]> {
   const { PitchDetector } = await import("pitchy");
-  const data = audioBuf.getChannelData(0);
-  const sr = audioBuf.sampleRate;
-  const size = 2048;
-  const hop = 512;
+  const data   = audioBuf.getChannelData(0);
+  const sr     = audioBuf.sampleRate;
+  const size   = 2048;
+  const hop    = 256; // smaller hop = better time resolution for offline
   const detector = PitchDetector.forFloat32Array(size);
   const frames: { t: number; midi: number; clarity: number; rms: number }[] = [];
-  const window = new Float32Array(size);
+  const win    = new Float32Array(size);
+
   for (let i = 0; i + size <= data.length; i += hop) {
-    window.set(data.subarray(i, i + size));
-    const [freq, clarity] = detector.findPitch(window, sr);
+    win.set(data.subarray(i, i + size));
+    const [freq, clarity] = detector.findPitch(win, sr);
     let rms = 0;
-    for (let j = 0; j < size; j++) rms += window[j] * window[j];
+    for (let j = 0; j < size; j++) rms += win[j] * win[j];
     rms = Math.sqrt(rms / size);
-    const midi = freq > 0 ? Math.round(69 + 12 * Math.log2(freq / 440)) : 0;
+    const midi = freq > 0 ? Math.round(freqToMidiF(freq)) : 0;
     frames.push({ t: i / sr, midi, clarity, rms });
   }
 
-  // median-smooth midi over 5 frames
-  const sm = frames.map((f, i) => {
-    const w = frames.slice(Math.max(0, i - 2), i + 3).map((x) => x.midi).filter((m) => m > 0).sort((a, b) => a - b);
+  // ── Median smooth over window sized by smoothing preset ──
+  const smoothWin = opts.smoothing === "very_smooth" ? 9 : opts.smoothing === "tight" ? 3 : 5;
+  const smoothed  = frames.map((f, i) => {
+    const w = frames
+      .slice(Math.max(0, i - (smoothWin >> 1)), i + (smoothWin >> 1) + 1)
+      .map((x) => x.midi)
+      .filter((m) => m > 0)
+      .sort((a, b) => a - b);
     return { ...f, midi: w.length ? w[Math.floor(w.length / 2)] : 0 };
   });
 
-  // segment by pitch stability + clarity gate
-  const notes: ConvNote[] = [];
+  // ── Clarity gate values by smoothing preset ──
+  const clarityGate = opts.smoothing === "very_smooth" ? 0.55 : 0.48;
+  const hopSec      = hop / sr;
+
+  // ── Segment into raw note events ──
+  const rawNotes: ConvNote[] = [];
   let cur: { midi: number; start: number; frames: number; rmsSum: number } | null = null;
-  const hopSec = hop / sr;
-  for (const f of sm) {
-    const voiced = f.clarity >= 0.5 && f.midi >= 40 && f.midi <= 96;
+
+  for (const f of smoothed) {
+    const voiced = f.clarity >= clarityGate && f.midi >= 36 && f.midi <= 96 && f.rms > 0.003;
     if (voiced) {
       if (cur && Math.abs(cur.midi - f.midi) <= 1) {
         cur.frames++;
         cur.rmsSum += f.rms;
       } else {
-        if (cur && cur.frames >= 3) notes.push(toNote(cur, hopSec));
+        if (cur && cur.frames >= 2) rawNotes.push(toNote(cur, hopSec));
         cur = { midi: f.midi, start: f.t, frames: 1, rmsSum: f.rms };
       }
     } else if (cur) {
-      if (cur.frames >= 3) notes.push(toNote(cur, hopSec));
+      if (cur.frames >= 2) rawNotes.push(toNote(cur, hopSec));
       cur = null;
     }
   }
-  if (cur && cur.frames >= 3) notes.push(toNote(cur, hopSec));
-  return notes;
+  if (cur && cur.frames >= 2) rawNotes.push(toNote(cur, hopSec));
+
+  if (rawNotes.length === 0) return [];
+
+  // ── Post-process: remove octave flips ──
+  const deFlipped = removeOctaveFlips(rawNotes);
+
+  // ── Post-process: merge tiny fragments ──
+  const minDurSec = opts.smoothing === "tight" ? 0.05 : 0.08;
+  const merged    = mergeTiny(deFlipped, minDurSec);
+
+  // ── Post-process: auto-transpose into trumpet range ──
+  const transposed = merged.map((n) => ({
+    ...n,
+    midi: mapToTrumpetRange(n.midi, "auto"),
+  }));
+
+  // ── Post-process: scale snap ──
+  const final = opts.scaleSnap
+    ? transposed.map((n) => ({
+        ...n,
+        midi: snapToScale(n.midi, keyToPc(opts.scaleSnap!.key), opts.scaleSnap!.scale),
+      }))
+    : transposed;
+
+  return final;
 }
 
 function toNote(cur: { midi: number; start: number; frames: number; rmsSum: number }, hopSec: number): ConvNote {
-  const duration = Math.max(0.12, cur.frames * hopSec);
-  const velocity = Math.max(0.35, Math.min(1, (cur.rmsSum / cur.frames) * 7));
+  const duration = Math.max(0.1, cur.frames * hopSec);
+  const velocity = Math.max(0.3, Math.min(1, (cur.rmsSum / cur.frames) * 8));
   return { midi: cur.midi, start: cur.start, duration, velocity };
 }
+
+/** Remove octave flips: if adjacent notes differ by exactly 12, keep the one
+ *  that matches the surrounding context better (most common octave wins). */
+function removeOctaveFlips(notes: ConvNote[]): ConvNote[] {
+  if (notes.length < 3) return notes;
+  const out = [...notes];
+  for (let i = 1; i < out.length - 1; i++) {
+    const prev = out[i - 1].midi;
+    const curr = out[i].midi;
+    const next = out[i + 1].midi;
+    if (Math.abs(curr - prev) === 12 && Math.abs(curr - next) === 12) {
+      // curr is an octave off from both neighbours — snap it
+      const shifted = curr + (prev > curr ? 12 : -12);
+      out[i] = { ...out[i], midi: shifted };
+    }
+  }
+  return out;
+}
+
+/** Merge notes shorter than minDurSec into the previous note when possible. */
+function mergeTiny(notes: ConvNote[], minDurSec: number): ConvNote[] {
+  const out: ConvNote[] = [];
+  for (const n of notes) {
+    if (out.length > 0 && n.duration < minDurSec && Math.abs(out[out.length - 1].midi - n.midi) <= 2) {
+      // extend previous note
+      out[out.length - 1] = {
+        ...out[out.length - 1],
+        duration: out[out.length - 1].duration + n.duration,
+      };
+    } else {
+      out.push(n);
+    }
+  }
+  return out;
+}
+
+// ── Pure exports for unit tests ────────────────────────────────────────────
+export { TRACKING_PRESETS };
+export type { WorkletConfig };

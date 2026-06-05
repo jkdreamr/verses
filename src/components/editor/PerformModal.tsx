@@ -1954,10 +1954,15 @@ export function PerformModal({
               <div className="space-y-5">
                 {/* Voice → Trumpet */}
                 <div className="rounded-xl border border-line/50 bg-surface-2/40 p-3">
+                  {/* Header row */}
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
                       <div className="text-[12px] font-medium text-ink-text">Voice → Trumpet</div>
-                      <div className="text-[10px] leading-snug text-ink-mute/70">Sing and a real trumpet follows your pitch. 🎧 use headphones.</div>
+                      <div className="text-[10px] leading-snug text-ink-mute/70">
+                        {perfMode === "vocal"
+                          ? "Vocal FX is active — trumpet layers on top."
+                          : "Sing into the mic; a brass synth follows your pitch in real time."}
+                      </div>
                     </div>
                     <button
                       role="switch" aria-checked={trumpetOn} onClick={() => void toggleTrumpet()}
@@ -1969,49 +1974,213 @@ export function PerformModal({
 
                   {trumpetOn && (
                     <div className="mt-3 space-y-3">
-                      {trumpet.loading && <div className="text-[11px] text-accent">loading trumpet…</div>}
-                      {trumpet.error && <div className="text-[11px] text-danger">{trumpet.error}</div>}
+                      {trumpet.loading && <div className="text-[11px] text-accent animate-pulse">Loading samples…</div>}
+                      {trumpet.error   && <div className="text-[11px] text-red-400">{trumpet.error}</div>}
 
-                      {/* detected note + input meter */}
-                      <div className="flex items-center gap-2">
-                        <span className={`min-w-[3ch] font-mono text-[13px] ${trumpet.isActive ? "text-accent" : "text-ink-mute/50"}`}>
-                          {trumpet.isActive ? trumpet.detectedNote ?? "—" : "—"}
-                        </span>
-                        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-bg/60">
-                          <div className="h-full rounded-full bg-accent/70 transition-[width] duration-75" style={{ width: `${Math.round(Math.min(1, trumpet.inputLevel) * 100)}%` }} />
-                        </div>
-                        {trumpet.latencyMs != null && (
-                          <span className="font-mono text-[10px] text-ink-mute/70" title="Live monitoring latency — inherent to real-time pitch→audio">~{trumpet.latencyMs} ms</span>
-                        )}
-                      </div>
-
-                      {/* calibrate */}
-                      <button
-                        type="button" onClick={() => void calibrateMic()} disabled={calibrating}
-                        title="Sample ~1.5s of room noise so silence/breath never trigger the horn"
-                        className={`w-full rounded-lg px-2 py-1.5 text-[11px] transition-colors ${calibrated ? "bg-success/15 text-success" : "bg-surface-2 text-ink-mute hover:text-ink-text"} disabled:opacity-50`}
-                      >
-                        {calibrating ? "calibrating…" : calibrated ? "✓ mic calibrated" : "Calibrate mic to the room"}
-                      </button>
-
-                      {/* presets */}
-                      <div className="flex flex-wrap gap-1.5">
-                        {TRUMPET_PRESETS.map((p) => (
-                          <button key={p.name} title={p.blurb}
-                            onClick={() => { setTrumpetPresetName(p.name); trumpet.applyPreset(p); }}
-                            className={`rounded-lg px-2.5 py-1.5 text-[11px] transition-colors ${trumpetPresetName === p.name ? "bg-accent/15 text-accent ring-1 ring-accent/40" : "bg-surface-2 text-ink-mute hover:text-ink-text"}`}>
-                            {p.name}
+                      {/* ── Mode toggle: Live / Convert ── */}
+                      <div className="flex rounded-lg overflow-hidden border border-line/40 text-[11px]">
+                        {(["live", "convert"] as const).map((m) => (
+                          <button key={m}
+                            onClick={() => trumpet.setMode(m)}
+                            className={`flex-1 py-1.5 transition-colors ${trumpet.mode === m ? "bg-accent/20 text-accent font-medium" : "text-ink-mute hover:text-ink-text"}`}>
+                            {m === "live" ? "Live Play" : "Sing & Convert"}
                           </button>
                         ))}
                       </div>
 
-                      <Slider label="Brightness" value={trumpet.brightness} onChange={trumpet.setBrightness} valueLabel={`${Math.round(trumpet.brightness * 100)}%`} />
-                      <Slider label="Glide" value={trumpet.portamento} onChange={trumpet.setPortamento} valueLabel={`${Math.round(trumpet.portamento * 100)}%`} />
+                      {/* ── Mode description ── */}
+                      <div className="text-[10px] text-ink-mute/60 leading-snug">
+                        {trumpet.mode === "live"
+                          ? "Brass synth follows your voice in real time. Use headphones to avoid feedback. Some latency is inherent."
+                          : "Record a phrase, convert it to clean trumpet notes, then play it back. Higher quality, no live latency."}
+                      </div>
 
+                      {/* ── Status line ── */}
+                      {trumpet.mode === "live" && !trumpet.loading && (
+                        <div className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-[11px] font-mono ${
+                          trumpet.pitchStatus === "tracking" ? "bg-accent/10 text-accent"
+                          : trumpet.pitchStatus === "held"   ? "bg-accent/5 text-accent/60"
+                          : trumpet.pitchStatus === "uncalibrated" ? "bg-amber-500/10 text-amber-400"
+                          : trumpet.pitchStatus === "too_quiet"    ? "bg-surface-2 text-ink-mute/60"
+                          : "bg-surface-2 text-ink-mute/50"
+                        }`}>
+                          <span className={`h-1.5 w-1.5 rounded-full flex-shrink-0 ${trumpet.pitchStatus === "tracking" ? "bg-accent animate-pulse" : trumpet.pitchStatus === "held" ? "bg-accent/40" : "bg-ink-mute/30"}`} />
+                          <span>
+                            {trumpet.pitchStatus === "tracking"     ? `Tracking ${trumpet.rawNote ?? "—"} → ${trumpet.outputNote ?? "—"}`
+                             : trumpet.pitchStatus === "held"        ? `Holding ${trumpet.outputNote ?? "—"}`
+                             : trumpet.pitchStatus === "too_quiet"   ? "Too quiet — sing louder"
+                             : trumpet.pitchStatus === "no_pitch"    ? "Listening…"
+                             : trumpet.pitchStatus === "out_of_range"? "Out of range — try a different octave"
+                             : trumpet.pitchStatus === "uncalibrated"? "Not calibrated — calibrate for best results"
+                             : trumpet.pitchStatus === "loading"     ? "Loading…"
+                             : "Waiting…"}
+                          </span>
+                          {trumpet.latencyMs != null && trumpet.pitchStatus === "tracking" && (
+                            <span className="ml-auto text-ink-mute/40">~{trumpet.latencyMs} ms</span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* ── Input level + note readout ── */}
+                      {trumpet.mode === "live" && (
+                        <div className="flex items-center gap-2">
+                          {/* Raw voice → output note */}
+                          <div className="flex items-center gap-1 font-mono text-[11px]">
+                            <span className="text-ink-mute/50 w-[3ch]">{trumpet.rawNote ?? "—"}</span>
+                            <span className="text-ink-mute/30">→</span>
+                            <span className={`w-[3ch] ${trumpet.isActive ? "text-accent" : "text-ink-mute/30"}`}>{trumpet.outputNote ?? "—"}</span>
+                          </div>
+                          {/* Level meter */}
+                          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-bg/60">
+                            <div
+                              className={`h-full rounded-full transition-[width] duration-75 ${trumpet.isActive ? "bg-accent/70" : "bg-ink-mute/20"}`}
+                              style={{ width: `${Math.round(Math.min(1, trumpet.inputLevel) * 100)}%` }}
+                            />
+                          </div>
+                          {/* Confidence bar */}
+                          <div className="h-1.5 w-10 overflow-hidden rounded-full bg-bg/60" title="Pitch confidence">
+                            <div className="h-full rounded-full bg-accent/40 transition-[width] duration-100" style={{ width: `${Math.round(trumpet.confidence * 100)}%` }} />
+                          </div>
+                          {trumpet.latencyMs != null && (
+                            <span className="font-mono text-[10px] text-ink-mute/40">~{trumpet.latencyMs} ms</span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* ── Calibrate ── */}
+                      {trumpet.mode === "live" && (
+                        <button
+                          type="button"
+                          onClick={async () => { await calibrateMic(); trumpet.onCalibrated(); }}
+                          disabled={calibrating}
+                          title="Sample ~1.5 s of ambient room noise so breath/silence never trigger the horn"
+                          className={`w-full rounded-lg px-2 py-1.5 text-[11px] transition-colors ${calibrated ? "bg-success/15 text-success" : "bg-surface-2 text-ink-mute hover:text-ink-text"} disabled:opacity-50`}
+                        >
+                          {calibrating ? "Calibrating…" : calibrated ? "✓ Mic calibrated" : "Calibrate mic to the room (recommended)"}
+                        </button>
+                      )}
+
+                      {/* ── Sound presets ── */}
+                      <div>
+                        <div className="mb-1 text-[9px] uppercase tracking-widest text-ink-mute/50">Sound</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {TRUMPET_PRESETS.map((p) => (
+                            <button key={p.name} title={p.blurb}
+                              onClick={() => { setTrumpetPresetName(p.name); trumpet.applyPreset(p); }}
+                              className={`rounded-lg px-2.5 py-1.5 text-[11px] transition-colors ${trumpetPresetName === p.name ? "bg-accent/15 text-accent ring-1 ring-accent/40" : "bg-surface-2 text-ink-mute hover:text-ink-text"}`}>
+                              {p.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <Slider label="Brightness" value={trumpet.brightness} onChange={trumpet.setBrightness} valueLabel={`${Math.round(trumpet.brightness * 100)}%`} />
+                      <Slider label="Volume" value={trumpet.outputGain} onChange={trumpet.setOutputGain} valueLabel={`${Math.round(trumpet.outputGain * 100)}%`} />
+
+                      {/* ── Live-only controls ── */}
+                      {trumpet.mode === "live" && (
+                        <>
+                          {/* Tracking preset */}
+                          <div>
+                            <div className="mb-1 text-[9px] uppercase tracking-widest text-ink-mute/50">Tracking speed</div>
+                            <div className="flex gap-1.5">
+                              {(["fast", "balanced", "accurate"] as const).map((t) => (
+                                <button key={t}
+                                  title={trumpet.TRACKING_PRESETS[t].blurb}
+                                  onClick={() => trumpet.setTrackingPreset(t)}
+                                  className={`flex-1 rounded-lg py-1.5 text-[11px] transition-colors ${trumpet.trackingPreset === t ? "bg-accent/15 text-accent ring-1 ring-accent/40" : "bg-surface-2 text-ink-mute hover:text-ink-text"}`}>
+                                  {trumpet.TRACKING_PRESETS[t].label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Range / octave */}
+                          <div>
+                            <div className="mb-1 text-[9px] uppercase tracking-widest text-ink-mute/50">Range</div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {([
+                                { v: "auto",  label: "Auto",    title: "Automatically transpose into the trumpet's sweet range" },
+                                { v: "same",  label: "Same",    title: "Use the same octave as sung" },
+                                { v: "+12",   label: "+Oct",    title: "One octave up" },
+                                { v: "-12",   label: "−Oct",    title: "One octave down" },
+                              ] as const).map(({ v, label, title }) => (
+                                <button key={v} title={title}
+                                  onClick={() => trumpet.setRangeMode(v)}
+                                  className={`rounded-lg px-2.5 py-1.5 text-[11px] transition-colors ${trumpet.rangeMode === v ? "bg-accent/15 text-accent ring-1 ring-accent/40" : "bg-surface-2 text-ink-mute hover:text-ink-text"}`}>
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </>
+                      )}
+
+                      {/* ── Snap to key (both modes) ── */}
                       <label className="flex items-center justify-between text-[11px] text-ink-mute">
                         <span>Snap to song key ({rootKey})</span>
                         <input type="checkbox" checked={trumpet.snapEnabled} onChange={(e) => trumpet.setSnapEnabled(e.target.checked)} className="accent-accent" />
                       </label>
+
+                      {/* ── Sing & Convert controls ── */}
+                      {trumpet.mode === "convert" && (
+                        <div className="space-y-2 rounded-lg border border-line/30 bg-bg/40 p-2.5">
+                          {trumpet.captureState === "idle" && (
+                            <button
+                              onClick={() => trumpet.startCapture()}
+                              disabled={!micStream}
+                              className="w-full rounded-lg bg-accent/20 py-2 text-[11px] text-accent hover:bg-accent/30 disabled:opacity-40 transition-colors">
+                              Record phrase
+                            </button>
+                          )}
+                          {trumpet.captureState === "capturing" && (
+                            <>
+                              <div className="flex items-center gap-2 text-[11px] text-red-400">
+                                <span className="h-2 w-2 rounded-full bg-red-400 animate-pulse" />
+                                Recording… sing your phrase
+                              </div>
+                              <button
+                                onClick={() => void trumpet.finishCapture({ smoothing: "natural", scaleSnap: trumpet.snapEnabled })}
+                                className="w-full rounded-lg bg-surface-2 py-1.5 text-[11px] text-ink-mute hover:text-ink-text transition-colors">
+                                Stop &amp; Convert
+                              </button>
+                            </>
+                          )}
+                          {trumpet.captureState === "converting" && (
+                            <div className="text-[11px] text-accent animate-pulse">Analysing pitch…</div>
+                          )}
+                          {trumpet.captureState === "ready" && (
+                            <>
+                              <div className="text-[11px] text-success">
+                                {trumpet.convertNoteCount} note{trumpet.convertNoteCount !== 1 ? "s" : ""} detected
+                              </div>
+                              <div className="flex gap-1.5">
+                                <button
+                                  onClick={() => void trumpet.playConverted()}
+                                  className="flex-1 rounded-lg bg-accent/20 py-1.5 text-[11px] text-accent hover:bg-accent/30 transition-colors">
+                                  Play trumpet
+                                </button>
+                                <button
+                                  onClick={() => trumpet.clearConvert()}
+                                  className="rounded-lg bg-surface-2 px-2.5 py-1.5 text-[11px] text-ink-mute hover:text-ink-text transition-colors">
+                                  Clear
+                                </button>
+                              </div>
+                              {/* Smoothing picker */}
+                              <div className="flex gap-1.5 pt-0.5">
+                                {(["natural", "tight", "very_smooth"] as const).map((s) => (
+                                  <button key={s}
+                                    onClick={() => void trumpet.finishCapture({ smoothing: s, scaleSnap: trumpet.snapEnabled })}
+                                    className="flex-1 rounded-lg bg-surface-2 py-1 text-[10px] text-ink-mute hover:text-ink-text transition-colors"
+                                    title="Re-analyse with this smoothing">
+                                    {s === "natural" ? "Natural" : s === "tight" ? "Tight" : "Smooth"}
+                                  </button>
+                                ))}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
