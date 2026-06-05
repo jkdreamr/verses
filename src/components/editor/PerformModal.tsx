@@ -23,6 +23,7 @@ import {
   midiToLabel,
   keyToPc,
   buildScaleLadder,
+  scaleIntervals,
 } from "@/lib/audio/scales";
 import { OneEuroFilter } from "@/lib/audio/oneEuro";
 import { TouchInstrument } from "@/components/perform/TouchInstrument";
@@ -32,6 +33,8 @@ import { Slider } from "@/components/ui/Slider";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useSmartLyrics } from "@/hooks/useSmartLyrics";
 import { useLiveTrumpet, TRUMPET_PRESETS } from "@/hooks/perform/useLiveTrumpet";
+import { useVocalFx } from "@/hooks/perform/useVocalFx";
+import { VocalFxRack } from "@/components/perform/VocalFxRack";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -52,6 +55,20 @@ const ROOTS = NOTE_NAMES;
 
 const LATCH_HOLD_MS = 380;
 const LATCH_COOLDOWN_MS = 750;
+// Mode B: hand height spans ± this many semitones of live pitch shift.
+const VOCAL_PITCH_RANGE = 12;
+
+/** Snap an integer semitone shift to the nearest in-scale (diatonic) transposition. */
+function snapShiftToScale(semis: number, scaleId: ScaleId): number {
+  const set = scaleIntervals(scaleId);
+  const inScale = (s: number) => set.includes(((s % 12) + 12) % 12);
+  if (inScale(semis)) return semis;
+  for (let d = 1; d <= 6; d++) {
+    if (inScale(semis - d)) return semis - d;
+    if (inScale(semis + d)) return semis + d;
+  }
+  return semis;
+}
 const PINCH_ON = 0.45; // ratio of pinch distance / palm size
 const PINCH_OFF = 0.62;
 
@@ -281,7 +298,7 @@ export function PerformModal({
   const [showSkeleton, setShowSkeleton] = useState(true);
   const [showGrid, setShowGrid] = useState(true);
   const [swapHands, setSwapHands] = useState(false);
-  const [tab, setTab] = useState<"beat" | "sound" | "chords" | "guide">("beat");
+  const [tab, setTab] = useState<"beat" | "sound" | "chords" | "guide" | "voice">("beat");
   const [beatPlaying, setBeatPlaying] = useState(false);
 
   // ── Smart Lyric Reader (strict line-by-line teleprompter in the stage) ──
@@ -300,6 +317,24 @@ export function PerformModal({
   const trumpetOnRef = useRef(false);
   useEffect(() => { trumpetOnRef.current = trumpetOn; }, [trumpetOn]);
   const trumpet = useLiveTrumpet({ micStream, enabled: trumpetOn });
+
+  // ── Performance mode: Chords & Drums (A) vs Vocal FX (B) ──
+  const [perfMode, setPerfMode] = useState<"chords" | "vocal">("chords");
+  const [recordMode, setRecordMode] = useState<"processed" | "raw">("processed");
+  const perfModeRef = useRef(perfMode);
+  const recordModeRef = useRef(recordMode);
+  useEffect(() => { perfModeRef.current = perfMode; }, [perfMode]);
+  useEffect(() => { recordModeRef.current = recordMode; }, [recordMode]);
+  const dryMonitorRef = useRef<GainNode | null>(null);
+  // Vocal FX runs the processed voice through the chain; "raw" mode bypasses it.
+  const vfx = useVocalFx({ micStream, enabled: perfMode === "vocal" && recordMode === "processed" });
+  const livePitchRef = useRef(0);
+  const [liveShift, setLiveShift] = useState(0); // throttled HUD copy of livePitchRef
+  const [vocalKeyLock, setVocalKeyLock] = useState(true);
+  const vocalKeyLockRef = useRef(true);
+  useEffect(() => { vocalKeyLockRef.current = vocalKeyLock; }, [vocalKeyLock]);
+  const pitchEuroRef = useRef(new OneEuroFilter({ minCutoff: 1.2, beta: 0.02 }));
+  const vfxActiveRef = useRef(false);
 
   // Zone labels for the live chord/note grid — derived from the REAL X→action
   // mapping so the guide is truthful (chord mode: progression slots; lead mode:
@@ -483,6 +518,24 @@ export function PerformModal({
     }
   }, [busSetDrum, drumVol, playDrumsFn, stopDrums]);
 
+  // ── Mode B: right hand height → live vocal pitch shift ──
+  const { setManualPitch: vfxSetPitch, setManualActive: vfxSetActive } = vfx;
+  const handleVocalHands = useCallback((hand: Hand) => {
+    if (!hand.present) {
+      if (vfxActiveRef.current) { vfxSetActive(false); vfxActiveRef.current = false; }
+      pitchEuroRef.current.reset();
+      livePitchRef.current = 0;
+      return;
+    }
+    if (!vfxActiveRef.current) { vfxSetActive(true); vfxActiveRef.current = true; }
+    // hand top (y≈0) = up an octave, middle = unison, bottom = down an octave
+    const raw = (0.5 - hand.y) * 2 * VOCAL_PITCH_RANGE;
+    let semis = pitchEuroRef.current.filter(raw, performance.now());
+    if (vocalKeyLockRef.current) semis = snapShiftToScale(Math.round(semis), scaleRef.current);
+    livePitchRef.current = semis;
+    vfxSetPitch(semis);
+  }, [vfxSetActive, vfxSetPitch]);
+
   // ── MediaPipe loader ──
   const loadMediaPipe = useCallback(async () => {
     if (handLandmarkerRef.current) return;
@@ -554,9 +607,13 @@ export function PerformModal({
     rightHandRef.current = nr;
     setLeftHand(nl);
     setRightHand(nr);
-    handleRight(nr);
-    handleLeft(nl);
-  }, [handleLeft, handleRight, releaseChord]);
+    if (perfModeRef.current === "chords") {
+      handleRight(nr);
+      handleLeft(nl);
+    } else {
+      handleVocalHands(nr);
+    }
+  }, [handleLeft, handleRight, handleVocalHands, releaseChord]);
 
   // ── Detection + draw loop ──
   const loop = useCallback(() => {
@@ -634,7 +691,7 @@ export function PerformModal({
       if (grid.height !== ch) grid.height = ch;
       const gctx = grid.getContext("2d");
       if (gctx) {
-        if (showGridRef.current) {
+        if (showGridRef.current && perfModeRef.current === "chords") {
           const labels = zonesRef.current;
           const rh = rightHandRef.current;
           const activeIdx = rh.present && labels.length
@@ -704,13 +761,20 @@ export function PerformModal({
       const engine = ensureEngine();
       const src = engine.ctx.createMediaStreamSource(stream);
       const g = engine.ctx.createGain();
-      // When the trumpet is on we duck the dry voice so the take is the horn,
-      // not a latency-doubled voice + horn.
-      g.gain.value = trumpetOnRef.current ? 0 : 1;
+      // Dry record tap (→ recordDest only, never the speakers). Ducked whenever
+      // a processed voice (trumpet or Vocal FX) is what should land in the take.
+      g.gain.value = (trumpetOnRef.current || perfModeRef.current === "vocal") ? 0 : 1;
       src.connect(g);
-      g.connect(engine.recordDest); // captured in takes, never sent to the speakers
+      g.connect(engine.recordDest);
       micSourceRef.current = src;
       micRecGainRef.current = g;
+      // Dry monitor (→ master, so it's heard AND recorded). Only live in Vocal FX
+      // "raw" capture, where you want to hear + record the clean voice.
+      const dm = engine.ctx.createGain();
+      dm.gain.value = (perfModeRef.current === "vocal" && recordModeRef.current === "raw") ? 1 : 0;
+      src.connect(dm);
+      dm.connect(engine.master);
+      dryMonitorRef.current = dm;
       setMicStream(stream);
       return stream;
     } catch (err) {
@@ -721,11 +785,13 @@ export function PerformModal({
 
   const stopMic = useCallback(() => {
     try { micRecGainRef.current?.disconnect(); } catch { /* */ }
+    try { dryMonitorRef.current?.disconnect(); } catch { /* */ }
     try { micSourceRef.current?.disconnect(); } catch { /* */ }
     micStreamRef.current?.getTracks().forEach((t) => t.stop());
     micStreamRef.current = null;
     micSourceRef.current = null;
     micRecGainRef.current = null;
+    dryMonitorRef.current = null;
     setMicStream(null);
   }, []);
 
@@ -736,13 +802,37 @@ export function PerformModal({
     if (ok) setTrumpetOn(true);
   }, [trumpetOn, ensureMic]);
 
-  // Duck the dry-voice record tap while the trumpet is sounding.
+  // Route the dry voice: record-tap ducked when a processed voice (trumpet or
+  // Vocal FX) is the take; dry monitor live only for Vocal-FX "raw" capture.
   useEffect(() => {
-    const g = micRecGainRef.current;
-    if (!g) return;
     const e = ensureEngine();
-    g.gain.setTargetAtTime(trumpetOn ? 0 : 1, e.ctx.currentTime, 0.05);
-  }, [trumpetOn]);
+    const rec = micRecGainRef.current;
+    const dm = dryMonitorRef.current;
+    const processedVoice = trumpetOn || perfMode === "vocal";
+    if (rec) rec.gain.setTargetAtTime(processedVoice ? 0 : 1, e.ctx.currentTime, 0.05);
+    if (dm) dm.gain.setTargetAtTime(perfMode === "vocal" && recordMode === "raw" ? 1 : 0, e.ctx.currentTime, 0.05);
+  }, [trumpetOn, perfMode, recordMode]);
+
+  // Entering Vocal FX: get the mic, drop any held chord, and show the Voice tab.
+  useEffect(() => {
+    if (perfMode === "vocal") {
+      void ensureMic();
+      releaseChord();
+      rightSoundingRef.current = false;
+      setActiveSlot(null);
+      setTab("voice");
+    } else {
+      setTab((t) => (t === "voice" ? "beat" : t));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [perfMode]);
+
+  // Throttled HUD mirror of the live hand-pitch (avoids per-frame re-renders).
+  useEffect(() => {
+    if (perfMode !== "vocal") return;
+    const id = window.setInterval(() => setLiveShift(livePitchRef.current), 100);
+    return () => window.clearInterval(id);
+  }, [perfMode]);
 
   // Keep the trumpet's optional scale-snap locked to the performance key.
   const { setSnapKey: setTrumpetSnapKey, setSnapScale: setTrumpetSnapScale } = trumpet;
@@ -858,7 +948,18 @@ export function PerformModal({
       {/* Header */}
       <div className="flex items-center justify-between border-b border-line/60 px-5 py-3">
         <div className="flex items-center gap-3">
-          <span className="font-serif text-base tracking-tight text-ink-text">Perform</span>
+          <span className="hidden font-serif text-base tracking-tight text-ink-text sm:inline">Perform</span>
+          {/* Performance mode — the headline switcher */}
+          <div role="group" aria-label="Performance mode" className="flex overflow-hidden rounded-lg border border-line/70">
+            <button
+              onClick={() => setPerfMode("chords")} aria-pressed={perfMode === "chords"}
+              className={`px-3 py-1 text-[11px] font-medium transition-colors ${perfMode === "chords" ? "bg-accent/15 text-accent" : "text-ink-mute hover:text-ink-text"}`}
+            >Chords &amp; Drums</button>
+            <button
+              onClick={() => setPerfMode("vocal")} aria-pressed={perfMode === "vocal"}
+              className={`px-3 py-1 text-[11px] font-medium transition-colors ${perfMode === "vocal" ? "bg-accent/15 text-accent" : "text-ink-mute hover:text-ink-text"}`}
+            >Vocal FX</button>
+          </div>
           {recording && (
             <span className="flex items-center gap-1.5 rounded-full bg-danger/15 px-2.5 py-0.5 font-mono text-[10px] text-danger">
               <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-danger" />
@@ -866,9 +967,9 @@ export function PerformModal({
             </span>
           )}
           {!recording && (camActive || inputMode === "touch") && (
-            <span className="rounded-full bg-success/15 px-2.5 py-0.5 text-[10px] text-success">Live</span>
+            <span className="hidden rounded-full bg-success/15 px-2.5 py-0.5 text-[10px] text-success sm:inline">Live</span>
           )}
-          {chord.loading && (
+          {((perfMode === "chords" && chord.loading) || (perfMode === "vocal" && vfx.loading)) && (
             <span className="rounded-full bg-accent/10 px-2.5 py-0.5 text-[10px] text-accent">loading sound…</span>
           )}
         </div>
@@ -965,20 +1066,45 @@ export function PerformModal({
             </div>
           )}
 
-          {/* Bottom chord/lead display */}
-          <div className="flex items-center gap-4 border-t border-line/50 bg-surface/40 px-5 py-3">
-            <div className="min-w-0 flex-1">
-              <div className="text-[9px] uppercase tracking-wider text-ink-mute/50">{rightMode === "lead" ? "Note" : "Chord"}</div>
-              <div className="truncate font-serif text-2xl font-semibold text-ink-text">{leadNote}</div>
+          {/* Bottom display — chord/lead (Mode A) or Vocal-FX HUD (Mode B) */}
+          {perfMode === "chords" ? (
+            <div className="flex items-center gap-4 border-t border-line/50 bg-surface/40 px-5 py-3">
+              <div className="min-w-0 flex-1">
+                <div className="text-[9px] uppercase tracking-wider text-ink-mute/50">{rightMode === "lead" ? "Note" : "Chord"}</div>
+                <div className="truncate font-serif text-2xl font-semibold text-ink-text">{leadNote}</div>
+              </div>
+              <div className="hidden w-44 sm:block"><PianoKeyboard activeNotes={chord.activeNotes} /></div>
             </div>
-            <div className="hidden w-44 sm:block"><PianoKeyboard activeNotes={chord.activeNotes} /></div>
-          </div>
+          ) : (
+            <div className="flex items-center gap-4 border-t border-line/50 bg-surface/40 px-5 py-3">
+              <div className="min-w-0">
+                <div className="text-[9px] uppercase tracking-wider text-ink-mute/50">Voice</div>
+                <div className="truncate font-serif text-2xl font-semibold text-ink-text">{vfx.detectedNote ?? "—"}</div>
+              </div>
+              <div className="min-w-[64px]">
+                <div className="text-[9px] uppercase tracking-wider text-ink-mute/50">Shift</div>
+                <div className="font-mono text-lg font-semibold tabular-nums text-accent">
+                  {liveShift > 0 ? "+" : ""}{liveShift.toFixed(liveShift % 1 === 0 ? 0 : 1)}
+                  <span className="ml-0.5 text-[10px] text-ink-mute">st</span>
+                </div>
+              </div>
+              <div className="flex flex-1 flex-wrap items-center justify-end gap-1.5">
+                {vfx.params.autotuneOn && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] text-accent">Auto-tune</span>}
+                {vfx.params.harmonyOn && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] text-accent">Harmony</span>}
+                {vfx.params.delayOn && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] text-accent">Delay</span>}
+                {vfx.params.reverbOn && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] text-accent">Reverb</span>}
+                <div className="ml-1 h-1.5 w-20 overflow-hidden rounded-full bg-bg/60" aria-hidden>
+                  <div className="h-full rounded-full bg-success/70 transition-[width] duration-75" style={{ width: `${Math.round(Math.min(1, vfx.inputLevel) * 100)}%` }} />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Controls */}
         <div className="flex w-full flex-shrink-0 flex-col border-t border-line/60 bg-surface/30 lg:w-80 lg:border-l lg:border-t-0">
           <div className="flex border-b border-line/50">
-            {(["beat", "sound", "chords", "guide"] as const).map((t) => (
+            {(perfMode === "vocal" ? (["voice", "sound", "guide"] as const) : (["beat", "sound", "chords", "guide"] as const)).map((t) => (
               <button key={t} onClick={() => setTab(t)}
                 className={`flex-1 px-3 py-2.5 text-[10px] uppercase tracking-[0.15em] transition-colors ${tab === t ? "bg-surface-2/60 text-accent" : "text-ink-mute hover:text-ink-text"}`}>
                 {t}
@@ -987,6 +1113,18 @@ export function PerformModal({
           </div>
 
           <div className="scrollbar-thin flex-1 overflow-y-auto p-4">
+            {tab === "voice" && (
+              <VocalFxRack
+                vfx={vfx}
+                recordMode={recordMode}
+                setRecordMode={setRecordMode}
+                songKey={rootKey}
+                songScale={scaleId}
+                keyLock={vocalKeyLock}
+                setKeyLock={setVocalKeyLock}
+                isCameraMode={inputMode === "camera"}
+              />
+            )}
             {tab === "sound" && (
               <div className="space-y-5">
                 {/* Voice → Trumpet */}
