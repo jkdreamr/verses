@@ -558,9 +558,13 @@ export function PerformModal({
     if (ytPlaying) {
       ytPlayerRef.current.pauseVideo();
     } else {
+      // If loop is on and has a loop range, seek to loop start before playing
+      if (ytLoopOn && ytHasLoopRange && ytLoopStart !== null) {
+        ytPlayerRef.current.seekTo(ytLoopStart, true);
+      }
       ytPlayerRef.current.playVideo();
     }
-  }, [ytPlaying, ytReady]);
+  }, [ytPlaying, ytReady, ytLoopOn, ytHasLoopRange, ytLoopStart]);
   
   const ytSeek = useCallback((time: number) => {
     if (!ytPlayerRef.current || !ytReady) return;

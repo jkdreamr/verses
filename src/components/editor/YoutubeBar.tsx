@@ -181,12 +181,19 @@ export function YoutubeBar({
     const p = playerRef.current;
     if (!p) return;
     try {
-      if (playing) p.pauseVideo();
-      else p.playVideo();
+      if (playing) {
+        p.pauseVideo();
+      } else {
+        // If loop is on and has a loop range, seek to loop start before playing
+        if (loopOn && hasLoopRange && loopStart !== null) {
+          p.seekTo(loopStart, true);
+        }
+        p.playVideo();
+      }
     } catch {
       /* ignore */
     }
-  }, [playing]);
+  }, [playing, loopOn, hasLoopRange, loopStart]);
 
   useShortcut({ key: "p", meta: true }, (e) => {
     if (!session) return;
