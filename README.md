@@ -205,9 +205,25 @@ pad) and follows you as you sing. Because we already **know** the written lyrics
    **never jumps backward** — no matter what the recogniser does, the highlight walks the
    song line by line, which keeps it accurate through repeated words and choruses. Within
    the active line we highlight up to the furthest word matched and auto-centre the scroll.
-5. The recogniser stops on silence, so we **auto-restart** it on `end`. If speech isn't
-   available or matching stalls (>6 s), we fall back to a timed **Pace** scroll (with an
-   adjustable seconds-per-line); a manual up/down **nudge** is always available.
+5. The recogniser stops on silence, so we **auto-restart** it on `end`.
+
+**Smart vs Pace is an explicit, always-visible toggle** — the user's *choice* is kept
+separate from the runtime *status*:
+
+- **Smart** is selectable whenever the browser supports `SpeechRecognition`. A mic denial
+  or hard error doesn't delete the option: it drops to **Pace** and shows a *"Smart
+  unavailable — Retry"* button. An unsupported browser shows Smart **disabled with a
+  tooltip** (and defaults to Pace). A momentary stall keeps Smart listening (with a "sing
+  up" hint) rather than silently giving up.
+- **Pace** is a timed scroll with an adjustable seconds-per-line.
+- A manual up/down **nudge** is always available in both.
+
+**Compact teleprompter.** The reader is a slim **glassy karaoke strip** pinned to the
+bottom of the stage — faint *previous* line / bold *active* line (word-by-word highlight) /
+faint *next* line, over a blurred gradient scrim with text-shadow for legibility on video.
+It honours `prefers-reduced-motion` and **no longer letterboxes the camera** (the old
+panel ate ~half the stage). Like every overlay it's a DOM layer — live-only, never in the
+recorded canvas.
 
 Honest note: sung lyrics are harder to recognise than speech, and the API is
 browser-dependent — that's why the strict line walk, the nudge and the Pace fallback are
@@ -237,6 +253,59 @@ It shares the same microphone the take records from — no second permission pro
 Everything routes through the trumpet bus, so the trumpet is captured in your take. While
 the trumpet is on, the dry-voice record tap is **ducked** so the take is the horn, not a
 latency-doubled voice + horn.
+
+## Perform's two modes + the Vocal FX chain
+
+Perform is a **mode switcher** (header). The choice is intentionally explicit, Dubler-2
+style:
+
+- **Mode A — Chords & Drums** (the existing instrument): hands/touch trigger the sampled
+  chords and the step-sequencer beat, with the truthful chord-zone grid.
+- **Mode B — Vocal FX** (new): you **sing** and your **hands** (or touch) bend the live
+  voice while a rack of effects shapes it.
+
+**One shared effects chain, two front-ends.** `src/lib/audio/vocalFx.ts` builds a single
+composable chain on the persistent engine context; both the **Voice rack** (sliders) and
+**Mode B** (hands) drive the *same* nodes — no fork (`useVocalFx.ts`,
+`VocalFxRack.tsx`):
+
+```
+mic ─► in ─►┬─► pitch-shift ─► wet ─┐
+            └────────────────► dry ─┴─► mix ─►┬─► harmony-shift ─► harm ─┐
+                                              └────────────────────────► ┴─► delay ─► reverb ─► out ─► master
+```
+
+- **Pitch shift / autotune.** A `Tone.PitchShift` (native-node granular shifter, on the
+  audio thread) is the core. **Autotune** = detect pitch with the **same MPM worklet** →
+  snap to the nearest note in the chosen **key/scale** → drive the shifter by the
+  *(target − detected)* cents, smoothed by a **retune-speed** one-pole (fast ≈ hard T-Pain,
+  slow ≈ natural). An **amount** crossfades corrected vs dry.
+- **Harmony.** A second `Tone.PitchShift` in parallel adds a chosen interval (±3rd/4th/5th/
+  octave), mixable.
+- **Delay / Reverb.** `Tone.FeedbackDelay` (time/feedback/mix) and `Tone.Reverb`
+  (size/mix), each with click-free ramps and an on/off LED.
+- **Presets** (Natural / Pop Vocal / T-Pain / Dreamy Hall / Slapback Double) persist to
+  `localStorage`.
+- **Output to master**, so the processed voice is monitored **and** recorded. **Processed
+  vs Raw** is an explicit toggle: *Processed* captures the FX mix (dry tap ducked); *Raw*
+  bypasses the chain and records a clean vocal via a dedicated dry-monitor path for
+  reprocessing later.
+
+**Hand → parameter mapping (Mode B, camera).** From MediaPipe landmarks: right-hand
+**height (Y) → live pitch shift** in semitones, smoothed by a **one-euro filter**
+(`minCutoff 1.2, beta 0.02`) so it glides rather than steps. **Key-lock** snaps the shift
+to in-scale (diatonic) intervals for clean transpositions; off = continuous glissando. A
+live **pitch-ladder overlay** (scale degrees on Y, active-shift band, hand marker) replaces
+the chord grid — live-only, never recorded. The HUD reads detected note, live shift, active
+effects and input level. On touch, Mode B gets a dedicated singing stage with a pitch-bend
+slider instead of the chord pads.
+
+**Honest limitations.** `Tone.PitchShift` is a **granular** shifter, not a
+formant-preserving phase vocoder, so large shifts colour the voice ("chipmunk"); for
+autotune and ±octave harmony it stays musical. Latency is inherent and **surfaced in the
+UI** (`~ms` readout) with a **"tighten latency"** window control (smaller window = lower
+latency, more artefacts; ~30–100 ms range). Use headphones — the processed voice is
+monitored through the speakers.
 
 ## Recording capture
 
@@ -291,6 +360,23 @@ path automatically. The only control is an (auto-detected, overridable) tempo.
    against the original recording. Live input warnings flag clipping / silence / noise.
 
 ## Latest refinements
+
+**Perform goes dual-mode + real-time Vocal FX.** Perform now has a **Chords & Drums** vs
+**Vocal FX** switcher. Mode B runs your live voice through a shared effects chain
+(`vocalFx.ts` / `useVocalFx.ts`) — **autotune** (detect → snap-to-key → shift-by-cents with
+a retune-speed control), **harmony**, **delay** and **reverb** — exposed both as a
+GarageBand-style **rack** (preset chips, per-effect LED switches, value readouts, a `~ms`
+latency readout + "tighten latency" control) and as **hand control** (hand height → live
+pitch, one-euro smoothed, with key-lock snapping to scale and a live pitch-ladder overlay).
+**Processed vs Raw** recording is an explicit choice. See *Perform's two modes + the Vocal
+FX chain* above. Honest about limits: it's a granular shifter (large shifts colour the
+voice) and latency is inherent but surfaced and tunable.
+
+**Lyrics: Smart restored + compact teleprompter.** The follower's **Smart/Pace** choice is
+an always-visible toggle again (it used to silently collapse to Pace). Smart prompts for the
+mic / shows a Retry on error / disables with a tooltip only when truly unsupported. The
+panel is now a slim **glassy karaoke strip** (prev / active-with-word-highlight / next) that
+**no longer letterboxes the camera**.
 
 **One place to record: Perform.** Recording has moved entirely into Perform, and **Takes
 is now a pure viewer** for past recordings (the old recorder is gone). Two things came with
@@ -404,6 +490,18 @@ are avoided. Verified offline: C-major scale → C, A-minor melody → A minor, 
   speakers while the mic captures it Photo-Booth style.
 - **Sampled, not modeled.** The trumpet is a good sampled instrument with pitch tracking,
   not a studio voice-conversion model.
+- **Vocal FX is a granular pitch shifter.** `Tone.PitchShift` is real-time and cheap but
+  **not formant-preserving**, so big shifts colour the voice; autotune and ±octave harmony
+  stay musical. The pitch-stage window is exposed as a **"tighten latency"** control
+  (~30–100 ms) and the `~ms` figure is shown in the rack. Headphones recommended — the
+  processed voice is monitored through the speakers.
+
+**Tuned parameters** (current defaults): hand→pitch one-euro `minCutoff 1.2 / beta 0.02`;
+Mode B range `±12 semitones` with key-lock snapping to scale; trumpet pitch median window
+`5`, clarity gate `0.55`, note-hysteresis `2 frames`, release-hold `110 ms`; Vocal FX
+defaults autotune `amount 0.6 / retune 55 ms`, reverb `2.2 s @ 18%`, pitch window `0.1 s`;
+lyric stall hint at `5 s`; Voice Score basic-pitch `onset 0.5 / frame 0.3 / minNoteLen 11 /
+1–1100 Hz`, quantized to a `1/16` grid at the auto-detected BPM.
 
 ---
 
@@ -437,9 +535,12 @@ button right in the panel).
 
 ### Perform — the one place you record
 
-Open **perform**. Up top, choose **Hands** or **Touch**, toggle **Lyrics**, and hit
-**Record** whenever you're ready. Recordings capture **your voice + every layer** (beat,
-chords, trumpet); use headphones so the beat doesn't bleed into the mic.
+Open **perform**. Up top, pick a **mode** — **Chords & Drums** or **Vocal FX** — choose
+**Hands** or **Touch**, toggle **Lyrics**, and hit **Record** whenever you're ready.
+Recordings capture **your voice + every layer**; use headphones so the monitored sound
+doesn't bleed into the mic.
+
+**Mode A — Chords & Drums**
 
 - **Hands:** Start camera. Keep both hands in frame. The on-screen **grid** shows which
   zone triggers which chord/note (toggle it with **Grid on/off**, top-right — it's a live
@@ -449,6 +550,20 @@ chords, trumpet); use headphones so the beat doesn't bleed into the mic.
   **Record** to capture a video take (camera + your playing, without the grid).
 - **Touch (and mobile):** drag on the pad — left↔right is pitch, up↕down is brightness;
   multiple fingers = chords. Tap the large chord pads for the progression.
+
+**Mode B — Vocal FX** (sing into the mic)
+
+- Open the **Voice** tab for the rack: pick a **preset** (Natural / Pop Vocal / T-Pain /
+  Dreamy Hall / Slapback Double) or dial in **Autotune** (amount, retune speed, key/scale —
+  hit **Song key** to match), **Harmony** (interval + mix), **Echo/Delay** and **Reverb**.
+  Each effect has an on/off LED; the `~ms` latency and a **Tighten latency** slider are
+  right there. Choose **Processed** (record the FX mix) or **Raw voice** (clean capture).
+- **Hands:** raise/lower your hand to **bend the pitch** live; **key-lock** snaps it to the
+  scale for clean intervals (turn it off for glissando). The on-screen pitch ladder shows
+  where you are.
+- **Touch:** the stage shows your detected note, an input meter and a **pitch-bend** slider;
+  everything else is in the Voice tab.
+- **Voice → Trumpet** lives in the **Sound** tab in either mode.
 - **Lyrics:** click **Lyrics** to drop your written words into the stage. They scroll
   **strictly line by line** as you sing (see Smart Lyric Reader above); a Pace fallback and
   up/down nudge are always there.
