@@ -4,20 +4,42 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createLineAligner } from "@/lib/music/lyricAlign";
 
 // ───────────────────────────────────────────────────────────────────────────
-// Smart Lyric Reader hook. Listens via the Web Speech API and advances a strict,
-// line-by-line teleprompter (the aligner never skips or jumps backward). Falls
-// back to a timed "Pace" scroll when recognition is unavailable or stalls, and
-// always exposes a manual nudge. Reusable from Perform (and anywhere else).
+// Smart Lyric Reader hook.
+//
+// Two USER-CHOSEN modes, always selectable via a toggle:
+//   • "smart" — the Web Speech API listens and the strict line-by-line aligner
+//     advances the teleprompter (never skips, never jumps back).
+//   • "pace"  — a timed scroll (seconds-per-line) for when you'd rather not rely
+//     on the mic.
+//
+// `mode` is the user's choice; `status` is the live health of that choice. A mic
+// denial or hard recognition error flips to Pace AND raises `smartError` so the
+// UI can show "Smart unavailable — using Pace" with a Retry button — Smart is
+// never silently removed. A momentary stall keeps Smart running (auto-restart)
+// and only surfaces a "stalled" hint.
 // ───────────────────────────────────────────────────────────────────────────
 
-export type LyricFollowStatus = "idle" | "listening" | "low" | "pace" | "unavailable";
+export type LyricMode = "smart" | "pace";
+export type LyricStatus = "idle" | "listening" | "low" | "stalled" | "pace";
+
+function speechSupported(): boolean {
+  if (typeof window === "undefined") return false;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return !!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+}
+
+const STALL_MS = 5000;
 
 export function useSmartLyrics(lyrics: string) {
   const lines = useMemo(() => lyrics.split(/\r?\n/), [lyrics]);
+  const supported = useMemo(speechSupported, []);
+
+  const [mode, setModeState] = useState<LyricMode>(() => (speechSupported() ? "smart" : "pace"));
+  const [status, setStatus] = useState<LyricStatus>("idle");
+  const [smartError, setSmartError] = useState(false);
+  const [running, setRunning] = useState(false);
   const [activeLine, setActiveLine] = useState(0);
   const [activeWord, setActiveWord] = useState(-1);
-  const [status, setStatus] = useState<LyricFollowStatus>("idle");
-  const [running, setRunning] = useState(false);
   const [secondsPerLine, setSecondsPerLine] = useState(3.5);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -25,30 +47,35 @@ export function useSmartLyrics(lyrics: string) {
   const alignerRef = useRef<ReturnType<typeof createLineAligner> | null>(null);
   const restartRef = useRef(false);
   const lastMatchRef = useRef(0);
+  const runningRef = useRef(false);
+  const modeRef = useRef(mode);
+  useEffect(() => { modeRef.current = mode; }, [mode]);
 
-  const stop = useCallback(() => {
+  const ensureAligner = useCallback(() => {
+    if (!alignerRef.current) {
+      const a = createLineAligner(lyrics);
+      alignerRef.current = a;
+      setActiveLine(a.line);
+      setActiveWord(-1);
+    }
+    return alignerRef.current;
+  }, [lyrics]);
+
+  const stopRecognition = useCallback(() => {
     restartRef.current = false;
-    if (recRef.current) {
-      try { recRef.current.onend = null; recRef.current.stop(); } catch { /* */ }
+    const rec = recRef.current;
+    if (rec) {
+      try { rec.onend = null; rec.onresult = null; rec.onerror = null; rec.stop(); } catch { /* */ }
       recRef.current = null;
     }
-    alignerRef.current = null;
-    setRunning(false);
-    setStatus("idle");
   }, []);
 
-  const start = useCallback(() => {
-    const aligner = createLineAligner(lyrics);
-    alignerRef.current = aligner;
-    setActiveLine(aligner.line);
-    setActiveWord(-1);
-    lastMatchRef.current = Date.now();
-    setRunning(true);
-
+  const startRecognition = useCallback((): boolean => {
+    if (!speechSupported()) { setSmartError(true); setStatus("pace"); setModeState("pace"); return false; }
+    const aligner = ensureAligner();
+    if (!aligner) return false;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const Ctor = typeof window !== "undefined" ? ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition) : undefined;
-    if (!Ctor) { setStatus("unavailable"); return; }
-
+    const Ctor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     try {
       const rec = new Ctor();
       rec.continuous = true;
@@ -56,6 +83,8 @@ export function useSmartLyrics(lyrics: string) {
       rec.lang = "en-US";
       recRef.current = rec;
       restartRef.current = true;
+      lastMatchRef.current = Date.now();
+      setSmartError(false);
       setStatus("listening");
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -72,10 +101,14 @@ export function useSmartLyrics(lyrics: string) {
       };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       rec.onerror = (e: any) => {
-        if (e?.error === "not-allowed" || e?.error === "service-not-allowed") {
+        // Hard failures → fall back to Pace but keep Smart offered (retry).
+        if (e?.error === "not-allowed" || e?.error === "service-not-allowed" || e?.error === "audio-capture") {
           restartRef.current = false;
+          setSmartError(true);
+          setModeState("pace");
           setStatus("pace");
         }
+        // "no-speech" / "aborted" / "network" → let onend auto-restart.
       };
       rec.onend = () => {
         if (restartRef.current && recRef.current === rec) {
@@ -83,10 +116,42 @@ export function useSmartLyrics(lyrics: string) {
         }
       };
       rec.start();
+      return true;
     } catch {
+      setSmartError(true);
+      setModeState("pace");
       setStatus("pace");
+      return false;
     }
-  }, [lyrics]);
+  }, [ensureAligner]);
+
+  const start = useCallback(() => {
+    ensureAligner();
+    setRunning(true);
+    runningRef.current = true;
+    lastMatchRef.current = Date.now();
+    if (modeRef.current === "smart" && speechSupported()) startRecognition();
+    else setStatus("pace");
+  }, [ensureAligner, startRecognition]);
+
+  const stop = useCallback(() => {
+    stopRecognition();
+    setRunning(false);
+    runningRef.current = false;
+    alignerRef.current = null;
+    setStatus("idle");
+  }, [stopRecognition]);
+
+  const setMode = useCallback((m: LyricMode) => {
+    if (m === "smart" && !speechSupported()) { setSmartError(true); return; }
+    setModeState(m);
+    if (m === "smart") setSmartError(false);
+    if (!runningRef.current) { if (m === "pace") setStatus("pace"); return; }
+    if (m === "smart") { lastMatchRef.current = Date.now(); startRecognition(); }
+    else { stopRecognition(); setStatus("pace"); }
+  }, [startRecognition, stopRecognition]);
+
+  const retrySmart = useCallback(() => setMode("smart"), [setMode]);
 
   const nudge = useCallback((delta: number) => {
     setActiveLine((l) => {
@@ -98,18 +163,20 @@ export function useSmartLyrics(lyrics: string) {
     });
   }, [lines.length]);
 
-  // Watchdog: if recognition stalls for a few seconds, drop to Pace mode.
+  // Watchdog: surface a "stalled" hint in Smart mode, but keep listening.
   useEffect(() => {
-    if (!running || (status !== "listening" && status !== "low")) return;
+    if (!running || mode !== "smart" || smartError) return;
     const id = window.setInterval(() => {
-      if (Date.now() - lastMatchRef.current > 6000) setStatus("pace");
+      if (Date.now() - lastMatchRef.current > STALL_MS) {
+        setStatus((s) => (s === "listening" || s === "low" ? "stalled" : s));
+      }
     }, 1000);
     return () => window.clearInterval(id);
-  }, [running, status]);
+  }, [running, mode, smartError]);
 
-  // Pace mode: advance one (non-empty) line on a timer.
+  // Pace timer: advance one (non-empty) line per interval.
   useEffect(() => {
-    if (!running || status !== "pace") return;
+    if (!running || mode !== "pace") return;
     const id = window.setInterval(() => {
       setActiveLine((l) => {
         let n = l + 1;
@@ -119,9 +186,14 @@ export function useSmartLyrics(lyrics: string) {
       setActiveWord(-1);
     }, Math.max(800, secondsPerLine * 1000));
     return () => window.clearInterval(id);
-  }, [running, status, secondsPerLine, lines]);
+  }, [running, mode, secondsPerLine, lines]);
 
   useEffect(() => () => stop(), [stop]);
 
-  return { lines, activeLine, activeWord, status, running, secondsPerLine, setSecondsPerLine, start, stop, nudge };
+  return {
+    lines, activeLine, activeWord,
+    mode, setMode, status, supported, smartError, retrySmart,
+    running, secondsPerLine, setSecondsPerLine,
+    start, stop, nudge,
+  };
 }
