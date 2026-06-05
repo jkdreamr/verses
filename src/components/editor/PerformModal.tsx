@@ -1088,7 +1088,8 @@ export function PerformModal({
 
     // 2) Skeleton — drawn in display space (1 − x) to match the mirrored frame.
     //    Part of the performance, so it stays on the capture canvas.
-    if (showSkeleton && landmarks.length) {
+    //    Photobooth mode: no skeleton overlay (raw video only)
+    if (showSkeleton && landmarks.length && perfModeRef.current !== "photobooth") {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       landmarks.forEach((lms: any[], i: number) => {
         const isRight = (handedness[i]?.[0]?.categoryName ?? "Right") === "Left";
