@@ -124,6 +124,11 @@ export function VocalFxRack({
             <button type="button" onClick={() => vfx.update({ key: songKey, scale: songScale })} title="Match the song's key & scale"
               className={`rounded-md bg-surface-2 px-2 py-1.5 text-[10px] text-ink-mute hover:text-ink-text ${FOCUS}`}>Song key</button>
           </div>
+          <button type="button" onClick={vfx.detectKey} disabled={vfx.detectingKey}
+            title="Sing for ~4 seconds and Verses will set the key you're in"
+            className={`w-full rounded-md px-2 py-1.5 text-[11px] transition-colors ${FOCUS} ${vfx.detectingKey ? "bg-accent/15 text-accent" : "bg-surface-2 text-ink-mute hover:text-ink-text"} disabled:opacity-60`}>
+            {vfx.detectingKey ? "listening… sing now" : "🎯 Detect my key"}
+          </button>
         </EffectCard>
 
         {/* Harmony */}

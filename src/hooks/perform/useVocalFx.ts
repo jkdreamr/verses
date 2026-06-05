@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ensureEngine, resumeEngine } from "@/lib/audio/engine";
-import { createVocalFxChain, autotuneCorrection, type VocalFxChain } from "@/lib/audio/vocalFx";
+import { createVocalFxChain, autotuneCorrection, bestKeyFromChroma, type VocalFxChain } from "@/lib/audio/vocalFx";
 import { aboveNoiseFloor } from "@/lib/audio/calibrate";
 import { midiToLabel, type ScaleId } from "@/lib/audio/scales";
 
@@ -73,6 +73,8 @@ export function useVocalFx({ micStream, enabled }: { micStream: MediaStream | nu
   const [detectedNote, setDetectedNote] = useState<string | null>(null);
   const [inputLevel, setInputLevel] = useState(0);
   const [confidence, setConfidence] = useState(0);
+  const [detectingKey, setDetectingKey] = useState(false);
+  const keyDetectRef = useRef<{ active: boolean; hist: number[] }>({ active: false, hist: new Array(12).fill(0) });
 
   const chainRef = useRef<VocalFxChain | null>(null);
   const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
@@ -148,6 +150,7 @@ export function useVocalFx({ micStream, enabled }: { micStream: MediaStream | nu
           if (voiced) {
             const detectedMidi = Math.round(69 + 12 * Math.log2(freq / 440));
             setDetectedNote(midiToLabel(detectedMidi));
+            if (keyDetectRef.current.active) keyDetectRef.current.hist[((detectedMidi % 12) + 12) % 12] += clarity;
           }
           // autotune only — Mode B drives pitch manually via setManualPitch()
           if (!p.autotuneOn || manualActiveRef.current) return;
@@ -200,6 +203,18 @@ export function useVocalFx({ micStream, enabled }: { micStream: MediaStream | nu
     setPresetName(name);
   }, []);
 
+  // Listen ~4s and set the autotune key/scale to the key you're singing in.
+  const detectKey = useCallback(() => {
+    keyDetectRef.current = { active: true, hist: new Array(12).fill(0) };
+    setDetectingKey(true);
+    window.setTimeout(() => {
+      keyDetectRef.current.active = false;
+      const best = bestKeyFromChroma(keyDetectRef.current.hist);
+      if (best) setParams((prev) => ({ ...prev, key: best.key, scale: best.scale, autotuneOn: true }));
+      setDetectingKey(false);
+    }, 4000);
+  }, []);
+
   // Mode B: hands set the live pitch directly (bypasses autotune).
   const setManualPitch = useCallback((semitones: number) => {
     manualPitchRef.current = semitones;
@@ -219,6 +234,6 @@ export function useVocalFx({ micStream, enabled }: { micStream: MediaStream | nu
   return useMemo(() => ({
     params, update, applyPreset, presetName,
     ready, loading, error, detectedNote, inputLevel, confidence, latencyMs,
-    setManualPitch, setManualActive,
-  }), [params, update, applyPreset, presetName, ready, loading, error, detectedNote, inputLevel, confidence, latencyMs, setManualPitch, setManualActive]);
+    setManualPitch, setManualActive, detectKey, detectingKey,
+  }), [params, update, applyPreset, presetName, ready, loading, error, detectedNote, inputLevel, confidence, latencyMs, setManualPitch, setManualActive, detectKey, detectingKey]);
 }

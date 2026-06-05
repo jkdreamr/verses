@@ -279,7 +279,10 @@ mic ─► in ─►┬─► pitch-shift ─► wet ─┐
   audio thread) is the core. **Autotune** = detect pitch with the **same MPM worklet** →
   snap to the nearest note in the chosen **key/scale** → drive the shifter by the
   *(target − detected)* cents, smoothed by a **retune-speed** one-pole (fast ≈ hard T-Pain,
-  slow ≈ natural). An **amount** crossfades corrected vs dry.
+  slow ≈ natural). An **amount** crossfades corrected vs dry. **Auto key detection**
+  (🎯 *Detect my key*) listens for ~4 s and runs a **Krumhansl-Schmuckler** correlation over
+  your sung pitch-class histogram to set the key/scale automatically — the other half of
+  Dubler's key-lock.
 - **Harmony.** A second `Tone.PitchShift` in parallel adds a chosen interval (±3rd/4th/5th/
   octave), mixable.
 - **Delay / Reverb.** `Tone.FeedbackDelay` (time/feedback/mix) and `Tone.Reverb`
