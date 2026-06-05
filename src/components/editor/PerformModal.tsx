@@ -3,6 +3,45 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { takesStore, newTakeId } from "@/lib/takes";
 import type { Take, YoutubeSession } from "@/lib/types";
+import { extractYoutubeId } from "@/lib/youtube";
+
+declare global {
+  interface Window {
+    YT?: {
+      Player: new (id: string, opts: Record<string, unknown>) => YouTubePlayer;
+      PlayerState: { PLAYING: number; PAUSED: number; ENDED: number };
+    };
+    onYouTubeIframeAPIReady?: () => void;
+  }
+}
+
+type YouTubePlayer = {
+  playVideo: () => void;
+  pauseVideo: () => void;
+  seekTo: (seconds: number, allowSeekAhead?: boolean) => void;
+  getCurrentTime: () => number;
+  getDuration: () => number;
+  setVolume: (v: number) => void;
+  getVolume: () => number;
+  setLoop: (loop: boolean) => void;
+  loadVideoById: (id: string) => void;
+  destroy: () => void;
+  getPlayerState: () => number;
+};
+
+let apiLoadPromise: Promise<void> | null = null;
+function loadYouTubeApi(): Promise<void> {
+  if (typeof window === "undefined") return Promise.resolve();
+  if (window.YT && window.YT.Player) return Promise.resolve();
+  if (apiLoadPromise) return apiLoadPromise;
+  apiLoadPromise = new Promise<void>((resolve) => {
+    const tag = document.createElement("script");
+    tag.src = "https://www.youtube.com/iframe_api";
+    document.head.appendChild(tag);
+    window.onYouTubeIframeAPIReady = () => resolve();
+  });
+  return apiLoadPromise;
+}
 import { useDrumEngine } from "@/hooks/perform/useDrumEngine";
 import { usePerformAudioBus } from "@/hooks/perform/usePerformAudioBus";
 import {
@@ -397,6 +436,74 @@ export function PerformModal({
   const micStreamRef = useRef<MediaStream | null>(null);
   const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const micRecGainRef = useRef<GainNode | null>(null);
+  
+  // ── YouTube player for beat playback in Perform ──
+  const ytPlayerRef = useRef<YouTubePlayer | null>(null);
+  const ytContainerId = useRef(`yt-perf-${Math.random().toString(36).slice(2, 8)}`);
+  const [ytPlaying, setYtPlaying] = useState(false);
+  const [ytReady, setYtReady] = useState(false);
+  
+  // Load YouTube player when youtube session is available
+  useEffect(() => {
+    if (!youtube || !youtube.youtube_url) return;
+    const videoId = extractYoutubeId(youtube.youtube_url);
+    if (!videoId) return;
+    
+    const loadPlayer = async () => {
+      await loadYouTubeApi();
+      if (!window.YT) return;
+      
+      const player = new window.YT.Player(ytContainerId.current, {
+        height: 0,
+        width: 0,
+        videoId,
+        playerVars: {
+          autoplay: 0,
+          controls: 0,
+          disablekb: 1,
+          fs: 0,
+          modestbranding: 1,
+        },
+        events: {
+          onReady: () => {
+            setYtReady(true);
+            ytPlayerRef.current = player;
+          },
+          onStateChange: (e: { data: number }) => {
+            if (window.YT) {
+              if (e.data === window.YT.PlayerState.PLAYING) setYtPlaying(true);
+              else if (e.data === window.YT.PlayerState.PAUSED || e.data === window.YT.PlayerState.ENDED) setYtPlaying(false);
+            }
+          },
+        },
+      });
+    };
+    
+    loadPlayer();
+    
+    return () => {
+      ytPlayerRef.current?.destroy();
+      ytPlayerRef.current = null;
+      setYtReady(false);
+      setYtPlaying(false);
+    };
+  }, [youtube]);
+  
+  const toggleYtPlayback = useCallback(() => {
+    if (!ytPlayerRef.current || !ytReady) return;
+    if (ytPlaying) {
+      ytPlayerRef.current.pauseVideo();
+    } else {
+      ytPlayerRef.current.playVideo();
+    }
+  }, [ytPlaying, ytReady]);
+  
+  const stopYtPlayback = useCallback(() => {
+    if (!ytPlayerRef.current || !ytReady) return;
+    ytPlayerRef.current.pauseVideo();
+    ytPlayerRef.current.seekTo(0);
+  }, [ytReady]);
+  
   const rightHandRef = useRef<Hand>({ present: false, x: 0.5, y: 0.5, pinch: false, gesture: null });
   const showGridRef = useRef(true);
   const reducedMotionRef = useRef(false);
@@ -1194,6 +1301,8 @@ export function PerformModal({
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-bg print:hidden">
+      {/* Hidden YouTube player container */}
+      <div id={ytContainerId.current} className="hidden" />
       {/* Header */}
       <div className="flex items-center justify-between gap-2 border-b border-line/60 px-3 py-3 sm:px-5">
         <div className="flex items-center gap-2 sm:gap-3">
@@ -1548,9 +1657,27 @@ export function PerformModal({
                     <div className="text-[10px] text-ink-mute/70 mb-2">
                       {youtube.youtube_url}
                     </div>
-                    <div className="text-[9px] text-ink-mute/50">
-                      Beat playback is available in the main editor. Use the YouTube bar at the bottom to control playback while performing.
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={toggleYtPlayback}
+                        disabled={!ytReady}
+                        className="flex-1 rounded-md bg-accent/15 px-3 py-1.5 text-[11px] text-accent transition-colors hover:bg-accent/25 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {ytPlaying ? "Pause" : "Play"}
+                      </button>
+                      <button
+                        onClick={stopYtPlayback}
+                        disabled={!ytReady}
+                        className="rounded-md bg-surface-2 px-3 py-1.5 text-[11px] text-ink-mute transition-colors hover:text-ink-text disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Stop
+                      </button>
                     </div>
+                    {!ytReady && (
+                      <div className="mt-2 text-[9px] text-ink-mute/50">
+                        Loading YouTube player…
+                      </div>
+                    )}
                   </div>
                 )}
                 <StepSequencer seq={drum} />
