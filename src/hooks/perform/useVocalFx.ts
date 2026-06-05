@@ -14,44 +14,283 @@ import { midiToLabel, type ScaleId } from "@/lib/audio/scales";
 // ───────────────────────────────────────────────────────────────────────────
 
 export type VocalFxParams = {
+  // Input / Gate
+  inputGain: number; // 0..1
+  gateOn: boolean;
+  gateThresholdDb: number; // -60..-20
+  gateDepth: number; // 0..1
+  gateAttackMs: number;
+  gateReleaseMs: number;
+  highPassHz: number; // 60..180
+
+  // Pitch
   autotuneOn: boolean;
   autotuneAmount: number; // 0..1 correction blend
-  retuneMs: number;       // 3 (hard) .. 140 (natural)
+  retuneMs: number; // 3 (hard) .. 140 (natural)
   key: string;
   scale: ScaleId;
+
+  // EQ
+  eqOn: boolean;
+  eqBodyDb: number; // -6..6 @ 250Hz
+  eqPresenceDb: number; // -6..6 @ 3kHz
+  eqAirDb: number; // -6..6 @ 10kHz
+
+  // De-esser
+  deEsserOn: boolean;
+  deEsserAmount: number; // 0..1
+  deEsserFreq: number; // 5..10 kHz
+
+  // Compressor
+  compressorOn: boolean;
+  compressorThresholdDb: number; // -40..-10
+  compressorRatio: number; // 1..20
+  compressorAttackMs: number;
+  compressorReleaseMs: number;
+  compressorMakeupDb: number; // 0..12
+  compressorMix: number; // 0..1 (parallel)
+
+  // Saturation
+  saturationOn: boolean;
+  saturationDrive: number; // 0..1
+  saturationMix: number; // 0..1
+
+  // Doubler
+  doublerOn: boolean;
+  doublerAmount: number; // 0..1
+  doublerWidth: number; // 0..1 stereo width
+
+  // Harmony
   harmonyOn: boolean;
   harmonyInterval: number; // semitones
-  harmonyMix: number;      // 0..1
+  harmonyMix: number; // 0..1
+
+  // Delay
   delayOn: boolean;
-  delayTime: number;       // seconds
-  delayFeedback: number;   // 0..0.92
-  delayMix: number;        // 0..1
+  delayTime: number; // seconds
+  delayFeedback: number; // 0..0.92
+  delayMix: number; // 0..1
+  delayLowCutHz: number; // 100..800
+  delayHighCutHz: number; // 4000..12000
+
+  // Reverb
   reverbOn: boolean;
-  reverbDecay: number;     // 0.3..8 s
-  reverbMix: number;       // 0..1
-  outputGain: number;      // 0..1
-  windowSize: number;      // 0.03..0.1 s (latency vs quality)
+  reverbDecay: number; // 0.3..8 s
+  reverbMix: number; // 0..1
+  reverbPreDelay: number; // 0..0.1 s
+  reverbLowCutHz: number; // 100..800
+  reverbHighCutHz: number; // 4000..12000
+
+  outputGain: number; // 0..1
+  windowSize: number; // 0.03..0.1 s (latency vs quality)
 };
 
 export const VOCAL_FX_DEFAULT: VocalFxParams = {
-  autotuneOn: true, autotuneAmount: 0.6, retuneMs: 55, key: "C", scale: "major",
-  harmonyOn: false, harmonyInterval: 7, harmonyMix: 0.35,
-  delayOn: false, delayTime: 0.22, delayFeedback: 0.28, delayMix: 0.22,
-  reverbOn: true, reverbDecay: 2.2, reverbMix: 0.18,
-  outputGain: 0.92, windowSize: 0.1,
+  // Input
+  inputGain: 0.85,
+  gateOn: true,
+  gateThresholdDb: -45,
+  gateDepth: 0.8,
+  gateAttackMs: 5,
+  gateReleaseMs: 150,
+  highPassHz: 80,
+
+  // Pitch
+  autotuneOn: true,
+  autotuneAmount: 0.6,
+  retuneMs: 55,
+  key: "C",
+  scale: "major",
+
+  // EQ
+  eqOn: true,
+  eqBodyDb: 1.5,
+  eqPresenceDb: 2,
+  eqAirDb: 1,
+
+  // De-esser
+  deEsserOn: true,
+  deEsserAmount: 0.4,
+  deEsserFreq: 8,
+
+  // Compressor
+  compressorOn: true,
+  compressorThresholdDb: -22,
+  compressorRatio: 4,
+  compressorAttackMs: 8,
+  compressorReleaseMs: 120,
+  compressorMakeupDb: 3,
+  compressorMix: 1,
+
+  // Saturation
+  saturationOn: false,
+  saturationDrive: 0.3,
+  saturationMix: 0.3,
+
+  // Doubler
+  doublerOn: false,
+  doublerAmount: 0.35,
+  doublerWidth: 0.6,
+
+  // Harmony
+  harmonyOn: false,
+  harmonyInterval: 7,
+  harmonyMix: 0.35,
+
+  // Delay
+  delayOn: false,
+  delayTime: 0.22,
+  delayFeedback: 0.28,
+  delayMix: 0.22,
+  delayLowCutHz: 300,
+  delayHighCutHz: 8000,
+
+  // Reverb
+  reverbOn: true,
+  reverbDecay: 2.2,
+  reverbMix: 0.18,
+  reverbPreDelay: 0.02,
+  reverbLowCutHz: 200,
+  reverbHighCutHz: 10000,
+
+  outputGain: 0.92,
+  windowSize: 0.1,
 };
 
 export type VocalFxPreset = { name: string; blurb: string; params: Partial<VocalFxParams> };
 
 export const VOCAL_FX_PRESETS: VocalFxPreset[] = [
-  { name: "Natural", blurb: "Gentle pitch nudge + air", params: { autotuneOn: true, autotuneAmount: 0.4, retuneMs: 90, harmonyOn: false, delayOn: false, reverbOn: true, reverbDecay: 1.8, reverbMix: 0.12 } },
-  { name: "Pop Vocal", blurb: "Tight tune + slap + plate", params: { autotuneOn: true, autotuneAmount: 0.75, retuneMs: 35, harmonyOn: false, delayOn: true, delayTime: 0.18, delayFeedback: 0.16, delayMix: 0.16, reverbOn: true, reverbDecay: 2.2, reverbMix: 0.2 } },
-  { name: "T-Pain", blurb: "Hard auto-tune", params: { autotuneOn: true, autotuneAmount: 1, retuneMs: 3, harmonyOn: false, delayOn: false, reverbOn: true, reverbDecay: 1.4, reverbMix: 0.12 } },
-  { name: "Dreamy Hall", blurb: "Octave shimmer + big hall", params: { autotuneOn: true, autotuneAmount: 0.5, retuneMs: 95, harmonyOn: true, harmonyInterval: 12, harmonyMix: 0.24, delayOn: true, delayTime: 0.4, delayFeedback: 0.34, delayMix: 0.24, reverbOn: true, reverbDecay: 4.6, reverbMix: 0.4 } },
-  { name: "Slapback Double", blurb: "Doubled voice, short slap", params: { autotuneOn: true, autotuneAmount: 0.3, retuneMs: 70, harmonyOn: false, delayOn: true, delayTime: 0.11, delayFeedback: 0.02, delayMix: 0.32, reverbOn: true, reverbDecay: 1.2, reverbMix: 0.1 } },
+  {
+    name: "Clean Studio",
+    blurb: "Natural tuning, gentle gate, low cut, subtle compression, small plate",
+    params: {
+      autotuneOn: true, autotuneAmount: 0.4, retuneMs: 90,
+      gateOn: true, gateThresholdDb: -45, gateDepth: 0.7,
+      highPassHz: 80,
+      eqOn: true, eqBodyDb: 1, eqPresenceDb: 1.5, eqAirDb: 0.5,
+      deEsserOn: true, deEsserAmount: 0.35,
+      compressorOn: true, compressorThresholdDb: -20, compressorRatio: 3, compressorMix: 1,
+      doublerOn: false, harmonyOn: false,
+      delayOn: false,
+      reverbOn: true, reverbDecay: 1.6, reverbMix: 0.12,
+    }
+  },
+  {
+    name: "Modern Pop",
+    blurb: "Tight tuning, polished compression, de-esser, slap/plate, slight air",
+    params: {
+      autotuneOn: true, autotuneAmount: 0.75, retuneMs: 35,
+      gateOn: true, gateThresholdDb: -42, gateDepth: 0.85,
+      highPassHz: 90,
+      eqOn: true, eqBodyDb: 1, eqPresenceDb: 2.5, eqAirDb: 2,
+      deEsserOn: true, deEsserAmount: 0.55,
+      compressorOn: true, compressorThresholdDb: -24, compressorRatio: 5, compressorMix: 0.85,
+      saturationOn: false,
+      doublerOn: false, harmonyOn: false,
+      delayOn: true, delayTime: 0.18, delayFeedback: 0.16, delayMix: 0.16,
+      reverbOn: true, reverbDecay: 2.2, reverbMix: 0.2,
+    }
+  },
+  {
+    name: "Rap Lead",
+    blurb: "Medium-hard tuning, tighter compressor, short delay, controlled reverb",
+    params: {
+      autotuneOn: true, autotuneAmount: 0.8, retuneMs: 25,
+      gateOn: true, gateThresholdDb: -40, gateDepth: 0.9,
+      highPassHz: 100,
+      eqOn: true, eqBodyDb: 2, eqPresenceDb: 3, eqAirDb: 1,
+      deEsserOn: true, deEsserAmount: 0.6,
+      compressorOn: true, compressorThresholdDb: -26, compressorRatio: 6, compressorAttackMs: 5, compressorMix: 0.9,
+      saturationOn: true, saturationDrive: 0.25, saturationMix: 0.2,
+      doublerOn: false, harmonyOn: false,
+      delayOn: true, delayTime: 0.14, delayFeedback: 0.12, delayMix: 0.2, delayLowCutHz: 400,
+      reverbOn: true, reverbDecay: 1.4, reverbMix: 0.12, reverbLowCutHz: 300,
+    }
+  },
+  {
+    name: "R&B Smooth",
+    blurb: "Natural tuning, warm compression, wider reverb, tasteful doubler",
+    params: {
+      autotuneOn: true, autotuneAmount: 0.5, retuneMs: 75,
+      gateOn: true, gateThresholdDb: -48, gateDepth: 0.6,
+      highPassHz: 70,
+      eqOn: true, eqBodyDb: 2, eqPresenceDb: 1, eqAirDb: 1.5,
+      deEsserOn: true, deEsserAmount: 0.3,
+      compressorOn: true, compressorThresholdDb: -18, compressorRatio: 3.5, compressorMix: 1,
+      saturationOn: false,
+      doublerOn: true, doublerAmount: 0.4, doublerWidth: 0.7,
+      harmonyOn: false,
+      delayOn: false,
+      reverbOn: true, reverbDecay: 3.2, reverbMix: 0.35, reverbPreDelay: 0.025,
+    }
+  },
+  {
+    name: "Indie Double",
+    blurb: "Light correction, doubler, slapback, small room",
+    params: {
+      autotuneOn: true, autotuneAmount: 0.3, retuneMs: 85,
+      gateOn: false,
+      highPassHz: 60,
+      eqOn: true, eqBodyDb: 0.5, eqPresenceDb: 1, eqAirDb: 0.5,
+      deEsserOn: false,
+      compressorOn: true, compressorThresholdDb: -16, compressorRatio: 2.5, compressorMix: 1,
+      doublerOn: true, doublerAmount: 0.5, doublerWidth: 0.5,
+      harmonyOn: false,
+      delayOn: true, delayTime: 0.11, delayFeedback: 0.05, delayMix: 0.35,
+      reverbOn: true, reverbDecay: 1.2, reverbMix: 0.15,
+    }
+  },
+  {
+    name: "Dream Hall",
+    blurb: "Softer correction, harmony optional, big filtered reverb, filtered delay",
+    params: {
+      autotuneOn: true, autotuneAmount: 0.35, retuneMs: 100,
+      gateOn: true, gateThresholdDb: -50, gateDepth: 0.5,
+      highPassHz: 70,
+      eqOn: true, eqBodyDb: 1, eqPresenceDb: 0, eqAirDb: 2,
+      deEsserOn: false,
+      compressorOn: true, compressorThresholdDb: -20, compressorRatio: 3, compressorMix: 1,
+      doublerOn: false,
+      harmonyOn: true, harmonyInterval: 12, harmonyMix: 0.25,
+      delayOn: true, delayTime: 0.4, delayFeedback: 0.34, delayMix: 0.3, delayLowCutHz: 400, delayHighCutHz: 6000,
+      reverbOn: true, reverbDecay: 5, reverbMix: 0.45, reverbPreDelay: 0.035, reverbLowCutHz: 250, reverbHighCutHz: 8000,
+    }
+  },
+  {
+    name: "Live Low Latency",
+    blurb: "Minimal reverb, smaller pitch window, safe gate, light compression",
+    params: {
+      autotuneOn: true, autotuneAmount: 0.5, retuneMs: 20,
+      gateOn: true, gateThresholdDb: -40, gateDepth: 0.85,
+      highPassHz: 100,
+      eqOn: true, eqBodyDb: 1, eqPresenceDb: 1.5, eqAirDb: 0,
+      deEsserOn: true, deEsserAmount: 0.3,
+      compressorOn: true, compressorThresholdDb: -18, compressorRatio: 4, compressorMix: 1,
+      doublerOn: false, harmonyOn: false,
+      delayOn: false,
+      reverbOn: true, reverbDecay: 0.8, reverbMix: 0.08,
+      windowSize: 0.05,
+    }
+  },
+  {
+    name: "Raw Clean",
+    blurb: "No pitch correction, light EQ/compression only",
+    params: {
+      autotuneOn: false, autotuneAmount: 0, retuneMs: 100,
+      gateOn: true, gateThresholdDb: -50, gateDepth: 0.6,
+      highPassHz: 80,
+      eqOn: true, eqBodyDb: 0.5, eqPresenceDb: 1, eqAirDb: 0,
+      deEsserOn: false,
+      compressorOn: true, compressorThresholdDb: -16, compressorRatio: 2, compressorMix: 1,
+      saturationOn: false,
+      doublerOn: false, harmonyOn: false,
+      delayOn: false,
+      reverbOn: false,
+    }
+  },
 ];
 
-const STORE_KEY = "verses.vocalfx.v1";
+const STORE_KEY = "verses.vocalfx.v2";
 const CLARITY_GATE = 0.5;
 const MIN_FREQ = 70, MAX_FREQ = 1200;
 
@@ -59,7 +298,11 @@ function loadParams(): VocalFxParams {
   if (typeof window === "undefined") return VOCAL_FX_DEFAULT;
   try {
     const raw = window.localStorage.getItem(STORE_KEY);
-    if (raw) return { ...VOCAL_FX_DEFAULT, ...JSON.parse(raw) };
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // Merge with defaults for any missing fields (backward compatibility)
+      return { ...VOCAL_FX_DEFAULT, ...parsed };
+    }
   } catch { /* */ }
   return VOCAL_FX_DEFAULT;
 }
@@ -72,9 +315,12 @@ export function useVocalFx({ micStream, enabled }: { micStream: MediaStream | nu
   const [error, setError] = useState<string | null>(null);
   const [detectedNote, setDetectedNote] = useState<string | null>(null);
   const [inputLevel, setInputLevel] = useState(0);
+  const [outputLevel, setOutputLevel] = useState(0);
   const [confidence, setConfidence] = useState(0);
   const [detectingKey, setDetectingKey] = useState(false);
-  const keyDetectRef = useRef<{ active: boolean; hist: number[] }>({ active: false, hist: new Array(12).fill(0) });
+  const [gateActivity, setGateActivity] = useState(0);
+  const [compressorReduction, setCompressorReduction] = useState(0);
+  const [deEsserActivity, setDeEsserActivity] = useState(0);
 
   const chainRef = useRef<VocalFxChain | null>(null);
   const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
@@ -85,6 +331,7 @@ export function useVocalFx({ micStream, enabled }: { micStream: MediaStream | nu
   const lastMsgRef = useRef(0);
   const manualPitchRef = useRef(0);
   const manualActiveRef = useRef(false);
+  const keyDetectRef = useRef<{ active: boolean; hist: number[] }>({ active: false, hist: new Array(12).fill(0) });
 
   // persist + push every change into the live chain
   useEffect(() => {
@@ -92,13 +339,71 @@ export function useVocalFx({ micStream, enabled }: { micStream: MediaStream | nu
     try { window.localStorage.setItem(STORE_KEY, JSON.stringify(params)); } catch { /* */ }
     const c = chainRef.current;
     if (!c) return;
-    c.setCorrectionBlend(params.autotuneOn ? params.autotuneAmount : 1);
+
+    // Input/Gate
+    c.setInputGain(params.inputGain);
+    c.setGate(params.gateOn, params.gateThresholdDb, params.gateDepth, params.gateAttackMs, params.gateReleaseMs);
+    c.setHighPass(params.highPassHz);
+
+    // Pitch correction blend: 0 = dry, 1 = fully corrected
+    // CRITICAL FIX: When autotune is OFF, blend should be 0 (dry), not 1
+    const blend = params.autotuneOn ? params.autotuneAmount : 0;
+    c.setCorrectionBlend(blend);
+
+    // EQ
+    c.setToneEq({ bodyDb: params.eqBodyDb, presenceDb: params.eqPresenceDb, airDb: params.eqAirDb });
+
+    // De-esser
+    c.setDeEsser(params.deEsserOn, params.deEsserAmount, params.deEsserFreq);
+
+    // Compressor
+    c.setCompressor(
+      params.compressorOn,
+      params.compressorThresholdDb,
+      params.compressorRatio,
+      params.compressorAttackMs,
+      params.compressorReleaseMs,
+      params.compressorMakeupDb,
+      params.compressorMix
+    );
+
+    // Saturation
+    c.setSaturation(params.saturationOn, params.saturationDrive, params.saturationMix);
+
+    // Doubler
+    c.setDoubler(params.doublerOn, params.doublerAmount, params.doublerWidth);
+
+    // Harmony
     c.setHarmony(params.harmonyOn, params.harmonyInterval, params.harmonyMix);
-    c.setDelay(params.delayOn, params.delayTime, params.delayFeedback, params.delayMix);
-    c.setReverb(params.reverbOn, params.reverbDecay, params.reverbMix);
+
+    // Delay
+    c.setDelay(
+      params.delayOn,
+      params.delayTime,
+      params.delayFeedback,
+      params.delayMix,
+      params.delayLowCutHz,
+      params.delayHighCutHz
+    );
+
+    // Reverb
+    c.setReverb(
+      params.reverbOn,
+      params.reverbDecay,
+      params.reverbMix,
+      params.reverbPreDelay,
+      params.reverbLowCutHz,
+      params.reverbHighCutHz
+    );
+
+    // Output
     c.setOutput(params.outputGain);
     c.setWindowSize(params.windowSize);
-    if (!params.autotuneOn && !manualActiveRef.current) c.setMainPitch(manualPitchRef.current);
+
+    // Update pitch only if not in manual mode and autotune is on
+    if (!params.autotuneOn && !manualActiveRef.current) {
+      c.setMainPitch(0);
+    }
   }, [params]);
 
   // build / teardown the live chain
@@ -115,12 +420,31 @@ export function useVocalFx({ micStream, enabled }: { micStream: MediaStream | nu
           if (cancelled) { chain.dispose(); setLoading(false); return; }
           chainRef.current = chain;
           const p = paramsRef.current;
-          chain.setCorrectionBlend(p.autotuneOn ? p.autotuneAmount : 1);
+
+          // Initialize all parameters
+          chain.setInputGain(p.inputGain);
+          chain.setGate(p.gateOn, p.gateThresholdDb, p.gateDepth, p.gateAttackMs, p.gateReleaseMs);
+          chain.setHighPass(p.highPassHz);
+          chain.setCorrectionBlend(p.autotuneOn ? p.autotuneAmount : 0);
+          chain.setToneEq({ bodyDb: p.eqBodyDb, presenceDb: p.eqPresenceDb, airDb: p.eqAirDb });
+          chain.setDeEsser(p.deEsserOn, p.deEsserAmount, p.deEsserFreq);
+          chain.setCompressor(p.compressorOn, p.compressorThresholdDb, p.compressorRatio, p.compressorAttackMs, p.compressorReleaseMs, p.compressorMakeupDb, p.compressorMix);
+          chain.setSaturation(p.saturationOn, p.saturationDrive, p.saturationMix);
+          chain.setDoubler(p.doublerOn, p.doublerAmount, p.doublerWidth);
           chain.setHarmony(p.harmonyOn, p.harmonyInterval, p.harmonyMix);
-          chain.setDelay(p.delayOn, p.delayTime, p.delayFeedback, p.delayMix);
-          chain.setReverb(p.reverbOn, p.reverbDecay, p.reverbMix);
+          chain.setDelay(p.delayOn, p.delayTime, p.delayFeedback, p.delayMix, p.delayLowCutHz, p.delayHighCutHz);
+          chain.setReverb(p.reverbOn, p.reverbDecay, p.reverbMix, p.reverbPreDelay, p.reverbLowCutHz, p.reverbHighCutHz);
           chain.setOutput(p.outputGain);
           chain.setWindowSize(p.windowSize);
+
+          // Set up metering callbacks
+          chain.setMeterCallbacks({
+            onGateActivity: (v) => setGateActivity(v),
+            onCompressorReduction: (v) => setCompressorReduction(v),
+            onDeEsserActivity: (v) => setDeEsserActivity(v),
+            onOutputLevel: (v) => setOutputLevel(v),
+          });
+
           setLoading(false);
         }
         await engine.ctx.audioWorklet.addModule("/worklets/pitch-detector.js").catch(() => {});
@@ -230,9 +554,13 @@ export function useVocalFx({ micStream, enabled }: { micStream: MediaStream | nu
     const p = paramsRef.current;
     if (!c) return;
     if (s == null) {
+      // CRITICAL FIX: Restore base rack settings properly when hand leaves
       c.setReverb(p.reverbOn, p.reverbDecay, p.reverbMix);
       c.setDelay(p.delayOn, p.delayTime, p.delayFeedback, p.delayMix);
       c.setHarmony(p.harmonyOn, p.harmonyInterval, p.harmonyMix);
+      // Also restore pitch correction blend
+      const blend = p.autotuneOn ? p.autotuneAmount : 0;
+      c.setCorrectionBlend(blend);
       return;
     }
     if (s.bypass) {
@@ -247,20 +575,52 @@ export function useVocalFx({ micStream, enabled }: { micStream: MediaStream | nu
     const harmOn = p.harmonyOn || s.harmony;
     c.setHarmony(harmOn, p.harmonyInterval, harmOn ? Math.max(p.harmonyMix, s.harmony ? 0.4 : 0) : 0);
   }, []);
+
+  // CRITICAL FIX: setManualActive now properly restores rack settings when exiting manual mode
   const setManualActive = useCallback((active: boolean) => {
     manualActiveRef.current = active;
     const c = chainRef.current;
+    const p = paramsRef.current;
     if (!c) return;
-    // in manual (hand) mode, push fully-shifted signal so the move is audible
-    if (active) c.setCorrectionBlend(1);
-    else if (!paramsRef.current.autotuneOn) c.setMainPitch(manualPitchRef.current);
+
+    if (active) {
+      // In manual (hand) mode, push fully-shifted signal so the move is audible
+      c.setCorrectionBlend(1);
+    } else {
+      // CRITICAL FIX: When exiting manual mode, restore proper settings
+      c.setMainPitch(0);
+      const blend = p.autotuneOn ? p.autotuneAmount : 0;
+      c.setCorrectionBlend(blend);
+      // Also restore any live FX that were active
+      c.setReverb(p.reverbOn, p.reverbDecay, p.reverbMix);
+      c.setDelay(p.delayOn, p.delayTime, p.delayFeedback, p.delayMix);
+      c.setHarmony(p.harmonyOn, p.harmonyInterval, p.harmonyMix);
+    }
+  }, []);
+
+  // CRITICAL FIX: Reset pitch when camera stops or hand leaves
+  const resetPitch = useCallback(() => {
+    manualPitchRef.current = 0;
+    const c = chainRef.current;
+    const p = paramsRef.current;
+    if (!c) return;
+    c.setMainPitch(0);
+    // Restore correction blend to match autotune state
+    const blend = p.autotuneOn ? p.autotuneAmount : 0;
+    c.setCorrectionBlend(blend);
   }, []);
 
   const latencyMs = chainRef.current?.latencyMs() ?? Math.round(params.windowSize * 1000);
 
   return useMemo(() => ({
     params, update, applyPreset, presetName,
-    ready, loading, error, detectedNote, inputLevel, confidence, latencyMs,
-    setManualPitch, setManualActive, setLiveFx, detectKey, detectingKey,
-  }), [params, update, applyPreset, presetName, ready, loading, error, detectedNote, inputLevel, confidence, latencyMs, setManualPitch, setManualActive, setLiveFx, detectKey, detectingKey]);
+    ready, loading, error, detectedNote, inputLevel, outputLevel, confidence, latencyMs,
+    gateActivity, compressorReduction, deEsserActivity,
+    setManualPitch, setManualActive, setLiveFx, resetPitch, detectKey, detectingKey,
+  }), [
+    params, update, applyPreset, presetName,
+    ready, loading, error, detectedNote, inputLevel, outputLevel, confidence, latencyMs,
+    gateActivity, compressorReduction, deEsserActivity,
+    setManualPitch, setManualActive, setLiveFx, resetPitch, detectKey, detectingKey
+  ]);
 }

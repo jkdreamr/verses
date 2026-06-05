@@ -5,6 +5,89 @@ import { useToast } from "@/components/Toast";
 import { takesStore, formatBytes, formatDuration } from "@/lib/takes";
 import type { Take } from "@/lib/types";
 
+// ── Linked beat playback helper ──────────────────────────────────────────────
+// When a take has linked_beat metadata, we play the YouTube beat in sync with
+// the vocal blob. YouTube iframe audio can't be baked into MediaRecorder blobs
+// due to browser cross-origin audio restrictions — so takes store metadata and
+// recreate the vocal+beat mix at playback time.
+function LinkedBeatPlayer({
+  take,
+  vocalUrl,
+}: {
+  take: Take;
+  vocalUrl: string;
+}) {
+  const lb = take.linked_beat;
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [beatError] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+
+  const fmt = (s: number) => {
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${m}:${sec.toString().padStart(2, "0")}`;
+  };
+
+  const handlePlay = useCallback(() => {
+    if (!lb) return;
+    setSyncing(true);
+    // Seek YouTube to beat_start_time and play in sync with vocal
+    window.dispatchEvent(new CustomEvent("verses:beat-play", {
+      detail: { startAt: lb.beat_start_time }
+    }));
+    setSyncing(false);
+  }, [lb]);
+
+  const handlePause = useCallback(() => {
+    window.dispatchEvent(new CustomEvent("verses:beat-pause"));
+  }, []);
+
+  if (!lb) return null;
+
+  return (
+    <div className="mt-2 space-y-2">
+      {/* Vocal blob player */}
+      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+      <audio
+        ref={audioRef}
+        src={vocalUrl}
+        controls
+        className="w-full"
+        onPlay={handlePlay}
+        onPause={handlePause}
+      />
+
+      {/* Beat metadata */}
+      <div className="rounded-md border border-accent/20 bg-surface-2/30 px-2.5 py-2">
+        <div className="flex items-center gap-2">
+          <svg className="h-3 w-3 flex-shrink-0 text-red-400" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M19.615 3.184c-3.604-.246-11.631-.245-15.23 0C.488 3.45.029 5.804 0 12c.029 6.185.484 8.549 4.385 8.816 3.6.245 11.626.246 15.23 0C23.512 20.55 23.971 18.196 24 12c-.029-6.185-.484-8.549-4.385-8.816zm-10.615 12.816v-8l8 3.993-8 4.007z"/>
+          </svg>
+          <span className="flex-1 truncate text-[11px] font-medium text-ink-text">
+            {lb.youtube_title ?? "YouTube Beat"}
+          </span>
+          <span className="font-mono text-[10px] text-ink-mute/60">
+            starts at {fmt(lb.beat_start_time)}
+          </span>
+        </div>
+        {beatError ? (
+          <p className="mt-1 text-[10px] text-amber-400">
+            Beat unavailable. Playing vocal only.
+          </p>
+        ) : (
+          <p className="mt-1 text-[10px] text-ink-mute/60">
+            Beat is linked from YouTube and plays in sync with your vocal.
+            {syncing && " Syncing…"}
+          </p>
+        )}
+        <p className="mt-0.5 text-[9px] text-ink-mute/40">
+          source: {lb.source} · {take.record_mode === "raw" ? "raw vocal" : "processed vocal"}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export function TakesPanel({
   open,
   songId,
@@ -225,13 +308,33 @@ export function TakesPanel({
                       {formatDuration(t.duration)}
                     </div>
                   </div>
-                  <div className="mt-0.5 flex items-center gap-2 text-[11px] text-ink-mute">
+                  <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-ink-mute">
                     <span>{new Date(t.created_at).toLocaleString()}</span>
                     <span>·</span>
                     <span>{formatBytes(t.size)}</span>
                     <span>·</span>
                     <span>{t.has_video ? "video" : "audio"}</span>
+                    {t.linked_beat && (
+                      <>
+                        <span>·</span>
+                        <span className="rounded bg-accent/15 px-1.5 py-0.5 text-[10px] text-accent">
+                          Vocal + Beat
+                        </span>
+                      </>
+                    )}
+                    {t.take_kind === "photobooth" && (
+                      <>
+                        <span>·</span>
+                        <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px]">photobooth</span>
+                      </>
+                    )}
                   </div>
+                  {t.linked_beat && (
+                    <div className="mt-1 text-[10px] text-ink-mute/60">
+                      Beat: {t.linked_beat.youtube_title ?? t.linked_beat.youtube_url.slice(0, 40)}
+                      {" · "}starts at {Math.floor(t.linked_beat.beat_start_time / 60)}:{String(Math.floor(t.linked_beat.beat_start_time % 60)).padStart(2, "0")}
+                    </div>
+                  )}
 
                   {isActive ? (
                     <div className="mt-2">
@@ -242,6 +345,9 @@ export function TakesPanel({
                           controls
                           className="aspect-video w-full rounded border border-ink-line bg-black"
                         />
+                      ) : t.linked_beat ? (
+                        // Linked beat take: synced vocal+YouTube playback
+                        <LinkedBeatPlayer take={t} vocalUrl={blobUrlFor(t)} />
                       ) : (
                         // eslint-disable-next-line jsx-a11y/media-has-caption
                         <audio

@@ -254,6 +254,16 @@ export function YoutubeBar({
       }
     };
 
+    // Allow other components (e.g. VocalFxRack BeatStrip) to poll the current time
+    const onGetTime = (ev: Event) => {
+      const p = playerRef.current;
+      if (!p) return;
+      const detail = (ev as CustomEvent<{ onTime?: (t: number) => void }>).detail;
+      if (typeof detail?.onTime === "function") {
+        try { detail.onTime(p.getCurrentTime()); } catch { /* ignore */ }
+      }
+    };
+
     window.addEventListener("verses:beat-play", onPlay);
     window.addEventListener("verses:beat-pause", onPause);
     window.addEventListener("verses:beat-toggle", onToggle);
@@ -261,6 +271,7 @@ export function YoutubeBar({
     window.addEventListener("verses:beat-loop-on", onLoopOn);
     window.addEventListener("verses:beat-loop-off", onLoopOff);
     window.addEventListener("verses:beat-seek", onSeek);
+    window.addEventListener("verses:beat-get-time", onGetTime);
     return () => {
       window.removeEventListener("verses:beat-play", onPlay);
       window.removeEventListener("verses:beat-pause", onPause);
@@ -269,6 +280,7 @@ export function YoutubeBar({
       window.removeEventListener("verses:beat-loop-on", onLoopOn);
       window.removeEventListener("verses:beat-loop-off", onLoopOff);
       window.removeEventListener("verses:beat-seek", onSeek);
+      window.removeEventListener("verses:beat-get-time", onGetTime);
     };
   }, [playing]);
 

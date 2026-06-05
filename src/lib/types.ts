@@ -37,6 +37,19 @@ export type DatamuseWord = {
   numSyllables?: number;
 };
 
+export type LinkedBeat = {
+  provider: "youtube";
+  youtube_url: string;
+  youtube_title?: string | null;
+  video_id?: string | null;
+  beat_start_time: number; // Seconds into the YouTube video where vocal starts
+  markers?: Array<{ id: string; time: number; label: string }>;
+  loop_start?: number | null;
+  loop_end?: number | null;
+  source: "marker" | "loopStart" | "currentTime" | "manual" | "zero";
+  vocal_offset_ms?: number; // Offset to align vocal with beat playback
+};
+
 export type TakeMeta = {
   id: string;
   song_id: string;
@@ -46,6 +59,10 @@ export type TakeMeta = {
   size: number;
   has_video: boolean;
   created_at: string;
+  // New fields for Vocal FX linked beat takes
+  take_kind?: "perform" | "vocal_fx" | "photobooth";
+  record_mode?: "processed" | "raw";
+  linked_beat?: LinkedBeat;
 };
 
 export type Take = TakeMeta & {

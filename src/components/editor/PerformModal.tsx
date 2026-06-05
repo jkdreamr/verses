@@ -762,6 +762,23 @@ export function PerformModal({
   const [vocalKeyLock, setVocalKeyLock] = useState(true);
   const vocalKeyLockRef = useRef(true);
   useEffect(() => { vocalKeyLockRef.current = vocalKeyLock; }, [vocalKeyLock]);
+
+  // ── Headphones confirmation (per-session, reset on modal close) ──
+  const [headphonesConfirmed, setHeadphonesConfirmed] = useState(false);
+
+  // ── Beat start point for Vocal FX linked-beat recording ──
+  type BeatStartSource = "marker" | "loopStart" | "currentTime" | "manual" | "zero";
+  const [beatStartTime, setBeatStartTime] = useState(0);
+  const [beatStartSource, setBeatStartSource] = useState<BeatStartSource>("zero");
+  const beatStartTimeRef = useRef(0);
+  const beatStartSourceRef = useRef<BeatStartSource>("zero");
+  useEffect(() => { beatStartTimeRef.current = beatStartTime; }, [beatStartTime]);
+  useEffect(() => { beatStartSourceRef.current = beatStartSource; }, [beatStartSource]);
+
+  const handleSetBeatStart = useCallback((t: number, src: BeatStartSource) => {
+    setBeatStartTime(t);
+    setBeatStartSource(src);
+  }, []);
   const pitchEuroRef = useRef(new OneEuroFilter({ minCutoff: 1.2, beta: 0.02 }));
   const vfxActiveRef = useRef(false);
   const [touchBend, setTouchBend] = useState(0); // touch pitch-bend in Mode B
@@ -997,7 +1014,13 @@ export function PerformModal({
   const handleVocalHands = useCallback((right: Hand, left: Hand) => {
     // RIGHT → pitch (raise = up an octave, middle = unison, lower = down)
     if (!right.present) {
-      if (vfxActiveRef.current) { vfxSetActive(false); vfxActiveRef.current = false; }
+      if (vfxActiveRef.current) {
+        // CRITICAL FIX: explicitly reset pitch to 0 when hand leaves frame,
+        // so the audio chain doesn't hold a stale pitch shift.
+        vfxSetPitch(0);
+        vfxSetActive(false);
+        vfxActiveRef.current = false;
+      }
       pitchEuroRef.current.reset();
       livePitchRef.current = 0;
     } else {
@@ -1029,9 +1052,15 @@ export function PerformModal({
   useEffect(() => {
     if (perfMode === "vocal" && !camActive) {
       if (leftFxActiveRef.current) { vfxSetLiveFx(null); leftFxActiveRef.current = false; leftFxRef.current = { present: false, space: 0, harmony: false, bypass: false }; }
-      if (vfxActiveRef.current) { vfxSetActive(false); vfxActiveRef.current = false; livePitchRef.current = 0; }
+      if (vfxActiveRef.current) {
+        // CRITICAL FIX: reset pitch when camera stops, not just active flag
+        vfxSetPitch(0);
+        vfxSetActive(false);
+        vfxActiveRef.current = false;
+        livePitchRef.current = 0;
+      }
     }
-  }, [perfMode, camActive, vfxSetActive, vfxSetLiveFx]);
+  }, [perfMode, camActive, vfxSetActive, vfxSetPitch, vfxSetLiveFx]);
 
   // ── MediaPipe loader ──
   const loadMediaPipe = useCallback(async () => {
@@ -1356,6 +1385,7 @@ export function PerformModal({
   }, [trumpetOn, perfMode, recordMode]);
 
   // Entering Vocal FX or Photobooth: get the mic, drop any held chord, and show the appropriate tab.
+  // When leaving Vocal FX, reset pitch/FX state cleanly so nothing stale lingers.
   useEffect(() => {
     if (perfMode === "vocal") {
       void ensureMic();
@@ -1368,8 +1398,12 @@ export function PerformModal({
       releaseChord();
       rightSoundingRef.current = false;
       setActiveSlot(null);
+      // Reset any vocal FX stale state when leaving vocal mode
+      vfx.resetPitch?.();
       setTab("beat");
     } else {
+      // Leaving vocal FX — reset pitch so no stale shift stays on
+      vfx.resetPitch?.();
       setTab((t) => (t === "voice" ? "beat" : t));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1394,30 +1428,29 @@ export function PerformModal({
   // ── Recording ──
   const startRecording = useCallback(async () => {
     const isPhotobooth = perfMode === "photobooth";
-    
+    const isVocalFx = perfMode === "vocal";
+
     if (isPhotobooth) {
-      // Photobooth mode: use raw mic stream directly, bypass Web Audio entirely
+      // Photobooth mode: raw mic + optional camera, NO Web Audio processing.
+      // Keep this path completely separate from Vocal FX.
       await ensureRawMic();
       const rawStream = rawMicStreamRef.current;
       if (!rawStream) return;
-      
+
       const cap = captureCanvasRef.current;
       const isVideo = inputMode === "camera" && camActive && !!cap;
       let stream: MediaStream;
       let mime: string;
-      
+
       if (isVideo && cap) {
         const videoStream = cap.captureStream(30);
-        stream = new MediaStream([
-          ...videoStream.getVideoTracks(),
-          ...rawStream.getAudioTracks(),
-        ]);
+        stream = new MediaStream([...videoStream.getVideoTracks(), ...rawStream.getAudioTracks()]);
         mime = pickMime(VIDEO_MIME) ?? "video/webm";
       } else {
         stream = rawStream;
         mime = pickMime(AUDIO_MIME) ?? "audio/webm";
       }
-      
+
       const recorder = new MediaRecorder(stream, { mimeType: mime });
       chunksRef.current = [];
       recStartRef.current = Date.now();
@@ -1426,15 +1459,13 @@ export function PerformModal({
         const blob = new Blob(chunksRef.current, { type: recorder.mimeType || mime });
         if (blob.size === 0) return;
         const take: Take = {
-          id: newTakeId(),
-          song_id: songId,
+          id: newTakeId(), song_id: songId,
           label: `photobooth ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
           mime: recorder.mimeType || mime,
           duration: (Date.now() - recStartRef.current) / 1000,
-          size: blob.size,
-          has_video: isVideo,
-          created_at: new Date().toISOString(),
-          blob,
+          size: blob.size, has_video: isVideo,
+          created_at: new Date().toISOString(), blob,
+          take_kind: "photobooth",
         };
         await takesStore.put(take);
         onTakeSaved();
@@ -1442,8 +1473,144 @@ export function PerformModal({
       recorder.start(250);
       recorderRef.current = recorder;
       setRecording(true);
+
+    } else if (isVocalFx) {
+      // ── Vocal FX mode: vocal-only recording + linked YouTube beat ──────────
+      // We record ONLY the vocal mic (either processed FX chain or clean raw).
+      // YouTube beat audio cannot be captured by MediaRecorder (browser security
+      // blocks cross-origin iframe audio from entering WebAudio/MediaRecorder).
+      // Instead we save the YouTube session metadata with the take so TakesPanel
+      // can recreate the vocal+beat mix by playing both in sync.
+      const engine = ensureEngine();
+      await resumeEngine();
+      await ensureMic();
+
+      const beatTime = beatStartTimeRef.current;
+      const beatSrc = beatStartSourceRef.current;
+      const ytSession = youtube ?? null;
+
+      // Seek YouTube to the chosen beat start point and begin playback as reference
+      if (ytSession) {
+        window.dispatchEvent(new CustomEvent("verses:beat-play", { detail: { startAt: beatTime } }));
+      }
+
+      // Build a vocal-only MediaStream:
+      // - Processed mode: route mic through the FX chain output (already wired to engine.master)
+      //   We create a dedicated MediaStreamDestination for the vocal output only.
+      // - Raw mode: use mic source directly (clean, no instruments mixed in).
+      let vocalStream: MediaStream;
+      const rMode = recordModeRef.current;
+
+      if (rMode === "processed") {
+        // Processed vocal: tap the engine's recordDest which already has the
+        // vocal FX chain routed in (outGain → engine.master → recordDest).
+        // The drums/chords/trumpet buses are muted while in vocal mode (mic gain = 0),
+        // so the processed vocal is the only signal present.
+        vocalStream = engine.recordDest.stream;
+      } else {
+        // Raw mode: create a dedicated stream from just the mic source.
+        const mic = micStreamRef.current;
+        if (!mic) { console.warn("[startRecording] vocal/raw: no mic stream"); return; }
+        const dest = engine.ctx.createMediaStreamDestination();
+        const src = engine.ctx.createMediaStreamSource(mic);
+        src.connect(dest);
+        // We'll disconnect when recording stops via a cleanup ref
+        (dest as MediaStreamAudioDestinationNode & { _src?: AudioNode })._src = src;
+        vocalStream = dest.stream;
+        // Store dest for cleanup
+        (recorderRef as React.MutableRefObject<MediaRecorder & { _rawDest?: MediaStreamAudioDestinationNode } | null>).current =
+          null; // will be replaced below
+        chunksRef.current = [];
+        const recorder2 = new MediaRecorder(vocalStream, { mimeType: pickMime(AUDIO_MIME) ?? "audio/webm" });
+        const mime2 = recorder2.mimeType;
+        recStartRef.current = Date.now();
+        recorder2.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+        recorder2.onstop = async () => {
+          // Cleanup the dedicated raw source node
+          try { src.disconnect(dest); } catch { /* */ }
+          const blob = new Blob(chunksRef.current, { type: mime2 });
+          if (blob.size === 0) return;
+          const timeLabel = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+          const beatLabel = ytSession?.youtube_title ? `raw vocal · ${ytSession.youtube_title.slice(0, 30)}` : "raw vocal";
+          const take: Take = {
+            id: newTakeId(), song_id: songId,
+            label: `${beatLabel} ${timeLabel}`,
+            mime: mime2,
+            duration: (Date.now() - recStartRef.current) / 1000,
+            size: blob.size, has_video: false,
+            created_at: new Date().toISOString(), blob,
+            take_kind: "vocal_fx", record_mode: "raw",
+            ...(ytSession ? {
+              linked_beat: {
+                provider: "youtube" as const,
+                youtube_url: ytSession.youtube_url,
+                youtube_title: ytSession.youtube_title,
+                video_id: extractYoutubeId(ytSession.youtube_url),
+                beat_start_time: beatTime,
+                markers: ytSession.markers,
+                loop_start: ytSession.loop_start,
+                loop_end: ytSession.loop_end,
+                source: beatSrc,
+              },
+            } : {}),
+          };
+          await takesStore.put(take);
+          // Pause YouTube after take is saved (don't leave it looping)
+          if (ytSession) window.dispatchEvent(new CustomEvent("verses:beat-pause"));
+          onTakeSaved();
+        };
+        recorder2.start(250);
+        recorderRef.current = recorder2 as typeof recorderRef.current;
+        setRecording(true);
+        return; // early return — raw branch sets up everything above
+      }
+
+      // Processed vocal branch (rMode === "processed")
+      const mime = pickMime(AUDIO_MIME) ?? "audio/webm";
+      const recorder = new MediaRecorder(vocalStream, { mimeType: mime });
+      chunksRef.current = [];
+      recStartRef.current = Date.now();
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      recorder.onstop = async () => {
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || mime });
+        if (blob.size === 0) return;
+        const timeLabel = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        const beatLabel = ytSession?.youtube_title
+          ? `processed vocal · ${ytSession.youtube_title.slice(0, 30)}`
+          : "processed vocal";
+        const take: Take = {
+          id: newTakeId(), song_id: songId,
+          label: `${beatLabel} ${timeLabel}`,
+          mime: recorder.mimeType || mime,
+          duration: (Date.now() - recStartRef.current) / 1000,
+          size: blob.size, has_video: false,
+          created_at: new Date().toISOString(), blob,
+          take_kind: "vocal_fx", record_mode: "processed",
+          ...(ytSession ? {
+            linked_beat: {
+              provider: "youtube" as const,
+              youtube_url: ytSession.youtube_url,
+              youtube_title: ytSession.youtube_title,
+              video_id: extractYoutubeId(ytSession.youtube_url),
+              beat_start_time: beatTime,
+              markers: ytSession.markers,
+              loop_start: ytSession.loop_start,
+              loop_end: ytSession.loop_end,
+              source: beatSrc,
+            },
+          } : {}),
+        };
+        await takesStore.put(take);
+        // Pause YouTube after take is saved
+        if (ytSession) window.dispatchEvent(new CustomEvent("verses:beat-pause"));
+        onTakeSaved();
+      };
+      recorder.start(250);
+      recorderRef.current = recorder;
+      setRecording(true);
+
     } else {
-      // Normal mode: use Web Audio engine for processed audio
+      // Chords & Drums mode: Web Audio engine captures everything routed through master
       const engine = ensureEngine();
       await resumeEngine();
       await ensureMic(); // so the take captures the singer's voice + the instruments
@@ -1458,10 +1625,7 @@ export function PerformModal({
       let mime: string;
       if (isVideo && cap) {
         const videoStream = cap.captureStream(30);
-        stream = new MediaStream([
-          ...videoStream.getVideoTracks(),
-          ...audioStream.getAudioTracks(),
-        ]);
+        stream = new MediaStream([...videoStream.getVideoTracks(), ...audioStream.getAudioTracks()]);
         mime = pickMime(VIDEO_MIME) ?? "video/webm";
       } else {
         stream = audioStream;
@@ -1476,15 +1640,13 @@ export function PerformModal({
         const blob = new Blob(chunksRef.current, { type: recorder.mimeType || mime });
         if (blob.size === 0) return;
         const take: Take = {
-          id: newTakeId(),
-          song_id: songId,
+          id: newTakeId(), song_id: songId,
           label: `perform ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
           mime: recorder.mimeType || mime,
           duration: (Date.now() - recStartRef.current) / 1000,
-          size: blob.size,
-          has_video: isVideo,
-          created_at: new Date().toISOString(),
-          blob,
+          size: blob.size, has_video: isVideo,
+          created_at: new Date().toISOString(), blob,
+          take_kind: "perform",
         };
         await takesStore.put(take);
         onTakeSaved();
@@ -1493,7 +1655,7 @@ export function PerformModal({
       recorderRef.current = recorder;
       setRecording(true);
     }
-  }, [onTakeSaved, songId, inputMode, camActive, ensureMic, ensureRawMic, perfMode]);
+  }, [onTakeSaved, songId, inputMode, camActive, ensureMic, ensureRawMic, perfMode, youtube]);
 
   const stopRecording = useCallback(() => {
     if (recorderRef.current && recorderRef.current.state !== "inactive") {
@@ -1527,6 +1689,10 @@ export function PerformModal({
     beatLatchRef.current = "stopped";
     setBeatPlaying(false);
     setPerfMode("chords");
+    // Reset per-session state on modal close
+    setHeadphonesConfirmed(false);
+    setBeatStartTime(0);
+    setBeatStartSource("zero");
     void suspendBus();
   }, [suspendBus, releaseChord, stopCamera, stopMic, stopRawMic, stopDrums, smartStop]);
 
@@ -1804,6 +1970,12 @@ export function PerformModal({
                 onCalibrate={() => void calibrateMic()}
                 calibrating={calibrating}
                 calibrated={calibrated}
+                headphonesConfirmed={headphonesConfirmed}
+                onConfirmHeadphones={() => setHeadphonesConfirmed(true)}
+                youtubeSession={youtube ?? null}
+                beatStartTime={beatStartTime}
+                beatStartSource={beatStartSource}
+                onSetBeatStart={handleSetBeatStart}
               />
             )}
             {tab === "sound" && (
