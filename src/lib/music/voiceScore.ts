@@ -253,6 +253,10 @@ const CHORD_TEMPLATES: { suffix: string; ivs: number[] }[] = [
   { suffix: "sus4", ivs: [0, 5, 7] },
 ];
 
+// Below this best-template score a window is too ambiguous to name a chord; we
+// hold the previous one instead of emitting a flickery guess.
+const MIN_CHORD_SCORE = 0.15;
+
 /**
  * Per-window chord inference by chroma template matching: build a duration- and
  * confidence-weighted 12-bin chroma for each beat window and pick the
@@ -300,6 +304,9 @@ export async function inferChords(
         if (score > bestScore) { bestScore = score; bestRoot = root; bestSuffix = tpl.suffix; }
       }
     }
+    // Hold the previous chord through ambiguous windows (passing tones, diffuse
+    // chroma) rather than emitting a low-confidence guess that flickers the sheet.
+    if (bestScore < MIN_CHORD_SCORE) continue;
     const symbol = names[bestRoot] + bestSuffix;
     if (symbol !== last) {
       hits.push({ startTime: Math.round(t * 1000) / 1000, symbol });
