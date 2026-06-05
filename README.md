@@ -52,9 +52,7 @@ Verses treats a song as more than plain text. A song is text, sound, rhythm, voi
 
 This section explains how to use every major part of the app.
 
----
-
-## 1. Opening the App
+## Opening the App
 
 Open the live app in a modern browser.
 
@@ -66,9 +64,7 @@ Recommended:
 
 The core writing features work without an account. Guest-mode song data is stored locally in the browser.
 
----
-
-## 2. Dashboard
+## Dashboard
 
 The dashboard is the home screen for songs.
 
@@ -84,9 +80,7 @@ From the dashboard, users can:
 
 The dashboard is meant to feel like a small song library rather than a file manager.
 
----
-
-## 3. Light and Dark Mode
+## Light and Dark Mode
 
 Verses supports both dark mode and light mode.
 
@@ -96,7 +90,7 @@ Dark mode is the default because the app is designed for long writing and late-n
 
 ---
 
-## 4. Lyric Editor
+## Lyric Editor
 
 The editor is the main writing surface.
 
@@ -119,7 +113,7 @@ The editor is intentionally minimal so the lyric stays at the center.
 
 ---
 
-## 5. Autosave
+## Autosave
 
 Verses saves drafts automatically.
 
@@ -134,7 +128,7 @@ Version history gives additional protection by keeping snapshots of earlier draf
 
 ---
 
-## 6. Structure Tags
+## Structure Tags
 
 The structure tag picker inserts common songwriting labels into the lyrics.
 
@@ -149,9 +143,7 @@ Examples:
 
 This helps organize lyrics while writing.
 
----
-
-## 7. Tags
+## Tags
 
 Tags organize songs in the dashboard.
 
@@ -166,9 +158,7 @@ A user can tag songs by:
 
 Search includes tags, so tags can be used as lightweight organization.
 
----
-
-## 8. Version History
+## Version History
 
 Version history stores earlier snapshots of a song.
 
@@ -180,9 +170,7 @@ Users can:
 
 This is useful because songwriting often involves trying risky changes, cutting lines, and later wanting them back.
 
----
-
-## 9. Rhyme Finder
+## Rhyme Finder
 
 Rhyme Finder gives word-level rhyme suggestions.
 
@@ -196,9 +184,7 @@ How to use it:
 
 Results are grouped by syllable count, which makes them more useful for lyrics and meter.
 
----
-
-## 10. Rhyme Lens
+## Rhyme Lens
 
 Rhyme Lens analyzes the whole lyric and highlights sound relationships directly behind the text.
 
@@ -227,9 +213,7 @@ Rhyme Lens has density modes:
 
 The Sound Map lets users isolate one rhyme family at a time.
 
----
-
-## 11. YouTube Beat Bar
+## YouTube Beat Bar
 
 The beat bar lets users write to a YouTube beat from inside the editor.
 
@@ -244,9 +228,7 @@ Users can:
 
 This supports a common songwriting workflow: looping a beat section while drafting lyrics.
 
----
-
-## 12. OCR: Scan Handwritten Lyrics
+## OCR: Scan Handwritten Lyrics
 
 The OCR feature imports lyrics from a photo.
 
@@ -260,9 +242,7 @@ Users can:
 
 This is useful for writers who start in a notebook and later move into the app.
 
----
-
-## 13. Export and Print
+## Export and Print
 
 The export modal lets users move lyrics out of Verses.
 
@@ -274,9 +254,7 @@ Options include:
 
 The print view can be used for rehearsal, sharing, or saving as PDF.
 
----
-
-## 14. Takes
+## Takes
 
 Takes are recordings attached to a song.
 
@@ -290,9 +268,7 @@ Users can:
 
 Takes are stored locally in the browser through IndexedDB.
 
----
-
-## 15. Perform
+## Perform
 
 Perform is the main live performance and recording area.
 
@@ -311,9 +287,7 @@ It includes:
 
 Perform is where a written song can become a recorded performance.
 
----
-
-## 16. Chords & Drums Mode
+## Chords & Drums Mode
 
 Chords & Drums mode lets the user play music with hands or touch.
 
@@ -342,9 +316,7 @@ Touch mode works without a camera.
 
 Touch mode is especially useful on mobile or when camera input is not reliable.
 
----
-
-## 17. Step Sequencer
+## Step Sequencer
 
 The step sequencer is a 4x16 drum grid.
 
@@ -365,9 +337,7 @@ It includes:
 
 The sequencer gives the user a simple beat-making tool inside the songwriting workspace.
 
----
-
-## 18. Chord Slots and Chord Presets
+## Chord Slots and Chord Presets
 
 Verses includes an 8-slot chord system.
 
@@ -399,9 +369,7 @@ Supported chord qualities include:
 
 Chord presets include pop, R&B, sad, jazz, trap-dark, and gospel-style progressions.
 
----
-
-## 19. Chord and Lead Sounds
+## Chord and Lead Sounds
 
 Verses includes multiple chord timbres:
 
@@ -414,9 +382,7 @@ Verses includes multiple chord timbres:
 
 Lead mode turns the right hand or touch pad into a scale-locked melody instrument. The selected key and scale keep notes musical, while pitch glide makes the instrument feel more expressive.
 
----
-
-## 20. Smart Lyric Reader
+## Smart Lyric Reader
 
 The Smart Lyric Reader is a performance teleprompter.
 
@@ -436,9 +402,7 @@ It supports:
 
 Smart mode listens to the performer and aligns heard words against the written lyrics. Pace mode scrolls by time when speech recognition is unavailable or unreliable.
 
----
-
-## 21. Vocal FX Mode
+## Vocal FX Mode
 
 Vocal FX mode turns the app into a live vocal processor.
 
@@ -477,9 +441,7 @@ Controls include:
 
 Users can choose whether recordings capture the processed vocal or a raw clean vocal.
 
----
-
-## 22. Hand-Controlled Vocal FX
+## Hand-Controlled Vocal FX
 
 In Vocal FX camera mode, hand movement controls live vocal effects.
 
@@ -497,9 +459,7 @@ Left hand:
 
 This makes vocal processing performable instead of only slider-based.
 
----
-
-## 23. Touch-Controlled Vocal FX
+## Touch-Controlled Vocal FX
 
 In touch mode, Vocal FX provides a touch-friendly singing stage.
 
@@ -512,9 +472,7 @@ Users can:
 
 This gives mobile users access to the same vocal engine without needing hand tracking.
 
----
-
-## 24. Voice → Trumpet
+## Voice → Trumpet
 
 Voice → Trumpet turns sung pitch into a trumpet-style instrument.
 
@@ -552,17 +510,13 @@ Range modes include:
 * +24
 * -12
 
----
-
-## 25. Photobooth Mode
+## Photobooth Mode
 
 Photobooth records a simpler camera/mic performance.
 
 It is useful when the user wants a raw performance capture without hand instruments, grids, or heavy vocal processing.
 
----
-
-## 26. Recording
+## Recording
 
 Recording happens inside Perform.
 
@@ -583,9 +537,7 @@ Live helper guides, such as the chord grid or pitch ladder, are not recorded.
 
 Recordings are saved as takes and can be played, renamed, downloaded, or deleted.
 
----
-
-## 27. Voice Score
+## Voice Score
 
 Voice Score converts a sung or hummed melody into musical notation.
 
@@ -610,15 +562,11 @@ Exports include:
 
 Voice Score is designed for musicians who can sing an idea before they can notate it.
 
----
-
-## 28. PWA and Native Shell
+## PWA and Native Shell
 
 Verses can be used as a browser app and includes installability support.
 
 It also includes a Tauri scaffold for building native desktop shells for macOS, Windows, and Linux.
-
----
 
 # Technical Architecture
 
@@ -659,8 +607,6 @@ The application is organized around a few main areas:
 
 The app is client-heavy by design. Writing, audio, OCR, hand tracking, pitch detection, recording, and transcription all run in the browser.
 
----
-
 ## Lazy Loading
 
 Heavy features are loaded only when needed.
@@ -675,8 +621,6 @@ Examples:
 
 This keeps the initial editor experience lighter.
 
----
-
 ## Storage
 
 The core guest-mode app uses local browser storage.
@@ -689,8 +633,6 @@ The core guest-mode app uses local browser storage.
 * Takes: IndexedDB
 
 IndexedDB is used for takes because recordings are binary Blobs and are too large for normal localStorage.
-
----
 
 ## Shared Audio Engine
 
@@ -715,8 +657,6 @@ This design keeps audio routing consistent:
 
 Tone.js is attached to the same AudioContext when it is needed.
 
----
-
 # Feature-by-Feature Technical Details
 
 ## Lyric Editor
@@ -732,23 +672,17 @@ Rhyme Lens requires styled highlights behind the text, which a textarea cannot d
 
 This gives the app both native text editing and rich visual analysis.
 
----
-
 ## Autosave and Versions
 
 Autosave tracks changed song state and persists it on a timer. It also saves on page lifecycle events such as hiding or closing the tab.
 
 Version snapshots are stored separately from the current song. This lets the user restore earlier drafts without losing the current save object.
 
----
-
 ## Theme System
 
 Theme is stored in localStorage. The app toggles a root `light` class on the document element, and CSS variables update the interface.
 
 This makes theme switching global and avoids duplicating light/dark styles across components.
-
----
 
 ## Rhyme Finder
 
@@ -763,8 +697,6 @@ The selected word is sent through one of three relationship modes:
 The app debounces requests, caches results for the session, filters low-quality results, sorts by score, and groups by syllable count.
 
 Grouping by syllable count matters because a lyricist often needs a rhyme that fits a rhythmic slot, not just any rhyming word.
-
----
 
 ## Rhyme Lens
 
@@ -802,8 +734,6 @@ It detects:
 
 The analysis is approximate because accent and vocal delivery affect rhyme, but it gives a useful structural map of the lyric.
 
----
-
 ## YouTube Beat Bar
 
 The beat bar uses the YouTube IFrame API.
@@ -811,8 +741,6 @@ The beat bar uses the YouTube IFrame API.
 Verses stores the beat URL, loop points, and markers with the song session. A playback loop checks current time and seeks back to the loop start when needed.
 
 YouTube audio is not directly captured in the internal recording stream because cross-origin media cannot be freely mixed into Web Audio recording output.
-
----
 
 ## OCR
 
@@ -828,8 +756,6 @@ Pipeline:
 6. User inserts or replaces lyrics.
 
 This supports notebook-to-digital songwriting without a custom OCR server.
-
----
 
 ## Perform
 
@@ -853,8 +779,6 @@ The three modes are separated so each mode can have a clear mental model:
 * Vocal FX: process and perform the voice
 * Photobooth: simple raw capture
 
----
-
 ## Hand Tracking
 
 Hand tracking uses MediaPipe HandLandmarker.
@@ -873,8 +797,6 @@ The right hand typically controls pitch, chords, or expression. The left hand co
 
 Pinch detection uses hysteresis so the gesture does not flicker when the hand is near the threshold.
 
----
-
 ## Touch Input
 
 Touch input maps pointer events into musical controls.
@@ -882,8 +804,6 @@ Touch input maps pointer events into musical controls.
 Each active touch point can become its own voice, which allows polyphony. X position maps to a scale degree or pitch region, while Y position maps to expression such as brightness or level.
 
 Touch mode gives the app a fallback for mobile devices and situations where camera tracking is not appropriate.
-
----
 
 ## Step Sequencer
 
@@ -899,8 +819,6 @@ Each row controls a drum voice:
 The sequence is scheduled on Tone.Transport, which provides musical timing. The visual playhead is drawn with Tone.Draw so the UI stays aligned with the audio clock.
 
 Each voice uses a sample player routed through per-voice gain and then into the drum bus. Mute, solo, level, tempo, swing, presets, and saved patterns all update sequencer state.
-
----
 
 ## Chord System
 
@@ -922,8 +840,6 @@ The chord engine converts each slot into MIDI notes. For smoother changes, it ev
 
 That voice-leading makes chord changes feel less abrupt.
 
----
-
 ## Sampled Instruments
 
 Verses uses a mix of sampled instruments and synthesized instruments.
@@ -937,8 +853,6 @@ sampler or synth → lowpass filter → reverb → volume → engine bus
 ```
 
 This gives the app more realistic chords and converted trumpet playback while keeping sample size manageable.
-
----
 
 ## Smart Lyric Reader
 
@@ -959,8 +873,6 @@ Pipeline:
 9. Provide manual nudge and Pace fallback.
 
 This strict movement prevents repeated choruses or misheard words from causing large jumps.
-
----
 
 ## Vocal FX
 
@@ -1047,8 +959,6 @@ In camera mode, hand movement writes directly into the same audio chain:
 
 This makes Vocal FX performable, not only adjustable through sliders.
 
----
-
 ## Voice → Trumpet
 
 Voice → Trumpet has two paths.
@@ -1105,15 +1015,11 @@ recorded voice
 
 Live mode is for performing. Convert mode is for cleaner playback.
 
----
-
 ## Photobooth
 
 Photobooth is a simpler capture mode. It records raw camera and microphone without the heavier performance instrument overlays.
 
 This gives users a straightforward way to record a vocal/video idea.
-
----
 
 ## Recording
 
@@ -1130,8 +1036,6 @@ For camera-based takes:
 7. The final Blob is saved as a take in IndexedDB.
 
 The live guide grid and pitch ladder are not recorded because they are drawn on separate live-only layers.
-
----
 
 ## Takes
 
@@ -1150,8 +1054,6 @@ Each take can store:
 * recording Blob
 
 IndexedDB is used because recordings are too large for localStorage.
-
----
 
 ## Voice Score
 
@@ -1206,8 +1108,6 @@ Exports include:
 * JSON
 * CSV
 * printable lead sheet
-
----
 
 # Evaluation and Evidence
 
@@ -1321,8 +1221,6 @@ The project went through multiple design refinements:
 * Voice → Trumpet was separated into live and convert paths so latency and quality could be handled differently.
 * Vocal FX added raw/processed recording options and exposed latency as a visible tradeoff.
 
----
-
 # Limitations and Tradeoffs
 
 ## Browser Audio Latency
@@ -1355,8 +1253,6 @@ OCR quality depends on handwriting clarity, lighting, and image quality. Extract
 
 Verses is focused on early songwriting, performance capture, and musical idea generation. It does not yet include a full multitrack timeline, clip editing, plugin hosting, automation, or mastering tools.
 
----
-
 # Privacy
 
 Verses keeps the core creative workflow local when used in guest mode.
@@ -1369,8 +1265,6 @@ Verses keeps the core creative workflow local when used in guest mode.
 * Voice Score transcription runs locally with the vendored model when available.
 * Camera and microphone streams are used by the browser for live features.
 * Smart Lyrics uses the browser's built-in speech recognition, so behavior depends on browser/OS implementation.
-
----
 
 # Development
 
@@ -1410,8 +1304,6 @@ npm run tauri:dev
 npm run tauri:build
 ```
 
----
-
 # Credits and Disclosure
 
 ## Major Libraries and APIs
@@ -1446,8 +1338,6 @@ Verses uses vendored instrument samples for piano, strings/cello, and trumpet pl
 AI assistance was used during debugging, code iteration, architecture explanation, and README drafting.
 
 The project author remains responsible for the final implementation, design decisions, testing, disclosure, and submission.
-
----
 
 # Rubric Coverage
 
